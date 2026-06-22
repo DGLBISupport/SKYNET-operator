@@ -1,0 +1,22 @@
+{
+    "zoneMappings": [
+        {
+            "province": "Eastern",
+            "district": "Batticaloa",
+            "city": "Kattankudy",
+            "zoneName": "Zone-E02"
+        }
+    ],
+    "allocationRules": {
+        "Zone-E02": [
+            {
+                "partnerCode": "PickMe",
+                "weightPercentage": 70
+            },
+            {
+                "partnerCode": "Domex",
+                "weightPercentage": 30
+            }
+        ]
+    }
+}
