@@ -15,6 +15,15 @@ export default function WorkstationDashboard() {
     const [scanCameraOpen, setScanCameraOpen] = useState(false);
     const [verifyCameraOpen, setVerifyCameraOpen] = useState(false);
 
+    // Device Manager states
+    const [isDeviceManagerOpen, setIsDeviceManagerOpen] = useState(false);
+    const [deviceManagerTab, setDeviceManagerTab] = useState<'rtd' | 'camera' | 'remote'>('rtd');
+    const [cameraDevices, setCameraDevices] = useState<MediaDeviceInfo[]>([]);
+    const [selectedCameraId, setSelectedCameraId] = useState<string | null>(null);
+    const [testScannerInput, setTestScannerInput] = useState('');
+    const [testScannerSpeed, setTestScannerSpeed] = useState<string>('');
+    const [testKeyTimes, setTestKeyTimes] = useState<number[]>([]);
+
     // Image decoder dashboard states
     const dashboardFileInputRef = useRef<HTMLInputElement>(null);
     const [uploadImageSrc, setUploadImageSrc] = useState<string | null>(null);
@@ -110,6 +119,57 @@ export default function WorkstationDashboard() {
         if (activeTab === 'scan') scanInputRef.current?.focus();
         else if (activeTab === 'verify') verifyInputRef.current?.focus();
     }, [activeTab, status, verifyStatus]);
+
+    // Fetch camera devices when Device Manager is open
+    useEffect(() => {
+        if (!isDeviceManagerOpen) return;
+        
+        const fetchCameras = async () => {
+            try {
+                // Request temporary access to trigger permission prompt (otherwise labels will be empty)
+                await navigator.mediaDevices.getUserMedia({ video: true }).catch(() => {});
+                const devices = await navigator.mediaDevices.enumerateDevices();
+                const videoDevices = devices.filter(d => d.kind === 'videoinput');
+                setCameraDevices(videoDevices);
+                if (videoDevices.length > 0 && !selectedCameraId) {
+                    setSelectedCameraId(videoDevices[0].deviceId);
+                }
+            } catch (err) {
+                console.error("Error enumerating cameras:", err);
+            }
+        };
+
+        fetchCameras();
+    }, [isDeviceManagerOpen, selectedCameraId]);
+
+    const handleTestScannerKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+        const now = Date.now();
+        setTestKeyTimes(prev => {
+            const next = [...prev, now];
+            if (next.length > 15) next.shift();
+            
+            if (next.length >= 2) {
+                const deltas = [];
+                for (let i = 1; i < next.length; i++) {
+                    deltas.push(next[i] - next[i - 1]);
+                }
+                const avg = deltas.reduce((a, b) => a + b, 0) / deltas.length;
+                if (avg < 50) {
+                    setTestScannerSpeed(`Verified RTD/Hardware Scanner (average keystroke: ${avg.toFixed(0)}ms)`);
+                    setScannerConnected(true);
+                } else {
+                    setTestScannerSpeed(`Manual typing speed (average keystroke: ${avg.toFixed(0)}ms)`);
+                }
+            }
+            return next;
+        });
+    };
+
+    const handleClearTestInput = () => {
+        setTestScannerInput('');
+        setTestScannerSpeed('');
+        setTestKeyTimes([]);
+    };
 
     const handleScanSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
@@ -392,17 +452,40 @@ export default function WorkstationDashboard() {
                         </span>
                     </div>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '16px', fontSize: '13px', color: '#6b7280' }}>
-                        <span style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                        <button
+                            onClick={() => setIsDeviceManagerOpen(true)}
+                            title="Open Scanner & Device Manager"
+                            style={{
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: '6px',
+                                backgroundColor: '#ffffff',
+                                border: '1px solid #d1d5db',
+                                borderRadius: '6px',
+                                padding: '6px 12px',
+                                fontSize: '12px',
+                                fontWeight: '600',
+                                color: '#374151',
+                                cursor: 'pointer',
+                                transition: 'all 0.15s ease'
+                            }}
+                            onMouseOver={(e) => { e.currentTarget.style.backgroundColor = '#f9fafb'; }}
+                            onMouseOut={(e) => { e.currentTarget.style.backgroundColor = '#ffffff'; }}
+                        >
                             <span style={{
                                 width: '8px', height: '8px', borderRadius: '50%', display: 'inline-block',
                                 backgroundColor: scannerConnected === true ? '#16a34a' : scannerConnected === null ? '#f59e0b' : '#dc2626'
                             }}></span>
                             {scannerConnected === true
-                                ? 'USB scanner connected'
+                                ? 'Scanner Connected'
                                 : scannerConnected === null
-                                    ? 'Awaiting scanner input…'
-                                    : 'No scanner detected'}
-                        </span>
+                                    ? 'Awaiting Scanner'
+                                    : 'No Scanner'}
+                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ marginLeft: '2px' }}>
+                                <circle cx="12" cy="12" r="3" />
+                                <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
+                            </svg>
+                        </button>
                         <span style={{ color: '#374151', fontWeight: '600', borderLeft: '1px solid #e5e7eb', paddingLeft: '16px' }}>{timeString}</span>
                     </div>
                 </header>
@@ -1024,6 +1107,7 @@ export default function WorkstationDashboard() {
             {/* ── CAMERA SCANNER MODALS ── */ }
             <BarcodeScanner
                 active={scanCameraOpen}
+                selectedDeviceId={selectedCameraId}
                 onClose={() => setScanCameraOpen(false)}
                 onDetected={(value) => {
                     setScanCameraOpen(false);
@@ -1064,6 +1148,7 @@ export default function WorkstationDashboard() {
 
             <BarcodeScanner
                 active={verifyCameraOpen}
+                selectedDeviceId={selectedCameraId}
                 onClose={() => setVerifyCameraOpen(false)}
                 onDetected={(value) => {
                     setVerifyCameraOpen(false);
@@ -1113,6 +1198,251 @@ export default function WorkstationDashboard() {
 
     {/* Hidden dummy element for dashboard file decoder */ }
     <div id="dashboard-dummy-decoder" style={{ display: 'none' }} />
+
+    {/* ── DEVICE MANAGER MODAL ── */}
+    {isDeviceManagerOpen && (
+        <div style={{
+            position: 'fixed', inset: 0, zIndex: 1100,
+            backgroundColor: 'rgba(0,0,0,0.65)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            fontFamily: 'system-ui, -apple-system, sans-serif'
+        }}>
+            <div style={{
+                backgroundColor: '#ffffff',
+                borderRadius: '12px',
+                width: '100%', maxWidth: '580px',
+                boxShadow: '0 20px 50px rgba(0,0,0,0.3)',
+                overflow: 'hidden'
+            }}>
+                {/* Header */}
+                <div style={{
+                    display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                    padding: '16px 20px', borderBottom: '1px solid #e5e7eb'
+                }}>
+                    <div>
+                        <h3 style={{ margin: 0, fontWeight: '700', fontSize: '16px', color: '#111827' }}>
+                            Workstation Device Manager
+                        </h3>
+                        <p style={{ margin: '2px 0 0 0', fontSize: '12px', color: '#6b7280' }}>
+                            Manage barcode readers, camera inputs, and remote scanners
+                        </p>
+                    </div>
+                    <button
+                        onClick={() => { setIsDeviceManagerOpen(false); handleClearTestInput(); }}
+                        style={{
+                            backgroundColor: '#f3f4f6', border: 'none', borderRadius: '6px',
+                            width: '32px', height: '32px', cursor: 'pointer',
+                            fontSize: '16px', color: '#6b7280',
+                            display: 'flex', alignItems: 'center', justifyContent: 'center'
+                        }}
+                    >✕</button>
+                </div>
+
+                {/* Modal Tabs */}
+                <div style={{ display: 'flex', borderBottom: '1px solid #e5e7eb', backgroundColor: '#f9fafb', padding: '0 10px' }}>
+                    {([
+                        { id: 'rtd', label: 'RTD / Wedge Scanner' },
+                        { id: 'camera', label: 'Camera Input' },
+                        { id: 'remote', label: 'Remote Scanner' }
+                    ] as const).map(tab => (
+                        <button
+                            key={tab.id}
+                            onClick={() => { setDeviceManagerTab(tab.id); handleClearTestInput(); }}
+                            style={{
+                                border: 'none',
+                                backgroundColor: 'transparent',
+                                padding: '12px 16px',
+                                fontSize: '13px',
+                                fontWeight: deviceManagerTab === tab.id ? '600' : '500',
+                                color: deviceManagerTab === tab.id ? '#16a34a' : '#6b7280',
+                                borderBottom: deviceManagerTab === tab.id ? '2px solid #16a34a' : '2px solid transparent',
+                                cursor: 'pointer',
+                                transition: 'all 0.15s ease'
+                            }}
+                        >
+                            {tab.label}
+                        </button>
+                    ))}
+                </div>
+
+                {/* Tab Content */}
+                <div style={{ padding: '24px 20px', minHeight: '260px' }}>
+                    {/* Tab 1: RTD / Keyboard Wedge */}
+                    {deviceManagerTab === 'rtd' && (
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+                            <p style={{ margin: 0, fontSize: '13px', lineHeight: '1.5', color: '#4b5563' }}>
+                                Rugged Handheld Terminals (RTD / PDT) and standard USB/Bluetooth barcode readers operate in <strong>Keyboard Wedge</strong> mode. They intercept scans and type them directly into the focused field, followed by an <code>Enter</code> code.
+                            </p>
+
+                            <div style={{
+                                backgroundColor: '#f3f4f6',
+                                borderRadius: '8px',
+                                padding: '16px',
+                                border: '1px solid #e5e7eb'
+                            }}>
+                                <div style={{ fontSize: '12px', fontWeight: '700', color: '#4b5563', marginBottom: '8px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+                                    Scanner Hardware Connection Tester
+                                </div>
+                                <div style={{ display: 'flex', gap: '8px', marginBottom: '10px' }}>
+                                    <input
+                                        type="text"
+                                        value={testScannerInput}
+                                        onChange={(e) => setTestScannerInput(e.target.value)}
+                                        onKeyDown={handleTestScannerKeyDown}
+                                        placeholder="Pull trigger to scan a barcode here..."
+                                        style={{ ...inputStyle, flex: 1, backgroundColor: '#ffffff' }}
+                                    />
+                                    <button
+                                        onClick={handleClearTestInput}
+                                        style={{ ...btnSecondary, padding: '9px 14px' }}
+                                    >
+                                        Clear
+                                    </button>
+                                </div>
+
+                                {testScannerSpeed && (
+                                    <div style={{
+                                        fontSize: '13px',
+                                        fontWeight: '600',
+                                        padding: '8px 12px',
+                                        borderRadius: '6px',
+                                        backgroundColor: testScannerSpeed.includes('Verified') ? '#ecfdf5' : '#fffbeb',
+                                        color: testScannerSpeed.includes('Verified') ? '#047857' : '#b45309',
+                                        border: testScannerSpeed.includes('Verified') ? '1px solid #a7f3d0' : '1px solid #fde68a',
+                                        display: 'flex',
+                                        alignItems: 'center',
+                                        gap: '6px'
+                                    }}>
+                                        <span style={{
+                                            width: '6px', height: '6px', borderRadius: '50%',
+                                            backgroundColor: testScannerSpeed.includes('Verified') ? '#10b981' : '#f59e0b'
+                                        }}></span>
+                                        {testScannerSpeed}
+                                    </div>
+                                )}
+                            </div>
+
+                            <div style={{ fontSize: '12px', color: '#6b7280' }}>
+                                <div style={{ fontWeight: '600', color: '#374151', marginBottom: '4px' }}>Setup Instructions:</div>
+                                <ol style={{ margin: 0, paddingLeft: '16px', display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                                    <li>Ensure the RTD machine is powered on and connected to the network or workstation.</li>
+                                    <li>Open the scanner tool on the RTD (e.g. Zebra DataWedge, Honeywell Scanner) and verify that <strong>Keystroke Output / Keyboard Wedge</strong> is enabled.</li>
+                                    <li>Keep the main dashboard window active. Scan any package to allocate or verify instantly.</li>
+                                </ol>
+                            </div>
+                        </div>
+                    )}
+
+                    {/* Tab 2: Camera Input */}
+                    {deviceManagerTab === 'camera' && (
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+                            <p style={{ margin: 0, fontSize: '13px', lineHeight: '1.5', color: '#4b5563' }}>
+                                Select which video capture source the screen-based camera scanner should activate.
+                            </p>
+
+                            <div>
+                                <label style={{ display: 'block', fontSize: '12px', fontWeight: '600', color: '#374151', marginBottom: '6px' }}>
+                                    Select Camera Feed
+                                </label>
+                                <select
+                                    value={selectedCameraId || ''}
+                                    onChange={(e) => setSelectedCameraId(e.target.value)}
+                                    style={inputStyle}
+                                >
+                                    {cameraDevices.map(d => (
+                                        <option key={d.deviceId} value={d.deviceId}>
+                                            {d.label || `Camera Device (${d.deviceId.slice(0, 8)})`}
+                                        </option>
+                                    ))}
+                                    {cameraDevices.length === 0 && (
+                                        <option value="">No cameras detected (verify permission)</option>
+                                    )}
+                                </select>
+                            </div>
+
+                            <div style={{
+                                fontSize: '12px',
+                                backgroundColor: '#eff6ff',
+                                color: '#1e40af',
+                                border: '1px solid #bfdbfe',
+                                padding: '10px 14px',
+                                borderRadius: '6px',
+                                lineHeight: '1.4'
+                            }}>
+                                Note: If camera devices are missing or labelled generically, ensure you have clicked "Allow" when the browser requested camera permissions.
+                            </div>
+                        </div>
+                    )}
+
+                    {/* Tab 3: Remote Scanner */}
+                    {deviceManagerTab === 'remote' && (
+                        <div style={{ display: 'flex', gap: '20px', alignItems: 'flex-start' }}>
+                            <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                                <p style={{ margin: 0, fontSize: '13px', lineHeight: '1.5', color: '#4b5563' }}>
+                                    Connect any smartphone (iPhone, Android, Samsung Ultra) or secondary Wi-Fi tablet to act as a remote barcode reader.
+                                </p>
+                                <div style={{
+                                    backgroundColor: '#f9fafb',
+                                    border: '1px solid #e5e7eb',
+                                    padding: '10px 12px',
+                                    borderRadius: '6px',
+                                    fontSize: '12px',
+                                    fontFamily: 'monospace',
+                                    color: '#374151',
+                                    wordBreak: 'break-all'
+                                }}>
+                                    {typeof window !== 'undefined' ? window.location.origin : 'https://192.168.97.173:3001'}
+                                </div>
+                                <div style={{ fontSize: '12px', color: '#6b7280' }}>
+                                    <div style={{ fontWeight: '600', color: '#374151', marginBottom: '4px' }}>How to link:</div>
+                                    <ol style={{ margin: 0, paddingLeft: '16px', display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                                        <li>Connect the phone to the same local Wi-Fi network.</li>
+                                        <li>Scan the QR code or enter the URL above in the phone's browser.</li>
+                                        <li>Scan barcodes using the phone's camera to process parcels instantly.</li>
+                                    </ol>
+                                </div>
+                            </div>
+                            <div style={{
+                                width: '150px',
+                                height: '150px',
+                                backgroundColor: '#ffffff',
+                                border: '1px solid #e5e7eb',
+                                borderRadius: '8px',
+                                padding: '8px',
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                flexShrink: 0
+                            }}>
+                                <img
+                                    src={`https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=${encodeURIComponent(
+                                        typeof window !== 'undefined' ? window.location.origin : 'https://192.168.97.173:3001'
+                                    )}`}
+                                    alt="Wireless remote link QR"
+                                    style={{ width: '100%', height: '100%', objectFit: 'contain' }}
+                                />
+                            </div>
+                        </div>
+                    )}
+                </div>
+
+                {/* Footer */}
+                <div style={{
+                    padding: '14px 20px',
+                    borderTop: '1px solid #e5e7eb',
+                    display: 'flex', justifyContent: 'flex-end',
+                    backgroundColor: '#f9fafb'
+                }}>
+                    <button
+                        onClick={() => { setIsDeviceManagerOpen(false); handleClearTestInput(); }}
+                        style={{ ...btnPrimary }}
+                    >
+                        Done
+                    </button>
+                </div>
+            </div>
+        </div>
+    )}
 
     {/* Custom animations for dashboard image scanner */ }
     <style>{`

@@ -7,9 +7,10 @@ interface BarcodeScannerProps {
     onDetected: (value: string) => void;
     onClose: () => void;
     active: boolean;
+    selectedDeviceId?: string | null;
 }
 
-export default function BarcodeScanner({ onDetected, onClose, active }: BarcodeScannerProps) {
+export default function BarcodeScanner({ onDetected, onClose, active, selectedDeviceId }: BarcodeScannerProps) {
     const html5QrCodeRef = useRef<Html5Qrcode | null>(null);
     const fileInputRef = useRef<HTMLInputElement>(null);
     const lastDetectedRef = useRef<string>('');
@@ -64,8 +65,12 @@ export default function BarcodeScanner({ onDetected, onClose, active }: BarcodeS
                 scannerInstance = scanner;
                 html5QrCodeRef.current = scanner;
 
+                const cameraConfig = selectedDeviceId
+                    ? selectedDeviceId
+                    : { facingMode: 'environment' };
+
                 await scanner.start(
-                    { facingMode: 'environment' },
+                    cameraConfig,
                     {
                         fps: 15,
                         qrbox: (width, height) => {
@@ -170,7 +175,7 @@ export default function BarcodeScanner({ onDetected, onClose, active }: BarcodeS
                 }
             }
         };
-    }, [active, retryCount]);
+    }, [active, retryCount, selectedDeviceId]);
 
     const handleRetry = () => {
         lastDetectedRef.current = '';
