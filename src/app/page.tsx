@@ -7,8 +7,9 @@ import { Html5Qrcode } from 'html5-qrcode';
 
 export default function WorkstationDashboard() {
     const [activeTab, setActiveTab] = useState<'scan' | 'verify' | 'config' | 'reports'>('scan');
-    const [scannedToday, setScannedToday] = useState<number>(1);
-    const [timeString, setTimeString] = useState<string>('17:00:41');
+    const [scannedToday, setScannedToday] = useState<number>(0);
+    const [timeString, setTimeString] = useState<string>('');
+    const [scannerConnected, setScannerConnected] = useState<boolean | null>(null); // null = unknown, true = connected, false = no scanner
 
     // Camera scanner visibility
     const [scanCameraOpen, setScanCameraOpen] = useState(false);
@@ -25,42 +26,10 @@ export default function WorkstationDashboard() {
 
     // Tab 1: Scan & Allocate
     const [barcodeInput, setBarcodeInput] = useState('');
-    const [currentScan, setCurrentScan] = useState<AllocationResponse | null>({
-        success: true,
-        parcel: {
-            trackingNumber: '710251521582',
-            recipientName: 'A.L.M Fahim Fahim',
-            province: 'Eastern',
-            district: 'Eastern',
-            city: 'Kattankudy',
-            weight: 0.65,
-            value: 'USD 19.15',
-            account: 'HK24018',
-            apiSync: 'Synced'
-        },
-        assignedZone: 'Zone C',
-        assignedPartner: 'PickMe'
-    });
-    const [status, setStatus] = useState<'READY' | 'FETCHING' | 'SUCCESS' | 'ERROR'>('SUCCESS');
+    const [currentScan, setCurrentScan] = useState<AllocationResponse | null>(null);
+    const [status, setStatus] = useState<'READY' | 'FETCHING' | 'SUCCESS' | 'ERROR'>('READY');
     const [errorMessage, setErrorMessage] = useState('');
-    const [history, setHistory] = useState<AllocationResponse[]>([
-        {
-            success: true,
-            parcel: {
-                trackingNumber: '710251521582',
-                recipientName: 'A.L.M Fahim Fahim',
-                province: 'Eastern',
-                district: 'Eastern',
-                city: 'Kattankudy',
-                weight: 0.65,
-                value: 'USD 19.15',
-                account: 'HK24018',
-                apiSync: 'Synced'
-            },
-            assignedZone: 'Zone C',
-            assignedPartner: 'PickMe'
-        }
-    ]);
+    const [history, setHistory] = useState<AllocationResponse[]>([]);
 
     // Tab 2: Dispatch Verify
     const [selectedBin, setSelectedBin] = useState<'PickMe' | 'Domex' | 'Pronto' | null>(null);
@@ -68,10 +37,10 @@ export default function WorkstationDashboard() {
     const [verifyScan, setVerifyScan] = useState<AllocationResponse | null>(null);
     const [verifyStatus, setVerifyStatus] = useState<'READY' | 'FETCHING' | 'MATCH' | 'MISMATCH' | 'ERROR'>('READY');
     const [verifyErrorMessage, setVerifyErrorMessage] = useState('');
-    const [binCounts, setBinCounts] = useState({ PickMe: 7, Domex: 3, Pronto: 2 });
+    const [binCounts, setBinCounts] = useState({ PickMe: 0, Domex: 0, Pronto: 0 });
     const [verifiedCount, setVerifiedCount] = useState(0);
     const [mismatchCount, setMismatchCount] = useState(0);
-    const [pendingDispatch, setPendingDispatch] = useState(12);
+    const [pendingDispatch, setPendingDispatch] = useState(0);
     const [verifyHistory, setVerifyHistory] = useState<Array<{
         trackingNumber: string;
         bin: string;
@@ -84,27 +53,8 @@ export default function WorkstationDashboard() {
 
     // Tab 3: Config
     const [config, setConfig] = useState({
-        zoneMappings: [
-            { province: 'Eastern', district: 'Batticaloa', city: 'Kattankudy', zoneName: 'Zone C' },
-            { province: 'Western', district: 'Colombo', city: 'Colombo 03', zoneName: 'Zone A' },
-            { province: 'Southern', district: 'Galle', city: 'Hikkaduwa', zoneName: 'Zone B' },
-            { province: 'Central', district: 'Kandy', city: 'Peradeniya', zoneName: 'Zone D' }
-        ],
-        allocationRules: {
-            'Zone C': [
-                { partnerCode: 'PickMe', weightPercentage: 50 },
-                { partnerCode: 'Domex', weightPercentage: 30 },
-                { partnerCode: 'Pronto', weightPercentage: 20 }
-            ],
-            'Zone A': [
-                { partnerCode: 'PickMe', weightPercentage: 40 },
-                { partnerCode: 'Domex', weightPercentage: 40 },
-                { partnerCode: 'Pronto', weightPercentage: 20 }
-            ],
-            'Default-Zone': [
-                { partnerCode: 'Domex', weightPercentage: 100 }
-            ]
-        }
+        zoneMappings: [] as { province: string; district: string; city: string; zoneName: string }[],
+        allocationRules: {} as Record<string, { partnerCode: string; weightPercentage: number }[]>
     });
     const [newProvince, setNewProvince] = useState('');
     const [newCity, setNewCity] = useState('');
@@ -115,14 +65,44 @@ export default function WorkstationDashboard() {
 
     // Live clock
     useEffect(() => {
-        const timer = setInterval(() => {
+        const tick = () => {
             const now = new Date();
             const hrs = String(now.getHours()).padStart(2, '0');
             const mins = String(now.getMinutes()).padStart(2, '0');
             const secs = String(now.getSeconds()).padStart(2, '0');
             setTimeString(`${hrs}:${mins}:${secs}`);
-        }, 1000);
+        };
+        tick();
+        const timer = setInterval(tick, 1000);
         return () => clearInterval(timer);
+    }, []);
+
+    // USB/Bluetooth barcode scanner detection:
+    // Real scanners send characters in rapid bursts (< 50ms between chars) ending with Enter.
+    // Regular keyboard typing is slower. We detect this pattern to set scanner status.
+    useEffect(() => {
+        let lastKeyTime = 0;
+        let rapidKeyCount = 0;
+        const RAPID_THRESHOLD_MS = 50;
+        const MIN_RAPID_KEYS = 5;
+
+        const handleKeyDown = (e: KeyboardEvent) => {
+            const now = Date.now();
+            const delta = now - lastKeyTime;
+            lastKeyTime = now;
+
+            if (delta < RAPID_THRESHOLD_MS) {
+                rapidKeyCount++;
+                if (rapidKeyCount >= MIN_RAPID_KEYS) {
+                    setScannerConnected(true);
+                }
+            } else {
+                rapidKeyCount = 0;
+            }
+        };
+
+        window.addEventListener('keydown', handleKeyDown);
+        return () => window.removeEventListener('keydown', handleKeyDown);
     }, []);
 
     // Focus input
@@ -150,6 +130,12 @@ export default function WorkstationDashboard() {
                 setHistory((prev) => [data, ...prev].slice(0, 10));
                 setScannedToday((prev) => prev + 1);
                 setStatus('SUCCESS');
+                // Increment real bin count for this partner so Dispatch Verify shows accurate numbers
+                const partner = data.assignedPartner as 'PickMe' | 'Domex' | 'Pronto';
+                if (partner === 'PickMe' || partner === 'Domex' || partner === 'Pronto') {
+                    setBinCounts((prev) => ({ ...prev, [partner]: prev[partner] + 1 }));
+                    setPendingDispatch((prev) => prev + 1);
+                }
             } else {
                 throw new Error(data.error || 'Unknown allocation failure');
             }
@@ -201,29 +187,6 @@ export default function WorkstationDashboard() {
         }
     };
 
-    const triggerDemoScan = () => {
-        const barcodes = ['710251521582', '502194821034', '301982741982', '804918274912'];
-        const randomBarcode = barcodes[Math.floor(Math.random() * barcodes.length)];
-        setBarcodeInput(randomBarcode);
-        setTimeout(() => {
-            const form = scanInputRef.current?.closest('form');
-            form?.dispatchEvent(new Event('submit', { cancelable: true, bubbles: true }));
-        }, 100);
-    };
-
-    const triggerVerifyDemoScan = () => {
-        if (!selectedBin) return;
-        let targetBarcode = '710251521582';
-        if (selectedBin === 'Domex') targetBarcode = '502194821034';
-        else if (selectedBin === 'Pronto') {
-            const choices = ['301982741982', '710251521582'];
-            targetBarcode = choices[Math.floor(Math.random() * choices.length)];
-        } else {
-            const choices = ['710251521582', '502194821034'];
-            targetBarcode = choices[Math.floor(Math.random() * choices.length)];
-        }
-        setVerifyBarcodeInput(targetBarcode);
-    };
 
     const handleAddZoneMapping = (e: React.FormEvent) => {
         e.preventDefault();
@@ -425,13 +388,20 @@ export default function WorkstationDashboard() {
                     <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
                         <img src="/logo.png" alt="SKYNET logo" style={{ height: '36px', width: 'auto' }} />
                         <span style={{ fontWeight: '700', fontSize: '16px', color: '#111827', borderLeft: '1px solid #e5e7eb', paddingLeft: '16px' }}>
-                            {activeTab === 'verify' ? 'Dispatch Verification' : 'Parcel Allocation System'}
+                            {activeTab === 'verify' ? 'SKYNET  Dispatch Verification' : 'SKYNET  Parcel Allocation System'}
                         </span>
                     </div>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '16px', fontSize: '13px', color: '#6b7280' }}>
                         <span style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                            <span style={{ width: '8px', height: '8px', borderRadius: '50%', backgroundColor: '#16a34a', display: 'inline-block' }}></span>
-                            {activeTab === 'verify' ? 'Scanner ready' : 'Scanner connected'}
+                            <span style={{
+                                width: '8px', height: '8px', borderRadius: '50%', display: 'inline-block',
+                                backgroundColor: scannerConnected === true ? '#16a34a' : scannerConnected === null ? '#f59e0b' : '#dc2626'
+                            }}></span>
+                            {scannerConnected === true
+                                ? 'USB scanner connected'
+                                : scannerConnected === null
+                                    ? 'Awaiting scanner input…'
+                                    : 'No scanner detected'}
                         </span>
                         <span style={{ color: '#374151', fontWeight: '600', borderLeft: '1px solid #e5e7eb', paddingLeft: '16px' }}>{timeString}</span>
                     </div>
@@ -506,12 +476,9 @@ export default function WorkstationDashboard() {
                                             <circle cx="12" cy="13" r="4" />
                                         </svg>
                                     </button>
-                                    <button type="button" onClick={triggerDemoScan} style={btnSecondary}>
-                                        Demo scan
-                                    </button>
                                 </form>
-                                {rowItem('Manifest', 'MF-2026-06-22')}
-                                {rowItem('Operator', 'Operator 02')}
+                                {rowItem('Manifest', `MF-${new Date().toISOString().slice(0, 10)}`)}
+                                {rowItem('Operator', 'Operator 01')}
                                 {rowItem('Scanned today', <span style={{ color: '#16a34a', fontWeight: '700' }}>{scannedToday}</span>, true)}
                             </div>
 
@@ -782,7 +749,7 @@ export default function WorkstationDashboard() {
                                 >
                                     <div style={{ fontWeight: '600', fontSize: '14px', color: '#111827' }}>{bin}</div>
                                     <div style={{ fontSize: '12px', color: '#6b7280', marginTop: '4px' }}>
-                                        {binCounts[bin]} parcels
+                                        {binCounts[bin] === 0 ? 'Empty' : `${binCounts[bin]} parcels`}
                                     </div>
                                 </button>
                             ))}
@@ -820,9 +787,6 @@ export default function WorkstationDashboard() {
                                         <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z" />
                                         <circle cx="12" cy="13" r="4" />
                                     </svg>
-                                </button>
-                                <button type="button" onClick={triggerVerifyDemoScan} disabled={!selectedBin} style={{ ...btnSecondary, opacity: selectedBin ? 1 : 0.5, cursor: selectedBin ? 'pointer' : 'not-allowed' }}>
-                                    Demo
                                 </button>
                             </form>
                             {rowItem('Active bin', <span style={{ color: selectedBin ? '#15803d' : '#b45309', fontWeight: '700' }}>{selectedBin || 'None selected'}</span>)}
@@ -940,6 +904,13 @@ export default function WorkstationDashboard() {
                                         </td>
                                     </tr>
                                 ))}
+                                {config.zoneMappings.length === 0 && (
+                                    <tr>
+                                        <td colSpan={3} style={{ padding: '24px 8px', textAlign: 'center', color: '#9ca3af', fontSize: '13px' }}>
+                                            No zone mappings configured yet. Add your first zone below.
+                                        </td>
+                                    </tr>
+                                )}
                             </tbody>
                         </table>
                         <form onSubmit={handleAddZoneMapping} style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', borderTop: '1px solid #f3f4f6', paddingTop: '16px' }}>
@@ -975,6 +946,11 @@ export default function WorkstationDashboard() {
                                     </div>
                                 </div>
                             ))}
+                            {Object.keys(config.allocationRules).length === 0 && (
+                                <p style={{ margin: 0, color: '#9ca3af', fontSize: '13px' }}>
+                                    No allocation rules configured yet. Add zone mappings first, then rules will appear here.
+                                </p>
+                            )}
                         </div>
                     </div>
                 </div>
@@ -1069,6 +1045,11 @@ export default function WorkstationDashboard() {
                                 setHistory((prev) => [data, ...prev].slice(0, 10));
                                 setScannedToday((prev) => prev + 1);
                                 setStatus('SUCCESS');
+                                const partner = data.assignedPartner as 'PickMe' | 'Domex' | 'Pronto';
+                                if (partner === 'PickMe' || partner === 'Domex' || partner === 'Pronto') {
+                                    setBinCounts((prev) => ({ ...prev, [partner]: prev[partner] + 1 }));
+                                    setPendingDispatch((prev) => prev + 1);
+                                }
                             } else {
                                 throw new Error(data.error || 'Allocation failure');
                             }

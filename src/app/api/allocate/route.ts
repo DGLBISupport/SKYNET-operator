@@ -13,69 +13,18 @@ export async function POST(request: Request) {
 
         const apiKey = process.env.SKYNET_API_KEY || 'MOCK_TOKEN_SECRET';
 
-        // Simulated database of parcel details
-        const parcelDatabase: { [key: string]: SkyNetParcelData } = {
-            '710251521582': {
-                trackingNumber: '710251521582',
-                recipientName: 'A.L.M Fahim Fahim',
-                province: 'Eastern',
-                district: 'Eastern',
-                city: 'Kattankudy',
-                weight: 0.65,
-                value: 'USD 19.15',
-                account: 'HK24018',
-                apiSync: 'Synced'
-            },
-            '502194821034': {
-                trackingNumber: '502194821034',
-                recipientName: 'Mohamed Ansar',
-                province: 'Western',
-                district: 'Colombo',
-                city: 'Colombo 03',
-                weight: 1.45,
-                value: 'USD 42.50',
-                account: 'HK24020',
-                apiSync: 'Synced'
-            },
-            '301982741982': {
-                trackingNumber: '301982741982',
-                recipientName: 'Shashini Silva',
-                province: 'Southern',
-                district: 'Galle',
-                city: 'Hikkaduwa',
-                weight: 0.95,
-                value: 'USD 12.00',
-                account: 'HK24025',
-                apiSync: 'Synced'
-            },
-            '804918274912': {
-                trackingNumber: '804918274912',
-                recipientName: 'Priyantha Bandara',
-                province: 'Central',
-                district: 'Kandy',
-                city: 'Peradeniya',
-                weight: 2.10,
-                value: 'USD 65.80',
-                account: 'HK24032',
-                apiSync: 'Synced'
-            }
-        };
+        // Parcel lookup — connect to real Skynet API here when available.
+        // For now: empty map means all barcodes return a "not found" error.
+        const parcelDatabase: { [key: string]: SkyNetParcelData } = {};
 
         let skynetData = parcelDatabase[trackingNumber];
 
         if (!skynetData) {
-            // Fallback fallback simulated data response for any other scanned barcode
-            skynetData = {
-                trackingNumber,
-                recipientName: 'Walk-in Client',
-                province: 'Eastern',
-                district: 'Eastern',
-                city: 'Kattankudy',
-                weight: 0.50,
-                value: 'USD 10.00',
-                account: 'HK24001',
-                apiSync: 'Synced'
-            };
+            // Barcode not found in the system — return a real error, not fake data
+            return NextResponse.json({
+                success: false,
+                error: `Barcode ${trackingNumber} not found in the system. Please verify the tracking number and try again.`
+            }, { status: 404 });
         }
 
         // 2. Load Local Zone and Allocation Rule configurations
