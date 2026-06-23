@@ -5,6 +5,9 @@ export interface SkyNetParcelData {
     district: string;
     city: string;
     weight: number;
+    value?: string;
+    account?: string;
+    apiSync?: string;
 }
 
 export interface ZoneRule {
