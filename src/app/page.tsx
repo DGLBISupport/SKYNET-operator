@@ -23,6 +23,7 @@ export default function WorkstationDashboard() {
     const [testScannerInput, setTestScannerInput] = useState('');
     const [testScannerSpeed, setTestScannerSpeed] = useState<string>('');
     const [testKeyTimes, setTestKeyTimes] = useState<number[]>([]);
+    const [workstationUrl, setWorkstationUrl] = useState<string>('');
 
     // Image decoder dashboard states
     const dashboardFileInputRef = useRef<HTMLInputElement>(null);
@@ -119,6 +120,26 @@ export default function WorkstationDashboard() {
         if (activeTab === 'scan') scanInputRef.current?.focus();
         else if (activeTab === 'verify') verifyInputRef.current?.focus();
     }, [activeTab, status, verifyStatus]);
+
+    // Fetch dynamic workstation local network URL on mount
+    useEffect(() => {
+        if (typeof window !== 'undefined') {
+            setWorkstationUrl(window.location.origin);
+        }
+
+        const fetchIP = async () => {
+            try {
+                const res = await fetch('/api/allocate');
+                const data = await res.json();
+                if (data.success && data.url) {
+                    setWorkstationUrl(data.url);
+                }
+            } catch (err) {
+                console.error("Failed to retrieve workstation server URL:", err);
+            }
+        };
+        fetchIP();
+    }, []);
 
     // Fetch camera devices when Device Manager is open
     useEffect(() => {
@@ -1391,7 +1412,7 @@ export default function WorkstationDashboard() {
                                     color: '#374151',
                                     wordBreak: 'break-all'
                                 }}>
-                                    {typeof window !== 'undefined' ? window.location.origin : 'https://192.168.97.173:3001'}
+                                    {workstationUrl || (typeof window !== 'undefined' ? window.location.origin : '')}
                                 </div>
                                 <div style={{ fontSize: '12px', color: '#6b7280' }}>
                                     <div style={{ fontWeight: '600', color: '#374151', marginBottom: '4px' }}>How to link:</div>
@@ -1416,7 +1437,7 @@ export default function WorkstationDashboard() {
                             }}>
                                 <img
                                     src={`https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=${encodeURIComponent(
-                                        typeof window !== 'undefined' ? window.location.origin : 'https://192.168.97.173:3001'
+                                        workstationUrl || (typeof window !== 'undefined' ? window.location.origin : '')
                                     )}`}
                                     alt="Wireless remote link QR"
                                     style={{ width: '100%', height: '100%', objectFit: 'contain' }}

@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import fs from 'fs';
 import path from 'path';
+import os from 'os';
 import { SkyNetParcelData, ZoneRule } from '@/types';
 
 export async function POST(request: Request) {
@@ -75,6 +76,40 @@ export async function POST(request: Request) {
             assignedPartner
         });
 
+    } catch (error: any) {
+        return NextResponse.json({ success: false, error: error.message }, { status: 500 });
+    }
+}
+
+export async function GET(request: Request) {
+    try {
+        const interfaces = os.networkInterfaces();
+        let localIP = '127.0.0.1';
+        for (const name of Object.keys(interfaces)) {
+            for (const net of interfaces[name] || []) {
+                if (net.family === 'IPv4' && !net.internal) {
+                    localIP = net.address;
+                    break;
+                }
+            }
+            if (localIP !== '127.0.0.1') break;
+        }
+
+        const hostHeader = request.headers.get('host') || '';
+        const port = hostHeader.split(':')[1] || '';
+        
+        const urlObj = new URL(request.url);
+        const protocol = urlObj.protocol; // 'http:' or 'https:'
+        
+        // Construct the URL using server's real local network IP
+        const localUrl = port ? `${protocol}//${localIP}:${port}` : `${protocol}//${localIP}`;
+
+        return NextResponse.json({
+            success: true,
+            ip: localIP,
+            port: port,
+            url: localUrl
+        });
     } catch (error: any) {
         return NextResponse.json({ success: false, error: error.message }, { status: 500 });
     }
