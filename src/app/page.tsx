@@ -1217,8 +1217,20 @@ export default function WorkstationDashboard() {
                 }}
             />
 
-    {/* Hidden dummy element for dashboard file decoder */ }
-    <div id="dashboard-dummy-decoder" style={{ display: 'none' }} />
+    {/* Hidden dummy element for dashboard file decoder - MUST NOT be display: none or 0px to prevent 0x0 canvas scaling */}
+    <div 
+        id="dashboard-dummy-decoder" 
+        style={{ 
+            position: 'absolute',
+            left: '-9999px',
+            top: '-9999px',
+            width: '800px',
+            height: '600px',
+            opacity: 0,
+            pointerEvents: 'none',
+            zIndex: -9999
+        }} 
+    />
 
     {/* ── DEVICE MANAGER MODAL ── */}
     {isDeviceManagerOpen && (
