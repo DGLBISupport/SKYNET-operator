@@ -399,17 +399,17 @@ export default function WorkstationDashboard() {
     const parcelDetailsGrid = (parcel: SkyNetParcelData) => (
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '16px 20px', fontSize: '14px' }}>
             {[
-                { icon: '🔍', lbl: 'Tracking no.', val: parcel.trackingNumber },
-                { icon: '👤', lbl: 'Recipient', val: parcel.recipientName },
-                { icon: '📍', lbl: 'City', val: parcel.city },
-                { icon: '🗺', lbl: 'District', val: parcel.district },
-                { icon: '⚖', lbl: 'Weight', val: `${parcel.weight} kg` },
-                { icon: '💲', lbl: 'Value', val: parcel.value || 'USD 10.00' },
-                { icon: '🏢', lbl: 'Account', val: parcel.account || 'HK24001' },
-                { icon: '🔄', lbl: 'API sync', val: <span style={{ color: '#16a34a' }}>✓ {parcel.apiSync || 'Synced'}</span> },
-            ].map(({ icon, lbl, val }) => (
+                { lbl: 'Tracking no.', val: parcel.trackingNumber },
+                { lbl: 'Recipient', val: parcel.recipientName },
+                { lbl: 'City', val: parcel.city },
+                { lbl: 'District', val: parcel.district },
+                { lbl: 'Weight', val: `${parcel.weight} kg` },
+                { lbl: 'Value', val: parcel.value || 'USD 10.00' },
+                { lbl: 'Account', val: parcel.account || 'HK24001' },
+                { lbl: 'API sync', val: <span style={{ color: '#16a34a' }}>✓ {parcel.apiSync || 'Synced'}</span> },
+            ].map(({ lbl, val }) => (
                 <div key={lbl}>
-                    <div style={{ color: '#6b7280', marginBottom: '4px', fontSize: '13px' }}>{icon} {lbl}</div>
+                    <div style={{ color: '#6b7280', marginBottom: '4px', fontSize: '13px' }}>{lbl}</div>
                     <div style={{ fontWeight: '600', color: '#111827' }}>{val}</div>
                 </div>
             ))}
@@ -422,9 +422,10 @@ export default function WorkstationDashboard() {
 
                 {/* ── HEADER ── */}
                 <header style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px', backgroundColor: '#ffffff', border: '1px solid #e5e7eb', borderRadius: '10px', padding: '14px 20px', boxShadow: '0 1px 3px rgba(0,0,0,0.06)' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                        <span style={{ fontWeight: '700', fontSize: '16px', color: '#111827' }}>
-                            {activeTab === 'verify' ? 'SKYNET — Dispatch Verification' : 'SKYNET — Parcel Allocation System'}
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
+                        <img src="/logo.png" alt="SKYNET logo" style={{ height: '36px', width: 'auto' }} />
+                        <span style={{ fontWeight: '700', fontSize: '16px', color: '#111827', borderLeft: '1px solid #e5e7eb', paddingLeft: '16px' }}>
+                            {activeTab === 'verify' ? 'Dispatch Verification' : 'Parcel Allocation System'}
                         </span>
                     </div>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '16px', fontSize: '13px', color: '#6b7280' }}>
@@ -473,7 +474,7 @@ export default function WorkstationDashboard() {
                         )}
                         {status === 'ERROR' && (
                             <div style={{ backgroundColor: '#fef2f2', border: '1px solid #fca5a5', color: '#dc2626', padding: '12px 16px', borderRadius: '8px', marginBottom: '16px', display: 'flex', alignItems: 'center', gap: '8px', fontSize: '14px', fontWeight: '500' }}>
-                                ❌ Scan Failed: {errorMessage}
+                                Scan Failed: {errorMessage}
                             </div>
                         )}
 
@@ -500,10 +501,13 @@ export default function WorkstationDashboard() {
                                         title="Open camera scanner"
                                         style={{ ...btnSecondary, paddingLeft: '12px', paddingRight: '12px' }}
                                     >
-                                        📷
+                                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                            <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z" />
+                                            <circle cx="12" cy="13" r="4" />
+                                        </svg>
                                     </button>
                                     <button type="button" onClick={triggerDemoScan} style={btnSecondary}>
-                                        ▷ Demo scan
+                                        Demo scan
                                     </button>
                                 </form>
                                 {rowItem('Manifest', 'MF-2026-06-22')}
@@ -513,7 +517,7 @@ export default function WorkstationDashboard() {
 
                             {/* Barcode Image Scanner Card */}
                             <div style={card}>
-                                <div style={label}>🖼 Image Barcode Scanner</div>
+                                <div style={label}>Image Barcode Scanner</div>
 
                                 {!uploadImageSrc ? (
                                     <div
@@ -526,11 +530,19 @@ export default function WorkstationDashboard() {
                                             cursor: 'pointer',
                                             backgroundColor: '#f9fafb',
                                             transition: 'border-color 0.15s ease',
+                                            display: 'flex',
+                                            flexDirection: 'column',
+                                            alignItems: 'center',
+                                            justifyContent: 'center'
                                         }}
                                         onMouseOver={(e) => (e.currentTarget.style.borderColor = '#16a34a')}
                                         onMouseOut={(e) => (e.currentTarget.style.borderColor = '#d1d5db')}
                                     >
-                                        <div style={{ fontSize: '28px', marginBottom: '8px' }}>📁</div>
+                                        <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="#6b7280" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ marginBottom: '8px' }}>
+                                            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                                            <polyline points="17 8 12 3 7 8" />
+                                            <line x1="12" y1="3" x2="12" y2="15" />
+                                        </svg>
                                         <div style={{ fontSize: '13px', fontWeight: '600', color: '#374151' }}>
                                             Upload package photo
                                         </div>
@@ -604,7 +616,7 @@ export default function WorkstationDashboard() {
                                         }}>
                                             {uploadScanError && (
                                                 <div style={{ color: '#dc2626', fontSize: '13px', fontWeight: '500' }}>
-                                                    ❌ {uploadScanError}
+                                                    {uploadScanError}
                                                 </div>
                                             )}
 
@@ -668,7 +680,7 @@ export default function WorkstationDashboard() {
                                         fontSize: '18px',
                                         margin: '0 auto 8px'
                                     }}>
-                                        🚚 {currentScan.assignedPartner}
+                                        {currentScan.assignedPartner}
                                     </div>
                                     <p style={{ fontSize: '12px', color: '#6b7280', margin: '0' }}>Based on 50% allocation rule</p>
                                 </div>
@@ -690,9 +702,9 @@ export default function WorkstationDashboard() {
                         <div style={label}>Parcel Details</div>
                         {parcelDetailsGrid(currentScan.parcel)}
                         <div style={{ display: 'flex', gap: '10px', marginTop: '20px', paddingTop: '16px', borderTop: '1px solid #f3f4f6' }}>
-                            <button onClick={handleConfirmDispatch} style={btnPrimary}>✓ Confirm & dispatch</button>
-                            <button onClick={handleChangeLMD} style={btnSecondary}>🔄 Change LMD partner</button>
-                            <button onClick={handleClearScan} style={{ ...btnDanger, marginLeft: 'auto' }}>✕ Clear</button>
+                            <button onClick={handleConfirmDispatch} style={btnPrimary}>Confirm & dispatch</button>
+                            <button onClick={handleChangeLMD} style={btnSecondary}>Change LMD partner</button>
+                            <button onClick={handleClearScan} style={{ ...btnDanger, marginLeft: 'auto' }}>Clear</button>
                         </div>
                     </div>
                 )}
@@ -768,7 +780,6 @@ export default function WorkstationDashboard() {
                                         transition: 'all 0.15s ease'
                                     }}
                                 >
-                                    <div style={{ fontSize: '22px', marginBottom: '4px' }}>{bin === 'Pronto' ? '🏍' : '🚚'}</div>
                                     <div style={{ fontWeight: '600', fontSize: '14px', color: '#111827' }}>{bin}</div>
                                     <div style={{ fontSize: '12px', color: '#6b7280', marginTop: '4px' }}>
                                         {binCounts[bin]} parcels
@@ -780,7 +791,7 @@ export default function WorkstationDashboard() {
 
                     {/* Notice Banner */}
                     <div style={{ border: '1px dashed #d1d5db', borderRadius: '8px', padding: '12px 16px', marginBottom: '16px', fontSize: '13px', color: selectedBin ? '#15803d' : '#b45309', backgroundColor: selectedBin ? '#f0fdf4' : '#fffbeb', fontWeight: '500' }}>
-                        {selectedBin ? `🔍 Active bin: ${selectedBin} — Scan barcodes below to verify routing.` : '⚠ Select a dispatch bin first, then scan parcels'}
+                        {selectedBin ? `Active bin: ${selectedBin} — Scan barcodes below to verify routing.` : 'Select a dispatch bin first, then scan parcels'}
                     </div>
 
                     {/* Step 2: Scan + Log */}
@@ -805,10 +816,13 @@ export default function WorkstationDashboard() {
                                     title={selectedBin ? 'Open camera scanner' : 'Select a bin first'}
                                     style={{ ...btnSecondary, paddingLeft: '12px', paddingRight: '12px', opacity: selectedBin ? 1 : 0.5, cursor: selectedBin ? 'pointer' : 'not-allowed' }}
                                 >
-                                    📷
+                                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                        <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z" />
+                                        <circle cx="12" cy="13" r="4" />
+                                    </svg>
                                 </button>
                                 <button type="button" onClick={triggerVerifyDemoScan} disabled={!selectedBin} style={{ ...btnSecondary, opacity: selectedBin ? 1 : 0.5, cursor: selectedBin ? 'pointer' : 'not-allowed' }}>
-                                    ▷ Demo
+                                    Demo
                                 </button>
                             </form>
                             {rowItem('Active bin', <span style={{ color: selectedBin ? '#15803d' : '#b45309', fontWeight: '700' }}>{selectedBin || 'None selected'}</span>)}
@@ -817,7 +831,7 @@ export default function WorkstationDashboard() {
                             {rowItem('Destination', verifyScan?.parcel?.city || '—')}
                             {rowItem('Result',
                                 <span style={{ color: verifyStatus === 'MATCH' ? '#15803d' : verifyStatus === 'MISMATCH' ? '#dc2626' : '#374151', fontWeight: '700' }}>
-                                    {verifyStatus === 'MATCH' ? '✓ MATCH' : verifyStatus === 'MISMATCH' ? '✕ MISMATCH' : '—'}
+                                    {verifyStatus === 'MATCH' ? 'MATCH' : verifyStatus === 'MISMATCH' ? 'MISMATCH' : '—'}
                                 </span>, true)}
                         </div>
 
@@ -863,7 +877,7 @@ export default function WorkstationDashboard() {
                                     textTransform: 'uppercase',
                                     letterSpacing: '0.5px'
                                 }}>
-                                    {verifyStatus === 'MATCH' ? '✓ Match Approved' : '✕ Mismatch Warning'}
+                                    {verifyStatus === 'MATCH' ? 'Match Approved' : 'Mismatch Warning'}
                                 </span>
                             </div>
                             {parcelDetailsGrid(verifyScan.parcel)}
@@ -883,7 +897,7 @@ export default function WorkstationDashboard() {
                         )}
                         <div style={{ display: 'flex', gap: '10px', marginTop: '14px' }}>
                             <button onClick={() => alert('Printing Batch Manifest PDF...')} style={btnSecondary}>
-                                🖨 Print manifest
+                                Print manifest
                             </button>
                             <button
                                 onClick={() => {
@@ -893,7 +907,7 @@ export default function WorkstationDashboard() {
                                 disabled={verifiedCount === 0}
                                 style={{ ...btnPrimary, opacity: verifiedCount > 0 ? 1 : 0.5, cursor: verifiedCount > 0 ? 'pointer' : 'not-allowed' }}
                             >
-                                ✓ Confirm dispatch
+                                Confirm dispatch
                             </button>
                         </div>
                     </div>
@@ -946,7 +960,7 @@ export default function WorkstationDashboard() {
                                     <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
                                         {rules.map((rule, idx) => (
                                             <div key={idx} style={{ display: 'flex', alignItems: 'center', gap: '10px', fontSize: '13px' }}>
-                                                <span style={{ color: '#374151', width: '60px' }}>🚚 {rule.partnerCode}</span>
+                                                <span style={{ color: '#374151', width: '60px' }}>{rule.partnerCode}</span>
                                                 <div style={{ flex: 1, height: '6px', backgroundColor: '#f3f4f6', borderRadius: '3px', overflow: 'hidden' }}>
                                                     <div style={{
                                                         width: `${rule.weightPercentage}%`,
@@ -1005,7 +1019,7 @@ export default function WorkstationDashboard() {
                                         <td style={{ padding: '10px 8px', color: '#374151' }}>{item.parcel?.recipientName}</td>
                                         <td style={{ padding: '10px 8px', fontWeight: '500' }}>{item.assignedPartner}</td>
                                         <td style={{ padding: '10px 8px', color: '#6b7280' }}>{item.parcel?.city}</td>
-                                        <td style={{ padding: '10px 8px', color: '#15803d', fontWeight: '500' }}>✓ Allocated</td>
+                                        <td style={{ padding: '10px 8px', color: '#15803d', fontWeight: '500' }}>Allocated</td>
                                     </tr>
                                 ))}
                                 {verifyHistory.map((item, idx) => (
@@ -1016,7 +1030,7 @@ export default function WorkstationDashboard() {
                                         <td style={{ padding: '10px 8px', fontWeight: '500' }}>{item.assignedPartner}</td>
                                         <td style={{ padding: '10px 8px', color: '#6b7280' }}>{item.city || '—'}</td>
                                         <td style={{ padding: '10px 8px', color: item.isMatch ? '#15803d' : '#dc2626', fontWeight: '600' }}>
-                                            {item.isMatch ? '✓ Matched' : '✕ Mismatch'}
+                                            {item.isMatch ? 'Matched' : 'Mismatch'}
                                         </td>
                                     </tr>
                                 ))}

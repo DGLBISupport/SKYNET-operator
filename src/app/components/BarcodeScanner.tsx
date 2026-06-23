@@ -258,7 +258,7 @@ export default function BarcodeScanner({ onDetected, onClose, active }: BarcodeS
                 }}>
                     <div>
                         <div style={{ fontWeight: '700', fontSize: '15px', color: '#111827' }}>
-                            📷 Camera Barcode Scanner
+                            Camera Barcode Scanner
                         </div>
                         <div style={{ fontSize: '12px', color: '#6b7280', marginTop: '2px' }}>
                             Powered by HTML5 Barcode Reader (Cross-Browser)
@@ -284,7 +284,7 @@ export default function BarcodeScanner({ onDetected, onClose, active }: BarcodeS
                             alignItems: 'center', justifyContent: 'center',
                             padding: '24px', textAlign: 'center'
                         }}>
-                            <div style={{ fontSize: '40px', marginBottom: '12px' }}>⚠️</div>
+                            <div style={{ fontSize: '40px', color: '#ef4444', fontWeight: 'bold', marginBottom: '12px' }}>!</div>
                             <p style={{ color: '#ffffff', fontSize: '14px', lineHeight: '1.6', whiteSpace: 'pre-line' }}>
                                 {error}
                             </p>
@@ -376,9 +376,12 @@ export default function BarcodeScanner({ onDetected, onClose, active }: BarcodeS
                                         backgroundColor: '#16a34a', borderRadius: '50%',
                                         width: '56px', height: '56px',
                                         display: 'flex', alignItems: 'center', justifyContent: 'center',
-                                        fontSize: '28px', color: '#ffffff',
                                         boxShadow: '0 4px 16px rgba(22,163,74,0.5)'
-                                    }}>✓</div>
+                                    }}>
+                                        <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#ffffff" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+                                            <polyline points="20 6 9 17 4 12" />
+                                        </svg>
+                                    </div>
                                     <p style={{ color: '#ffffff', fontWeight: '700', fontSize: '15px', textShadow: '0 1px 4px rgba(0,0,0,0.5)' }}>
                                         Barcode detected!
                                     </p>
@@ -407,7 +410,7 @@ export default function BarcodeScanner({ onDetected, onClose, active }: BarcodeS
                                         </>
                                     ) : (
                                         <>
-                                            <div style={{ fontSize: '32px', marginBottom: '8px' }}>❌</div>
+                                            <div style={{ fontSize: '20px', fontWeight: 'bold', color: '#ef4444', marginBottom: '8px' }}>Error</div>
                                             <p style={{ color: '#ffffff', fontSize: '13px', lineHeight: '1.5', margin: '0 0 16px 0' }}>
                                                 {fileError}
                                             </p>
@@ -437,10 +440,10 @@ export default function BarcodeScanner({ onDetected, onClose, active }: BarcodeS
                 }}>
                     <p style={{ margin: 0, fontSize: '12px', color: '#6b7280' }}>
                         {detected
-                            ? '✓ Processing barcode...'
+                            ? 'Processing barcode...'
                             : ready
-                                ? '🔍 Point camera at barcode — auto-detects instantly'
-                                : error ? '⚠ Camera unavailable' : 'Initialising...'}
+                                ? 'Point camera at barcode — auto-detects instantly'
+                                : error ? 'Camera unavailable' : 'Initialising...'}
                     </p>
                     
                     {!detected && (
@@ -454,7 +457,7 @@ export default function BarcodeScanner({ onDetected, onClose, active }: BarcodeS
                                     display: 'inline-flex', alignItems: 'center', gap: '6px'
                                 }}
                             >
-                                📁 Upload Image
+                                Upload Image
                             </button>
                             <input
                                 ref={fileInputRef}
