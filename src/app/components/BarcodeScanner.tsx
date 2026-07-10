@@ -1,3 +1,4 @@
+
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
@@ -8,26 +9,91 @@ interface BarcodeScannerProps {
     onClose: () => void;
     active: boolean;
     selectedDeviceId?: string | null;
+    embedded?: boolean;
+    containerId?: string;
 }
 
-export default function BarcodeScanner({ onDetected, onClose, active, selectedDeviceId }: BarcodeScannerProps) {
+export default function BarcodeScanner({ onDetected, onClose, active, selectedDeviceId, embedded = false, containerId = 'scanner-reader-container' }: BarcodeScannerProps) {
     const html5QrCodeRef = useRef<Html5Qrcode | null>(null);
-    const fileInputRef = useRef<HTMLInputElement>(null);
     const lastDetectedRef = useRef<string>('');
     const lastDetectedTimeRef = useRef<number>(0);
 
     const [ready, setReady] = useState(false);
     const [error, setError] = useState<string | null>(null);
+    const [scanMode, setScanMode] = useState<'linear' | 'square' | 'full'>('linear');
     const [detected, setDetected] = useState<string | null>(null);
     const [retryCount, setRetryCount] = useState(0);
-    const [fileError, setFileError] = useState<string | null>(null);
-    const [decodingFile, setDecodingFile] = useState(false);
-
+    const [btDevices, setBtDevices] = useState<any[]>([]);
+    const [hidDevices, setHidDevices] = useState<any[]>([]);
+    const [scannerActivity, setScannerActivity] = useState(false);
+    const [btSupported, setBtSupported] = useState(false);
+    const [hidSupported, setHidSupported] = useState(false);
     const onDetectedRef = useRef<((value: string) => void) | null>(null);
 
     useEffect(() => {
         onDetectedRef.current = onDetected;
     }, [onDetected]);
+
+    useEffect(() => {
+        setBtSupported(typeof (navigator as any).bluetooth !== 'undefined');
+        setHidSupported(typeof (navigator as any).hid !== 'undefined');
+    }, []);
+
+    const detectBluetoothDevices = async () => {
+        try {
+            if ((navigator as any).bluetooth && (navigator as any).bluetooth.getDevices) {
+                const devices = await (navigator as any).bluetooth.getDevices();
+                setBtDevices(devices.map((d: any) => ({ id: d.id, name: d.name || 'Unknown', connected: !!(d.gatt && d.gatt.connected) })));
+            } else if ((navigator as any).bluetooth && (navigator as any).bluetooth.requestDevice) {
+                // Fallback: ask user to pick a device (prompts a chooser)
+                const device = await (navigator as any).bluetooth.requestDevice({ acceptAllDevices: true });
+                setBtDevices(prev => [{ id: device.id, name: device.name || 'Unknown', connected: !!(device.gatt && device.gatt.connected) }, ...prev]);
+            } else {
+                setError('Web Bluetooth is not available in this browser.');
+            }
+        } catch (err: any) {
+            console.error('Bluetooth detect error:', err);
+            setError('Bluetooth detection failed. ' + (err?.message || ''));
+        }
+    };
+
+    const detectHidDevices = async () => {
+        try {
+            if ((navigator as any).hid && (navigator as any).hid.getDevices) {
+                const devices = await (navigator as any).hid.getDevices();
+                setHidDevices(devices.map((d: any) => ({ productName: d.productName, vendorId: d.vendorId, productId: d.productId })));
+            } else {
+                setError('WebHID is not available in this browser.');
+            }
+        } catch (err: any) {
+            console.error('HID detect error:', err);
+            setError('HID detection failed. ' + (err?.message || ''));
+        }
+    };
+
+    // Simple keyboard-based scanner activity detector: many Bluetooth scanners emulate a keyboard
+    useEffect(() => {
+        let buffer = '';
+        let lastTs = 0;
+
+        const onKey = (e: KeyboardEvent) => {
+            const now = Date.now();
+            if (now - lastTs > 120) buffer = '';
+            lastTs = now;
+            // Ignore modifier keys
+            if (e.key.length !== 1) return;
+            buffer += e.key;
+            // If a rapid sequence of >5 chars seen, treat as scanner activity
+            if (buffer.length >= 6) {
+                setScannerActivity(true);
+                setTimeout(() => setScannerActivity(false), 2500);
+                buffer = '';
+            }
+        };
+
+        window.addEventListener('keydown', onKey, true);
+        return () => window.removeEventListener('keydown', onKey, true);
+    }, []);
 
     useEffect(() => {
         let isCurrent = true;
@@ -37,22 +103,21 @@ export default function BarcodeScanner({ onDetected, onClose, active, selectedDe
             setError(null);
             setDetected(null);
             setReady(false);
-            setFileError(null);
 
             try {
                 // Wait for the container to render in DOM
-                let container = document.getElementById('scanner-reader-container');
+                let container = document.getElementById(containerId);
                 let attempts = 0;
                 while (!container && attempts < 20) {
                     if (!isCurrent) return;
                     await new Promise(r => setTimeout(r, 50));
-                    container = document.getElementById('scanner-reader-container');
+                    container = document.getElementById(containerId);
                     attempts++;
                 }
 
                 if (!container || !isCurrent) return;
 
-                const scanner = new Html5Qrcode('scanner-reader-container', {
+                const scanner = new Html5Qrcode(containerId, {
                     verbose: false,
                     formatsToSupport: [
                         Html5QrcodeSupportedFormats.CODE_128,
@@ -75,15 +140,25 @@ export default function BarcodeScanner({ onDetected, onClose, active, selectedDe
                     ? selectedDeviceId
                     : { facingMode: 'environment' };
 
+                // Determine active scan area (margins) based on scanMode
+                let configQrbox: any = undefined;
+                if (scanMode === 'linear') {
+                    configQrbox = (width: number, height: number) => {
+                        const finalWidth = Math.min(width - 20, 460);
+                        return { width: finalWidth, height: 120 };
+                    };
+                } else if (scanMode === 'square') {
+                    configQrbox = (width: number, height: number) => {
+                        const size = Math.min(width - 20, height - 20, 260);
+                        return { width: size, height: size };
+                    };
+                }
+
                 await scanner.start(
                     cameraConfig,
                     {
                         fps: 15,
-                        qrbox: (width, height) => {
-                            // Use full width of viewfinder to prevent clipping barcode quiet zones
-                            const finalHeight = Math.max(50, Math.min(height - 40, 140));
-                            return { width: width, height: finalHeight };
-                        },
+                        qrbox: configQrbox,
                         aspectRatio: 1.777778,
                         disableFlip: true,
                         videoConstraints: {
@@ -140,7 +215,7 @@ export default function BarcodeScanner({ onDetected, onClose, active, selectedDe
             } catch (err: any) {
                 if (!isCurrent) return;
                 console.error('Camera scan start failed:', err);
-                
+
                 let userFriendlyError = 'Could not start camera. Please verify permission or use a different browser.';
                 if (typeof err === 'string') {
                     if (err.includes('NotAllowedError') || err.includes('permission')) {
@@ -159,7 +234,7 @@ export default function BarcodeScanner({ onDetected, onClose, active, selectedDe
                         userFriendlyError = err.message;
                     }
                 }
-                
+
                 setError(userFriendlyError);
             }
         };
@@ -181,72 +256,146 @@ export default function BarcodeScanner({ onDetected, onClose, active, selectedDe
                 }
             }
         };
-    }, [active, retryCount, selectedDeviceId]);
+    }, [active, retryCount, selectedDeviceId, scanMode]);
 
     const handleRetry = () => {
         lastDetectedRef.current = '';
         setDetected(null);
-        setFileError(null);
         setRetryCount(prev => prev + 1);
     };
 
-    const handleTriggerFileUpload = () => {
-        if (fileInputRef.current) {
-            fileInputRef.current.click();
-        }
-    };
-
-    const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
-        const file = e.target.files?.[0];
-        if (!file) return;
-
-        setFileError(null);
-        setDecodingFile(true);
-
-        try {
-            // Stop active camera scan
-            if (html5QrCodeRef.current && html5QrCodeRef.current.isScanning) {
-                await html5QrCodeRef.current.stop();
-                html5QrCodeRef.current.clear();
-            }
-            setReady(false);
-
-            const scanner = html5QrCodeRef.current || new Html5Qrcode('scanner-reader-container');
-            const decodedText = await scanner.scanFile(file, false);
-
-            const isControlCode = decodedText.includes('^') || decodedText.includes('!') || decodedText.length < 6;
-            if (isControlCode) {
-                throw new Error("Secondary warehouse barcode detected. Please upload an image containing only the primary tracking number.");
-            }
-
-            setDetected(decodedText);
-            setTimeout(() => {
-                if (onDetectedRef.current) {
-                    onDetectedRef.current(decodedText);
-                }
-            }, 600);
-
-        } catch (err: any) {
-            console.error('File scan failed:', err);
-            let msg = 'No barcode detected in the selected image. Please make sure the barcode is clear and flat.';
-            if (err instanceof Error) {
-                msg = err.message;
-            } else if (typeof err === 'string') {
-                msg = err;
-            }
-            setFileError(msg);
-            
-            // Restart camera
-            setRetryCount(prev => prev + 1);
-        } finally {
-            setDecodingFile(false);
-            if (fileInputRef.current) {
-                fileInputRef.current.value = ''; // Reset input
-            }
-        }
-    };
-
     if (!active) return null;
+
+    if (embedded) {
+        return (
+            <div style={{
+                position: 'relative',
+                width: '100%',
+                borderRadius: '8px',
+                overflow: 'hidden',
+                border: '1px solid #e5e7eb',
+                boxShadow: '0 4px 12px rgba(0,0,0,0.05)',
+                backgroundColor: '#ffffff'
+            }}>
+                {/* Visual Scanner Area */}
+                <div style={{ position: 'relative', backgroundColor: '#000', aspectRatio: '4/3' }}>
+                    {error ? (
+                        <div style={{
+                            position: 'absolute', inset: 0,
+                            display: 'flex', flexDirection: 'column',
+                            alignItems: 'center', justifyContent: 'center',
+                            padding: '16px', textAlign: 'center'
+                        }}>
+                            <div style={{ fontSize: '32px', color: '#ef4444', fontWeight: 'bold', marginBottom: '8px' }}>!</div>
+                            <p style={{ color: '#ffffff', fontSize: '13px', lineHeight: '1.5', whiteSpace: 'pre-line', margin: 0 }}>
+                                {error}
+                            </p>
+                        </div>
+                    ) : (
+                        <>
+                            <div
+                                id={containerId}
+                                style={{ width: '100%', height: '100%', overflow: 'hidden' }}
+                            />
+                            {!detected && ready && (
+                                <div style={{
+                                    position: 'absolute', inset: 0,
+                                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                    pointerEvents: 'none', zIndex: 5
+                                }}>
+                                    <div style={{
+                                        width: '90%',
+                                        height: '100px',
+                                        border: '2px solid rgba(255,255,255,0.8)',
+                                        borderRadius: '6px',
+                                        boxShadow: '0 0 0 9999px rgba(0,0,0,0.3)',
+                                        position: 'relative'
+                                    }}>
+                                        <div style={{
+                                            position: 'absolute', left: '4px', right: '4px', height: '2px',
+                                            backgroundColor: '#16a34a',
+                                            animation: 'scanline 1.8s ease-in-out infinite',
+                                            boxShadow: '0 0 6px #16a34a'
+                                        }} />
+                                    </div>
+                                </div>
+                            )}
+                            {!ready && !error && (
+                                <div style={{
+                                    position: 'absolute', inset: 0, backgroundColor: '#000',
+                                    display: 'flex', flexDirection: 'column',
+                                    alignItems: 'center', justifyContent: 'center', gap: '8px',
+                                    zIndex: 6
+                                }}>
+                                    <div style={{
+                                        width: '28px', height: '28px', border: '3px solid #374151',
+                                        borderTopColor: '#16a34a', borderRadius: '50%',
+                                        animation: 'spin 0.8s linear infinite'
+                                    }} />
+                                    <p style={{ color: '#9ca3af', fontSize: '12px', margin: 0 }}>Starting camera...</p>
+                                </div>
+                            )}
+                            {detected && (
+                                <div style={{
+                                    position: 'absolute', inset: 0, backgroundColor: 'rgba(22,163,74,0.15)',
+                                    display: 'flex', flexDirection: 'column',
+                                    alignItems: 'center', justifyContent: 'center', gap: '6px',
+                                    zIndex: 7
+                                }}>
+                                    <div style={{
+                                        backgroundColor: '#16a34a', borderRadius: '50%',
+                                        width: '44px', height: '44px',
+                                        display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                        boxShadow: '0 4px 12px rgba(22,163,74,0.4)'
+                                    }}>
+                                        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#ffffff" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+                                            <polyline points="20 6 9 17 4 12" />
+                                        </svg>
+                                    </div>
+                                    <p style={{ color: '#ffffff', fontWeight: '700', fontSize: '13px', margin: 0 }}>
+                                        Detected: {detected}
+                                    </p>
+                                </div>
+                            )}
+                        </>
+                    )}
+                </div>
+                {/* Embedded controls footer */}
+                <div style={{ padding: '8px 12px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#f9fafb', borderTop: '1px solid #e5e7eb' }}>
+                    <span style={{ fontSize: '11px', color: '#6b7280' }}>
+                        {detected ? 'Scan complete' : 'Align barcode in frame'}
+                    </span>
+                    {detected && (
+                        <button onClick={handleRetry} style={{
+                            backgroundColor: '#ffffff', border: '1px solid #d1d5db',
+                            borderRadius: '4px', padding: '4px 10px',
+                            fontSize: '11px', fontWeight: '500', cursor: 'pointer', color: '#374151'
+                        }}>
+                            Rescan
+                        </button>
+                    )}
+                </div>
+                <style>{`
+                    @keyframes scanline {
+                        0%   { top: 8px; }
+                        50%  { top: calc(100% - 10px); }
+                        100% { top: 8px; }
+                    }
+                    @keyframes spin {
+                        to { transform: rotate(360deg); }
+                    }
+                    #${containerId} video {
+                        width: 100% !important;
+                        height: 100% !important;
+                        object-fit: cover !important;
+                    }
+                    #qr-shaded-region {
+                        display: none !important;
+                    }
+                `}</style>
+            </div>
+        );
+    }
 
     return (
         <div style={{
@@ -265,7 +414,7 @@ export default function BarcodeScanner({ onDetected, onClose, active, selectedDe
                 {/* Header */}
                 <div style={{
                     display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-                    padding: '16px 20px', borderBottom: '1px solid #e5e7eb'
+                    padding: '16px 20px', borderBottom: '1px solid #e5e7eb', marginBottom: '8px'
                 }}>
                     <div>
                         <div style={{ fontWeight: '700', fontSize: '15px', color: '#111827' }}>
@@ -284,6 +433,42 @@ export default function BarcodeScanner({ onDetected, onClose, active, selectedDe
                             display: 'flex', alignItems: 'center', justifyContent: 'center'
                         }}
                     >✕</button>
+                </div>
+
+                {/* Scan Mode Switcher */}
+                <div style={{
+                    display: 'flex',
+                    backgroundColor: '#f3f4f6',
+                    padding: '4px',
+                    margin: '0 20px 12px 20px',
+                    borderRadius: '8px',
+                    gap: '2px'
+                }}>
+                    {([
+                        { id: 'linear', label: '1D Barcode' },
+                        { id: 'square', label: 'QR Code' },
+                        { id: 'full', label: 'Full Feed' }
+                    ] as const).map(mode => (
+                        <button
+                            key={mode.id}
+                            onClick={() => setScanMode(mode.id)}
+                            style={{
+                                flex: 1,
+                                padding: '6px 8px',
+                                fontSize: '12px',
+                                fontWeight: '600',
+                                border: 'none',
+                                borderRadius: '6px',
+                                cursor: 'pointer',
+                                backgroundColor: scanMode === mode.id ? '#ffffff' : 'transparent',
+                                color: scanMode === mode.id ? '#16a34a' : '#6b7280',
+                                boxShadow: scanMode === mode.id ? '0 1px 3px rgba(0,0,0,0.1)' : 'none',
+                                transition: 'all 0.15s ease'
+                            }}
+                        >
+                            {mode.label}
+                        </button>
+                    ))}
                 </div>
 
                 {/* Video / Error area */}
@@ -314,7 +499,7 @@ export default function BarcodeScanner({ onDetected, onClose, active, selectedDe
                         <>
                             {/* html5-qrcode reader element */}
                             <div
-                                id="scanner-reader-container"
+                                id={containerId}
                                 style={{ width: '100%', height: '100%', overflow: 'hidden' }}
                             />
 
@@ -326,13 +511,14 @@ export default function BarcodeScanner({ onDetected, onClose, active, selectedDe
                                     pointerEvents: 'none', zIndex: 5
                                 }}>
                                     <div style={{
-                                        width: '90%',
-                                        maxWidth: '460px',
-                                        height: '140px',
+                                        width: scanMode === 'linear' ? '90%' : scanMode === 'square' ? '250px' : '96%',
+                                        maxWidth: scanMode === 'linear' ? '460px' : scanMode === 'square' ? '250px' : '96%',
+                                        height: scanMode === 'linear' ? '120px' : scanMode === 'square' ? '250px' : '86%',
                                         border: '2px solid rgba(255,255,255,0.8)',
                                         borderRadius: '8px',
                                         boxShadow: '0 0 0 9999px rgba(0,0,0,0.35)',
-                                        position: 'relative'
+                                        position: 'relative',
+                                        transition: 'all 0.25s cubic-bezier(0.4, 0, 0.2, 1)'
                                     }}>
                                         {/* Corner markers */}
                                         {[
@@ -402,43 +588,7 @@ export default function BarcodeScanner({ onDetected, onClose, active, selectedDe
                                 </div>
                             )}
 
-                            {/* File decoding or error overlay */}
-                            {(decodingFile || fileError) && (
-                                <div style={{
-                                    position: 'absolute', inset: 0, backgroundColor: 'rgba(0,0,0,0.85)',
-                                    display: 'flex', flexDirection: 'column',
-                                    alignItems: 'center', justifyContent: 'center', padding: '24px',
-                                    textAlign: 'center', zIndex: 8
-                                }}>
-                                    {decodingFile ? (
-                                        <>
-                                            <div style={{
-                                                width: '36px', height: '36px', border: '3px solid #374151',
-                                                borderTopColor: '#16a34a', borderRadius: '50%',
-                                                animation: 'spin 0.8s linear infinite', marginBottom: '12px'
-                                            }} />
-                                            <p style={{ color: '#ffffff', fontSize: '13px', margin: 0 }}>Analyzing barcode image...</p>
-                                        </>
-                                    ) : (
-                                        <>
-                                            <div style={{ fontSize: '20px', fontWeight: 'bold', color: '#ef4444', marginBottom: '8px' }}>Error</div>
-                                            <p style={{ color: '#ffffff', fontSize: '13px', lineHeight: '1.5', margin: '0 0 16px 0' }}>
-                                                {fileError}
-                                            </p>
-                                            <button
-                                                onClick={() => setFileError(null)}
-                                                style={{
-                                                    backgroundColor: '#16a34a', color: '#fff',
-                                                    border: 'none', borderRadius: '6px', padding: '8px 16px',
-                                                    fontSize: '12px', fontWeight: '600', cursor: 'pointer'
-                                                }}
-                                            >
-                                                Try scanning again
-                                            </button>
-                                        </>
-                                    )}
-                                </div>
-                            )}
+
                         </>
                     )}
                 </div>
@@ -447,38 +597,50 @@ export default function BarcodeScanner({ onDetected, onClose, active, selectedDe
                 <div style={{
                     padding: '14px 20px',
                     borderTop: '1px solid #e5e7eb',
-                    display: 'flex', justifyContent: 'space-between', alignItems: 'center'
+                    display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '12px'
                 }}>
-                    <p style={{ margin: 0, fontSize: '12px', color: '#6b7280' }}>
-                        {detected
-                            ? 'Processing barcode...'
-                            : ready
-                                ? 'Point camera at barcode — auto-detects instantly'
-                                : error ? 'Camera unavailable' : 'Initialising...'}
-                    </p>
-                    
-                    {!detected && (
-                        <div>
-                            <button
-                                onClick={handleTriggerFileUpload}
-                                style={{
-                                    backgroundColor: '#ffffff', border: '1px solid #d1d5db',
-                                    borderRadius: '6px', padding: '6px 14px',
-                                    fontSize: '12px', fontWeight: '500', cursor: 'pointer', color: '#374151',
-                                    display: 'inline-flex', alignItems: 'center', gap: '6px'
-                                }}
-                            >
-                                Upload Image
+                    <div style={{ display: 'flex', flexDirection: 'column' }}>
+                        <p style={{ margin: 0, fontSize: '12px', color: '#6b7280' }}>
+                            {detected
+                                ? 'Processing barcode...'
+                                : ready
+                                    ? 'Point camera at barcode — auto-detects instantly'
+                                    : error ? 'Camera unavailable' : 'Initialising...'}
+                        </p>
+
+                        <div style={{ marginTop: '8px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                            <div style={{ fontSize: '12px', color: scannerActivity ? '#16a34a' : '#6b7280', fontWeight: 600 }}>
+                                {scannerActivity ? 'Scanner activity detected' : (btDevices.length > 0 || hidDevices.length > 0) ? 'Scanner connected' : 'No scanner detected'}
+                            </div>
+
+                            <button onClick={detectBluetoothDevices} style={{
+                                backgroundColor: '#ffffff', border: '1px solid #d1d5db',
+                                borderRadius: '6px', padding: '6px 10px', fontSize: '12px', cursor: 'pointer'
+                            }}>
+                                Detect Bluetooth
                             </button>
-                            <input
-                                ref={fileInputRef}
-                                type="file"
-                                accept="image/*"
-                                onChange={handleFileChange}
-                                style={{ display: 'none' }}
-                            />
+
+                            <button onClick={detectHidDevices} style={{
+                                backgroundColor: '#ffffff', border: '1px solid #d1d5db',
+                                borderRadius: '6px', padding: '6px 10px', fontSize: '12px', cursor: 'pointer'
+                            }}>
+                                Detect HID
+                            </button>
                         </div>
-                    )}
+
+                        {(btDevices.length > 0 || hidDevices.length > 0) && (
+                            <div style={{ marginTop: '8px', fontSize: '12px', color: '#4b5563' }}>
+                                {btDevices.length > 0 && (
+                                    <div>Bluetooth: {btDevices.map(d => d.name).join(', ')}</div>
+                                )}
+                                {hidDevices.length > 0 && (
+                                    <div>HID: {hidDevices.map(d => d.productName || `${d.vendorId}:${d.productId}`).join(', ')}</div>
+                                )}
+                            </div>
+                        )}
+                    </div>
+
+
 
                     {detected && (
                         <button onClick={handleRetry} style={{
@@ -501,7 +663,7 @@ export default function BarcodeScanner({ onDetected, onClose, active, selectedDe
                 @keyframes spin {
                     to { transform: rotate(360deg); }
                 }
-                #scanner-reader-container video {
+                #${containerId} video {
                     width: 100% !important;
                     height: 100% !important;
                     object-fit: cover !important;

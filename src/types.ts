@@ -1,6 +1,10 @@
 export interface SkyNetParcelData {
     trackingNumber: string;
     recipientName: string;
+    recipientPhone?: string;
+    recipientAddress?: string;
+    senderName?: string;
+    senderAddress?: string;
     province: string;
     district: string;
     city: string;
@@ -8,6 +12,13 @@ export interface SkyNetParcelData {
     value?: string;
     account?: string;
     apiSync?: string;
+    goodsDesc?: string;
+    mawbRef?: string;
+    mawbCarrier?: string;
+    mawbFlight?: string;
+    mawbBags?: number;
+    serviceType?: string;
+    businessType?: string;
 }
 
 export interface ZoneRule {

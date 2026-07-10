@@ -4,6 +4,10 @@ import path from 'path';
 import os from 'os';
 import { SkyNetParcelData, ZoneRule } from '@/types';
 
+const cleanAddress = (...parts: (string | null | undefined)[]) => {
+    return parts.filter(p => p && p.trim() !== "").map(p => p.trim()).join(", ");
+};
+
 export async function POST(request: Request) {
     try {
         const { trackingNumber } = await request.json();
@@ -12,62 +16,191 @@ export async function POST(request: Request) {
             return NextResponse.json({ success: false, error: 'Missing tracking number' }, { status: 400 });
         }
 
-        const apiKey = process.env.SKYNET_API_KEY || 'MOCK_TOKEN_SECRET';
+        const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+        const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 
-        // Parcel lookup — connect to real Skynet API here when available.
-        // For now: empty map means all barcodes return a "not found" error.
-        const parcelDatabase: { [key: string]: SkyNetParcelData } = {};
+        if (!supabaseUrl || !anonKey) {
+            return NextResponse.json({ success: false, error: 'Database environment variables are not configured.' }, { status: 500 });
+        }
 
-        let skynetData = parcelDatabase[trackingNumber];
+        const shipmentRef = parseInt(trackingNumber.trim(), 10);
+        if (isNaN(shipmentRef)) {
+            return NextResponse.json({ success: false, error: 'Invalid barcode format. Expected a numeric shipment reference number.' }, { status: 400 });
+        }
 
-        if (!skynetData) {
-            // Barcode not found in the system — return a real error, not fake data
+        // 1. Fetch service provider allocation
+        const spaRes = await fetch(`${supabaseUrl}/rest/v1/service_provider_allocation?shipment_ref=eq.${shipmentRef}`, {
+            headers: {
+                "apikey": anonKey,
+                "Authorization": `Bearer ${anonKey}`
+            }
+        });
+        const allocations = await spaRes.json();
+        if (!allocations || allocations.length === 0) {
             return NextResponse.json({
                 success: false,
-                error: `Barcode ${trackingNumber} not found in the system. Please verify the tracking number and try again.`
+                error: `Barcode ${trackingNumber} not found in service provider allocations. Please check the shipment reference.`
             }, { status: 404 });
         }
 
-        // 2. Load Local Zone and Allocation Rule configurations
-        const configPath = path.join(process.cwd(), 'src', 'data', 'configuration.json');
-        const configRaw = fs.readFileSync(configPath, 'utf-8');
-        const config = JSON.parse(configRaw);
+        const allocation = allocations[0];
 
-        // 3. Perform Zone Lookup Mapping
-        // Look for matching city first (case-insensitive)
-        const match = config.zoneMappings.find(
-            (m: any) =>
-                m.city.toLowerCase() === skynetData.city.toLowerCase()
-        );
+        // 2. Fetch shipment details
+        const shipRes = await fetch(`${supabaseUrl}/rest/v1/shipments?reference_number=eq.${shipmentRef}`, {
+            headers: {
+                "apikey": anonKey,
+                "Authorization": `Bearer ${anonKey}`
+            }
+        });
+        const shipments = await shipRes.json();
+        const shipment = shipments && shipments[0];
+        if (!shipment) {
+            return NextResponse.json({
+                success: false,
+                error: `Shipment details not found for reference number ${shipmentRef} in database.`
+            }, { status: 404 });
+        }
 
-        // Map zones or use a default zone.
-        // In the screenshot, Kattankudy maps to "Zone C". 
-        // Let's make sure Kattankudy maps to Zone C or matches configuration.
-        // Let's check configuration: configuration.json maps Kattankudy to Zone-E02.
-        // To match the screenshot exactly (which displays Zone C), we can translate Zone-E02 to "Zone C" 
-        // or update configuration.json later, or map it. Let's make it map nicely.
-        const assignedZoneRaw = match ? match.zoneName : 'Default-Zone';
-        const assignedZone = assignedZoneRaw === 'Zone-E02' ? 'Zone C' : assignedZoneRaw;
-
-        // 4. Run Weighted Allocation Engine
-        // Use Zone C or the mapped zone name for rule lookup
-        const lookupZoneKey = assignedZone === 'Zone C' ? 'Zone-E02' : assignedZone;
-        const rules = config.allocationRules[lookupZoneKey] || [
-            { partnerCode: 'Domex', weightPercentage: 100 }
-        ];
-
-        // Select partner based on configured percentage probability split
-        const roll = Math.floor(Math.random() * 100) + 1; // 1 to 100
-        let accumulatedWeight = 0;
-        let assignedPartner = rules[0].partnerCode;
-
-        for (const rule of rules) {
-            accumulatedWeight += rule.weightPercentage;
-            if (roll <= accumulatedWeight) {
-                assignedPartner = rule.partnerCode;
-                break;
+        // 3. Fetch service provider
+        let providerName = "Unknown";
+        if (allocation.service_provider) {
+            const spRes = await fetch(`${supabaseUrl}/rest/v1/service_providers?id=eq.${allocation.service_provider}`, {
+                headers: {
+                    "apikey": anonKey,
+                    "Authorization": `Bearer ${anonKey}`
+                }
+            });
+            const providers = await spRes.json();
+            if (providers && providers[0]) {
+                providerName = providers[0].name || "Unknown";
             }
         }
+
+        // Normalize provider name (e.g. DOMEX -> Domex, PickMe -> PickMe) for UI bin routing compatibility
+        let assignedPartner = providerName;
+        if (providerName.toLowerCase() === 'pickme') assignedPartner = 'PickMe';
+        else if (providerName.toLowerCase() === 'domex') assignedPartner = 'Domex';
+        else if (providerName.toLowerCase() === 'pronto') assignedPartner = 'Pronto';
+
+        // 4. Resolve city mapping details
+        let mappedCity = null;
+        let cityName = shipment.consignee_location_name || "";
+        let districtName = shipment.consignee_address_3 || "";
+
+        if (allocation.mapped_city) {
+            const cityRes = await fetch(`${supabaseUrl}/rest/v1/district_city_mapping?id=eq.${allocation.mapped_city}`, {
+                headers: {
+                    "apikey": anonKey,
+                    "Authorization": `Bearer ${anonKey}`
+                }
+            });
+            const cities = await cityRes.json();
+            if (cities && cities[0]) {
+                mappedCity = cities[0];
+                cityName = mappedCity.city || cityName;
+                districtName = mappedCity.area_name || districtName;
+            }
+        } else if (cityName) {
+            // Attempt to dynamically find a city mapping
+            const cityRes = await fetch(`${supabaseUrl}/rest/v1/district_city_mapping?city=ilike.${cityName}`, {
+                headers: {
+                    "apikey": anonKey,
+                    "Authorization": `Bearer ${anonKey}`
+                }
+            });
+            const cities = await cityRes.json();
+            if (cities && cities[0]) {
+                mappedCity = cities[0];
+                cityName = mappedCity.city;
+                districtName = mappedCity.area_name;
+
+                // Silently update the database to link mapped_city permanently
+                try {
+                    await fetch(`${supabaseUrl}/rest/v1/service_provider_allocation?id=eq.${allocation.id}`, {
+                        method: "PATCH",
+                        headers: {
+                            "apikey": anonKey,
+                            "Authorization": `Bearer ${anonKey}`,
+                            "Content-Type": "application/json",
+                            "Prefer": "return=minimal"
+                        },
+                        body: JSON.stringify({ mapped_city: mappedCity.id })
+                    });
+                } catch (dbErr) {
+                    console.error("Failed to update mapped_city in DB:", dbErr);
+                }
+            }
+        }
+
+        // 5. Fetch zone details
+        let assignedZone = "Default-Zone";
+        if (mappedCity && mappedCity.zone) {
+            const zoneRes = await fetch(`${supabaseUrl}/rest/v1/zones?id=eq.${mappedCity.zone}`, {
+                headers: {
+                    "apikey": anonKey,
+                    "Authorization": `Bearer ${anonKey}`
+                }
+            });
+            const zones = await zoneRes.json();
+            if (zones && zones[0]) {
+                assignedZone = zones[0].zone_name || "Default-Zone";
+            }
+        }
+
+        // Translate specific zone codes if needed to match styling
+        if (assignedZone === 'Zone-E02') {
+            assignedZone = 'Zone C';
+        }
+
+        // 6. Fetch MAWB details if reference is present
+        let mawbDetails = null;
+        if (allocation.mawb_ref) {
+            const mawbRes = await fetch(`${supabaseUrl}/rest/v1/mawb?mawb_reference=eq.${allocation.mawb_ref}`, {
+                headers: {
+                    "apikey": anonKey,
+                    "Authorization": `Bearer ${anonKey}`
+                }
+            });
+            const mawbs = await mawbRes.json();
+            if (mawbs && mawbs[0]) {
+                mawbDetails = mawbs[0];
+            }
+        }
+
+        const skynetData: SkyNetParcelData = {
+            trackingNumber: shipment.reference_number.toString(),
+            recipientName: shipment.consignee_name || "Unknown Recipient",
+            recipientPhone: shipment.consignee_phone || "No Phone",
+            recipientAddress: cleanAddress(
+                shipment.consignee_address_1,
+                shipment.consignee_address_2,
+                shipment.consignee_address_3,
+                shipment.consignee_address_4,
+                shipment.consignee_address_5
+            ),
+            senderName: shipment.consignor_name || "Unknown Sender",
+            senderAddress: cleanAddress(
+                shipment.consignor_address_1,
+                shipment.consignor_address_2,
+                shipment.consignor_address_3,
+                shipment.consignor_address_4,
+                shipment.consignor_address_5
+            ),
+            province: shipment.consignee_state || "Unknown Province",
+            district: districtName || "Unknown District",
+            city: cityName || "Unknown City",
+            weight: shipment.weight_measure?.toUpperCase() === 'G' ? (shipment.weight || 0) / 1000 : (shipment.weight || 0),
+            value: shipment.customs_value ? `${shipment.customs_currency_code || 'LKR'} ${shipment.customs_value.toFixed(2)}` : undefined,
+            account: shipment.shipper_code || undefined,
+            apiSync: allocation.validated ? "Validated" : "Pending",
+            goodsDesc: shipment.goods_desc || undefined,
+            mawbRef: allocation.mawb_ref || undefined,
+            mawbCarrier: mawbDetails ? mawbDetails.carrier : undefined,
+            mawbFlight: mawbDetails ? mawbDetails.travel_id : undefined,
+            mawbBags: mawbDetails ? mawbDetails.declared_bags : undefined,
+            serviceType: shipment.service_type || undefined,
+            businessType: shipment.business_type || undefined
+        };
 
         return NextResponse.json({
             success: true,
