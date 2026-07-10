@@ -35,4 +35,5 @@ export interface AllocationResponse {
     assignedZone?: string;
     assignedPartner?: string;
     error?: string;
+    missedFirstScan?: boolean;
 }

@@ -4,7 +4,7 @@ import { useState, useRef, useEffect, useCallback } from 'react';
 import { AllocationResponse, SkyNetParcelData } from '@/types';
 
 export default function WorkstationDashboard() {
-    const [activeTab, setActiveTab] = useState<'scan' | 'verify' | 'config' | 'reports'>('scan');
+    const [activeTab, setActiveTab] = useState<'first-scan' | 'second-scan' | 'verify' | 'config' | 'reports'>('first-scan');
     const [scannedToday, setScannedToday] = useState<number>(0);
     const [timeString, setTimeString] = useState<string>('');
     const [scannerConnected, setScannerConnected] = useState<boolean | null>(null); // null = unknown, true = connected, false = no scanner
@@ -15,9 +15,20 @@ export default function WorkstationDashboard() {
     const [testScannerSpeed, setTestScannerSpeed] = useState<string>('');
     const [testKeyTimes, setTestKeyTimes] = useState<number[]>([]);
 
+    // Tab 1: Box Unsealing (First Scan)
+    const [mawbsList, setMawbsList] = useState<any[]>([]);
+    const [firstScanMawb, setFirstScanMawb] = useState('');
+    const [firstScanBags, setFirstScanBags] = useState<{ bagNumber: string; expectedCount: number }[]>([]);
+    const [firstScanSelectedBag, setFirstScanSelectedBag] = useState('');
+    const [firstScanExpected, setFirstScanExpected] = useState<number | ''>('');
+    const [firstScanInput, setFirstScanInput] = useState('');
+    const [firstScanLastScanned, setFirstScanLastScanned] = useState('');
+    const [firstScanHistory, setFirstScanHistory] = useState<Array<{ trackingNumber: string; recipientName: string; city: string; timestamp: string }>>([]);
+    const [firstScanStatus, setFirstScanStatus] = useState<'READY' | 'FETCHING' | 'SUCCESS' | 'ERROR'>('READY');
+    const [firstScanError, setFirstScanError] = useState('');
+    const [unsealedBoxes, setUnsealedBoxes] = useState<Array<{ mawb: string; bagNumber?: string; expected: number; scanned: number; timestamp: string }>>([]);
 
-
-    // Tab 1: Scan & Allocate
+    // Tab 2: Scan & Allocate (Second Scan)
     const [barcodeInput, setBarcodeInput] = useState('');
     const [lastScanned, setLastScanned] = useState('');
     const [currentScan, setCurrentScan] = useState<AllocationResponse | null>(null);
@@ -33,6 +44,9 @@ export default function WorkstationDashboard() {
     const [verifyStatus, setVerifyStatus] = useState<'READY' | 'FETCHING' | 'MATCH' | 'MISMATCH' | 'ERROR'>('READY');
     const [verifyErrorMessage, setVerifyErrorMessage] = useState('');
     const [binCounts, setBinCounts] = useState({ PickMe: 0, Domex: 0, Pronto: 0 });
+    const [duplicateModal, setDuplicateModal] = useState<{ barcode: string; type: 'allocate' | 'verify' } | null>(null);
+    const [confirmFinishModal, setConfirmFinishModal] = useState(false);
+    const [successModal, setSuccessModal] = useState<{ title: string; message: string } | null>(null);
     const [verifiedCount, setVerifiedCount] = useState(0);
     const [mismatchCount, setMismatchCount] = useState(0);
     const [pendingDispatch, setPendingDispatch] = useState(0);
@@ -55,6 +69,7 @@ export default function WorkstationDashboard() {
     const [newCity, setNewCity] = useState('');
     const [newZone, setNewZone] = useState('');
 
+    const firstScanInputRef = useRef<HTMLInputElement>(null);
     const scanInputRef = useRef<HTMLInputElement>(null);
     const verifyInputRef = useRef<HTMLInputElement>(null);
 
@@ -100,11 +115,186 @@ export default function WorkstationDashboard() {
         return () => window.removeEventListener('keydown', handleKeyDown);
     }, []);
 
+    // Fetch MAWBs list and existing unsealed bags on mount
+    useEffect(() => {
+        fetch('/api/allocate?mawbs=true')
+            .then(res => res.json())
+            .then(data => {
+                if (data.success && data.mawbs) {
+                    setMawbsList(data.mawbs);
+                }
+            }).catch(console.error);
+
+        fetch('/api/allocate?getUnsealedBags=true')
+            .then(res => res.json())
+            .then(data => {
+                if (data.success && data.unsealedBags) {
+                    const mapped = data.unsealedBags.map((ub: any) => ({
+                        mawb: ub.mawb_ref,
+                        bagNumber: ub.bag_number,
+                        expected: ub.expected_count,
+                        scanned: ub.scanned_count,
+                        timestamp: new Date(ub.created_at).toLocaleTimeString()
+                    }));
+                    setUnsealedBoxes(mapped);
+                }
+            }).catch(console.error);
+    }, []);
+
+    // Fetch bags for selected MAWB
+    useEffect(() => {
+        if (!firstScanMawb) {
+            setFirstScanBags([]);
+            setFirstScanSelectedBag('');
+            setFirstScanExpected('');
+            return;
+        }
+
+        const fetchBags = async () => {
+            try {
+                const res = await fetch(`/api/allocate?getBags=true&mawbRef=${firstScanMawb}`);
+                const data = await res.json();
+                if (data.success) {
+                    setFirstScanBags(data.bags || []);
+                } else {
+                    console.error("Failed to load bags:", data.error);
+                }
+            } catch (err) {
+                console.error("Error fetching bags:", err);
+            }
+        };
+
+        fetchBags();
+        setFirstScanSelectedBag('');
+        setFirstScanExpected('');
+        setFirstScanHistory([]);
+    }, [firstScanMawb]);
+
+    // Update expected count when bag is selected
+    useEffect(() => {
+        if (!firstScanSelectedBag) {
+            setFirstScanExpected('');
+            return;
+        }
+        const selected = firstScanBags.find(b => b.bagNumber === firstScanSelectedBag);
+        if (selected) {
+            setFirstScanExpected(selected.expectedCount);
+        } else {
+            setFirstScanExpected('');
+        }
+        setFirstScanHistory([]);
+    }, [firstScanSelectedBag, firstScanBags]);
+
     // Focus input
     useEffect(() => {
-        if (activeTab === 'scan') scanInputRef.current?.focus();
+        if (duplicateModal) return; // Prevent focus stealing when duplicate warning is open
+        if (activeTab === 'first-scan') firstScanInputRef.current?.focus();
+        else if (activeTab === 'second-scan') scanInputRef.current?.focus();
         else if (activeTab === 'verify') verifyInputRef.current?.focus();
-    }, [activeTab, status, verifyStatus]);
+    }, [activeTab, status, verifyStatus, duplicateModal, firstScanStatus]);
+
+    // Handle keypresses (Enter, Space, Escape) to dismiss duplicate warning modal and refocus
+    useEffect(() => {
+        if (!duplicateModal) return;
+        const handleModalKey = (e: KeyboardEvent) => {
+            if (e.key === 'Enter' || e.key === 'Escape' || e.key === ' ') {
+                e.preventDefault();
+                setDuplicateModal(null);
+                setTimeout(() => {
+                    if (activeTab === 'first-scan') firstScanInputRef.current?.focus();
+                    else if (activeTab === 'second-scan') scanInputRef.current?.focus();
+                    else if (activeTab === 'verify') verifyInputRef.current?.focus();
+                }, 50);
+            }
+        };
+        window.addEventListener('keydown', handleModalKey);
+        return () => window.removeEventListener('keydown', handleModalKey);
+    }, [duplicateModal, activeTab]);
+
+    const handleConfirmFinish = async () => {
+        if (!firstScanMawb || !firstScanSelectedBag || firstScanExpected === '') return;
+
+        const isMatch = firstScanHistory.length === Number(firstScanExpected);
+        if (!isMatch) {
+            setFirstScanError("Cannot close session: Scanned count does not match expected database count.");
+            setConfirmFinishModal(false);
+            return;
+        }
+
+        try {
+            setFirstScanStatus('FETCHING');
+            const response = await fetch('/api/allocate', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    stage: 'finish-bag',
+                    mawbRef: firstScanMawb,
+                    bagNumber: firstScanSelectedBag,
+                    expectedCount: Number(firstScanExpected),
+                    scannedCount: firstScanHistory.length,
+                    status: 'COUNTED'
+                }),
+            });
+            const data = await response.json();
+            if (data.success) {
+                setUnsealedBoxes(prev => [
+                    {
+                        mawb: firstScanMawb,
+                        bagNumber: firstScanSelectedBag,
+                        expected: Number(firstScanExpected),
+                        scanned: firstScanHistory.length,
+                        timestamp: new Date().toLocaleTimeString()
+                    },
+                    ...prev
+                ]);
+
+                setSuccessModal({
+                    title: "Bag Counted & Saved",
+                    message: `Bag "${firstScanSelectedBag}" has been successfully unsealed and stored in database. Count: ${firstScanHistory.length} parcels.`
+                });
+
+                handleClearFirstScan();
+            } else {
+                setFirstScanError(data.error || "Failed to save unsealing log to database.");
+            }
+        } catch (err: any) {
+            setFirstScanError(err.message || "Failed to connect to server.");
+        } finally {
+            setFirstScanStatus('READY');
+            setConfirmFinishModal(false);
+        }
+    };
+
+    // Keyboard wedge support for confirmFinishModal and successModal
+    useEffect(() => {
+        if (!confirmFinishModal && !successModal) return;
+        const handleModalKey = (e: KeyboardEvent) => {
+            if (successModal) {
+                if (e.key === 'Enter' || e.key === 'Escape' || e.key === ' ') {
+                    e.preventDefault();
+                    setSuccessModal(null);
+                    setTimeout(() => {
+                        if (activeTab === 'first-scan') firstScanInputRef.current?.focus();
+                        else if (activeTab === 'second-scan') scanInputRef.current?.focus();
+                        else if (activeTab === 'verify') verifyInputRef.current?.focus();
+                    }, 50);
+                }
+            } else if (confirmFinishModal) {
+                if (e.key === 'Enter') {
+                    e.preventDefault();
+                    handleConfirmFinish();
+                } else if (e.key === 'Escape') {
+                    e.preventDefault();
+                    setConfirmFinishModal(false);
+                    setTimeout(() => {
+                        if (activeTab === 'first-scan') firstScanInputRef.current?.focus();
+                    }, 50);
+                }
+            }
+        };
+        window.addEventListener('keydown', handleModalKey);
+        return () => window.removeEventListener('keydown', handleModalKey);
+    }, [confirmFinishModal, successModal, activeTab, firstScanMawb, firstScanExpected, firstScanHistory]);
 
 
 
@@ -137,10 +327,92 @@ export default function WorkstationDashboard() {
         setTestKeyTimes([]);
     };
 
+    const handleFirstScanSubmit = async (e: React.FormEvent) => {
+        e.preventDefault();
+        const barcode = firstScanInput.trim();
+        if (!barcode || !firstScanMawb) return;
+
+        // Auto select input text so next scan overwrites it
+        setTimeout(() => {
+            firstScanInputRef.current?.select();
+        }, 50);
+
+        // Check for duplicates in the current history session
+        const isDuplicate = firstScanHistory.some(item => item.trackingNumber === barcode);
+        if (isDuplicate) {
+            setFirstScanError(`Duplicate scan: Barcode "${barcode}" has already been scanned in this box.`);
+            setFirstScanStatus('ERROR');
+            setDuplicateModal({ barcode, type: 'allocate' });
+            return;
+        }
+
+        setFirstScanStatus('FETCHING');
+        setFirstScanError('');
+        setFirstScanLastScanned(barcode);
+
+        try {
+            const response = await fetch('/api/allocate', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    trackingNumber: barcode,
+                    stage: 'first',
+                    mawbRef: firstScanMawb
+                }),
+            });
+            const data: AllocationResponse = await response.json();
+            if (data.success && data.parcel) {
+                const now = new Date();
+                const timeStr = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+                setFirstScanHistory(prev => [
+                    {
+                        trackingNumber: barcode,
+                        recipientName: data.parcel?.recipientName || 'Unknown Recipient',
+                        city: data.parcel?.city || 'Unknown City',
+                        timestamp: timeStr
+                    },
+                    ...prev
+                ]);
+                setScannedToday((prev) => prev + 1);
+                setFirstScanStatus('SUCCESS');
+            } else {
+                throw new Error(data.error || 'Unknown scan error');
+            }
+        } catch (err: any) {
+            setFirstScanError(err.message || 'API connection failure');
+            setFirstScanStatus('ERROR');
+        }
+    };
+
+    const handleClearFirstScan = () => {
+        setFirstScanSelectedBag('');
+        setFirstScanExpected('');
+        setFirstScanInput('');
+        setFirstScanLastScanned('');
+        setFirstScanHistory([]);
+        setFirstScanStatus('READY');
+        setFirstScanError('');
+    };
+
     const handleScanSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
         const barcode = barcodeInput.trim();
         if (!barcode) return;
+
+        // Auto select input text so next scan overwrites it
+        setTimeout(() => {
+            scanInputRef.current?.select();
+        }, 50);
+
+        // Duplicate scan check
+        const isDuplicate = history.some(item => item.parcel?.trackingNumber === barcode);
+        if (isDuplicate) {
+            setErrorMessage(`Duplicate scan: Barcode "${barcode}" has already been scanned today.`);
+            setStatus('ERROR');
+            setDuplicateModal({ barcode, type: 'allocate' });
+            return;
+        }
+
         setStatus('FETCHING');
         setErrorMessage('');
         setLastScanned(barcode);
@@ -148,7 +420,7 @@ export default function WorkstationDashboard() {
             const response = await fetch('/api/allocate', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ trackingNumber: barcode }),
+                body: JSON.stringify({ trackingNumber: barcode, stage: 'second' }),
             });
             const data: AllocationResponse = await response.json();
             if (data.success) {
@@ -175,6 +447,21 @@ export default function WorkstationDashboard() {
         e.preventDefault();
         const barcode = verifyBarcodeInput.trim();
         if (!barcode || !selectedBin) return;
+
+        // Auto select input text so next scan overwrites it
+        setTimeout(() => {
+            verifyInputRef.current?.select();
+        }, 50);
+
+        // Duplicate verification check
+        const isDuplicate = verifyHistory.some(item => item.trackingNumber === barcode);
+        if (isDuplicate) {
+            setVerifyErrorMessage(`Duplicate scan: Barcode "${barcode}" has already been verified.`);
+            setVerifyStatus('ERROR');
+            setDuplicateModal({ barcode, type: 'verify' });
+            return;
+        }
+
         setVerifyStatus('FETCHING');
         setVerifyErrorMessage('');
         setLastVerifyScanned(barcode);
@@ -411,6 +698,12 @@ export default function WorkstationDashboard() {
 
     return (
         <div style={{ fontFamily: 'system-ui, -apple-system, sans-serif', backgroundColor: '#f9fafb', minHeight: '100vh', padding: '24px 20px', boxSizing: 'border-box' }}>
+            <style dangerouslySetInnerHTML={{__html: `
+                .scan-input-blink {
+                    border: 2px solid #fca5a5 !important;
+                    box-shadow: 0 0 0 3px rgba(244, 63, 94, 0.15) !important;
+                }
+            `}} />
             <div style={{ height: '4px', backgroundColor: '#e21b22', width: '100%', position: 'fixed', top: 0, left: 0, zIndex: 2000 }} />
             <div style={{ maxWidth: '1080px', margin: '0 auto' }}>
 
@@ -463,7 +756,7 @@ export default function WorkstationDashboard() {
 
                 {/* ── TABS ── */}
                 <nav style={{ display: 'flex', gap: '8px', marginBottom: '20px', backgroundColor: '#ffffff', border: '1px solid #e5e7eb', borderRadius: '10px', padding: '6px', boxShadow: '0 2px 4px rgba(0,0,0,0.04)' }}>
-                    {(['scan', 'verify', 'config', 'reports'] as const)
+                    {(['first-scan', 'second-scan', 'verify', 'config', 'reports'] as const)
                         .filter(tab => tab !== 'config') // Comment out Zone config tab
                         .map((tab) => (
                             <button
@@ -483,16 +776,252 @@ export default function WorkstationDashboard() {
                                     transition: 'all 0.2s ease'
                                 }}
                             >
-                                {tab === 'scan' ? 'Scan & allocate' : tab === 'verify' ? 'Dispatch verify' : tab === 'config' ? 'Zone config' : 'Reports'}
+                                {tab === 'first-scan' ? '1st Scan: Box Unsealing' : tab === 'second-scan' ? '2nd Scan: LMD Allocation' : tab === 'verify' ? 'Dispatch verify' : tab === 'config' ? 'Zone config' : 'Reports'}
                             </button>
                         ))
                     }
                 </nav>
 
                 {/* ═══════════════════════════════════════════════════════
-                    TAB 1 — SCAN & ALLOCATE
+                    TAB 1 — BOX UNSEALING (FIRST SCAN)
                 ═══════════════════════════════════════════════════════ */}
-                {activeTab === 'scan' && (
+                {activeTab === 'first-scan' && (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+                        {firstScanError && (
+                            <div style={{ backgroundColor: '#fef2f2', border: '1px solid #fca5a5', color: '#dc2626', padding: '12px 16px', borderRadius: '8px', display: 'flex', alignItems: 'center', gap: '8px', fontSize: '14px', fontWeight: '500' }}>
+                                Scan Error: {firstScanError}
+                            </div>
+                        )}
+
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+                            {/* Setup & Scan Box Card */}
+                            <div style={card}>
+                                <div style={label}>Box Setup & Unsealing</div>
+                                <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', marginBottom: '20px' }}>
+                                    <div>
+                                        <label style={{ fontSize: '12px', fontWeight: '600', color: '#374151', display: 'block', marginBottom: '6px' }}>
+                                            Select MAWB (Master Air Waybill) *
+                                        </label>
+                                        <select
+                                            value={firstScanMawb}
+                                            onChange={(e) => setFirstScanMawb(e.target.value)}
+                                            style={{ ...inputStyle, width: '100%' }}
+                                        >
+                                            <option value="">-- Choose active MAWB reference --</option>
+                                            {mawbsList.map((m: any) => (
+                                                <option key={m.mawb_reference} value={m.mawb_reference}>
+                                                    {m.mawb_reference} ({m.carrier || 'Unknown Carrier'} - Declared Bags: {m.declared_bags || 0})
+                                                </option>
+                                            ))}
+                                            {mawbsList.length === 0 && (
+                                                <option value="603-70659761">603-70659761 (Fallback default)</option>
+                                            )}
+                                        </select>
+                                    </div>
+                                    <div>
+                                        <label style={{ fontSize: '12px', fontWeight: '600', color: '#374151', display: 'block', marginBottom: '6px' }}>
+                                            Select Bag Number *
+                                        </label>
+                                        <select
+                                            value={firstScanSelectedBag}
+                                            onChange={(e) => setFirstScanSelectedBag(e.target.value)}
+                                            disabled={!firstScanMawb}
+                                            style={{ ...inputStyle, width: '100%', backgroundColor: !firstScanMawb ? '#f3f4f6' : '#ffffff' }}
+                                        >
+                                            <option value="">-- Choose bag to unseal --</option>
+                                            {firstScanBags.map((b) => (
+                                                <option key={b.bagNumber} value={b.bagNumber}>
+                                                    {b.bagNumber} (Expected: {b.expectedCount} parcels)
+                                                </option>
+                                            ))}
+                                            {firstScanMawb && firstScanBags.length === 0 && (
+                                                <option value="" disabled>No bags found for this MAWB</option>
+                                            )}
+                                        </select>
+                                    </div>
+                                    <div>
+                                        <label style={{ fontSize: '12px', fontWeight: '600', color: '#374151', display: 'block', marginBottom: '6px' }}>
+                                            Expected Parcel Count in Selected Bag
+                                        </label>
+                                        <input
+                                            type="text"
+                                            value={firstScanExpected === '' ? '' : `${firstScanExpected} parcels`}
+                                            disabled
+                                            placeholder="Automatically resolved from shipments manifest..."
+                                            style={{ ...inputStyle, width: '100%', backgroundColor: '#f3f4f6', fontWeight: '700' }}
+                                        />
+                                    </div>
+                                </div>
+
+                                <div style={{ borderTop: '1px solid #f6f5f3ff', paddingTop: '16px' }}>
+                                    <div style={label}> Scan Barcode</div>
+                                    <form onSubmit={handleFirstScanSubmit} style={{ display: 'flex', gap: '8px', marginBottom: '10px' }}>
+                                        <input
+                                            ref={firstScanInputRef}
+                                            type="text"
+                                            value={firstScanInput}
+                                            onChange={(e) => {
+                                                const val = e.target.value;
+                                                if (firstScanLastScanned && val.startsWith(firstScanLastScanned) && val.length > firstScanLastScanned.length) {
+                                                    setFirstScanInput(val.slice(firstScanLastScanned.length));
+                                                    setFirstScanLastScanned('');
+                                                } else {
+                                                    setFirstScanInput(val);
+                                                }
+                                            }}
+                                            disabled={!firstScanMawb || firstScanExpected === ''}
+                                            placeholder={firstScanMawb ? "Scan box parcel barcode..." : "Select MAWB and enter count above first"}
+                                            className={(!firstScanMawb || firstScanExpected === '') ? '' : 'scan-input-blink'}
+                                            style={{ ...inputStyle, flex: 1, backgroundColor: (!firstScanMawb || firstScanExpected === '') ? '#f3f4f6' : '#ffffff' }}
+                                        />
+                                    </form>
+                                    {firstScanLastScanned && (
+                                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '10px' }}>
+                                            <div style={{ fontSize: '11px', color: '#6b7280', display: 'flex', gap: '4px', alignItems: 'center' }}>
+                                                <span>Last scanned:</span>
+                                                <span style={{ fontFamily: 'monospace', fontWeight: '700', backgroundColor: '#f3f4f6', padding: '1px 4px', borderRadius: '3px' }}>
+                                                    {firstScanLastScanned}
+                                                </span>
+                                            </div>
+                                        </div>
+                                    )}
+                                </div>
+                            </div>
+
+                            {/* Live Discrepancy & Verification Dashboard Card */}
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+                                <div style={card}>
+                                    <div style={{ ...label, marginBottom: '16px' }}>
+                                        COUNT VERIFICATION
+                                    </div>
+
+                                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', marginBottom: '8px' }}>
+                                        <div style={{ backgroundColor: '#f9fafb', border: '1px solid #e5e7eb', borderRadius: '8px', padding: '12px', textAlign: 'center' }}>
+                                            <div style={{ fontSize: '11px', color: '#6b7280', textTransform: 'uppercase', fontWeight: '600' }}>Expected</div>
+                                            <div style={{ fontSize: '28px', fontWeight: '800', color: '#111827' }}>
+                                                {firstScanExpected === '' ? '—' : firstScanExpected}
+                                            </div>
+                                        </div>
+                                        <div style={{ backgroundColor: '#f9fafb', border: '1px solid #e5e7eb', borderRadius: '8px', padding: '12px', textAlign: 'center' }}>
+                                            <div style={{ fontSize: '11px', color: '#6b7280', textTransform: 'uppercase', fontWeight: '600' }}>Scanned</div>
+                                            <div style={{ fontSize: '28px', fontWeight: '800', color: '#111827' }}>
+                                                {firstScanHistory.length}
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    {firstScanExpected !== '' && (
+                                        <div style={{
+                                            fontSize: '12px',
+                                            fontWeight: '600',
+                                            color: firstScanHistory.length === firstScanExpected
+                                                ? '#047857'
+                                                : firstScanHistory.length < firstScanExpected
+                                                    ? '#1d4ed8'
+                                                    : '#dc2626',
+                                            marginTop: '8px',
+                                            textAlign: 'center'
+                                        }}>
+                                            {firstScanHistory.length === firstScanExpected
+                                                ? '✓ Counts Match!'
+                                                : firstScanHistory.length < firstScanExpected
+                                                    ? `Remaining: ${Number(firstScanExpected) - firstScanHistory.length} left`
+                                                    : `Surplus: ${firstScanHistory.length - Number(firstScanExpected)} extra`}
+                                        </div>
+                                    )}
+
+                                    <div style={{ display: 'flex', gap: '8px', marginTop: '16px' }}>
+                                        <button
+                                            onClick={() => {
+                                                setConfirmFinishModal(true);
+                                            }}
+                                            disabled={firstScanHistory.length === 0 || firstScanExpected === '' || firstScanHistory.length !== firstScanExpected}
+                                            style={{
+                                                flex: 1,
+                                                backgroundColor: '#1f2937',
+                                                color: '#ffffff',
+                                                border: 'none',
+                                                borderRadius: '6px',
+                                                padding: '10px',
+                                                fontSize: '13px',
+                                                fontWeight: '600',
+                                                cursor: (firstScanHistory.length === 0 || firstScanExpected === '' || firstScanHistory.length !== firstScanExpected) ? 'not-allowed' : 'pointer',
+                                                opacity: (firstScanHistory.length === 0 || firstScanExpected === '' || firstScanHistory.length !== firstScanExpected) ? 0.5 : 1,
+                                                textAlign: 'center'
+                                            }}
+                                        >
+                                            Finish Box (Save & Close)
+                                        </button>
+                                        <button
+                                            onClick={() => {
+                                                if (window.confirm("Clear all scanned records for this box?")) {
+                                                    handleClearFirstScan();
+                                                }
+                                            }}
+                                            style={{
+                                                backgroundColor: '#ffffff',
+                                                border: '1px solid #d1d5db',
+                                                color: '#374151',
+                                                borderRadius: '6px',
+                                                padding: '10px 14px',
+                                                fontSize: '13px',
+                                                fontWeight: '600',
+                                                cursor: 'pointer'
+                                            }}
+                                        >
+                                            Reset
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        {/* Scanned History for this Box */}
+                        <div style={card}>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
+                                <div style={label}>Scanned Parcels in current box ({firstScanHistory.length})</div>
+                                <div style={{ display: 'flex', gap: '12px', fontSize: '11px', color: '#6b7280', fontWeight: '600' }}>
+                                    <span>Active MAWB: {firstScanMawb || '—'}</span>
+                                    {firstScanSelectedBag && <span>Bag: {firstScanSelectedBag}</span>}
+                                </div>
+                            </div>
+                            <div style={{ maxHeight: '300px', overflowY: 'auto' }}>
+                                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px', textAlign: 'left' }}>
+                                    <thead>
+                                        <tr style={{ borderBottom: '2px solid #e5e7eb' }}>
+                                            {['Timestamp', 'Tracking Number', 'Consignee', 'Destination City', 'Status'].map(h => (
+                                                <th key={h} style={{ padding: '8px', color: '#6b7280', fontWeight: '600', fontSize: '11px', textTransform: 'uppercase' }}>{h}</th>
+                                            ))}
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {firstScanHistory.map((item, idx) => (
+                                            <tr key={`first-${idx}`} style={{ borderBottom: '1px solid #f3f4f6' }}>
+                                                <td style={{ padding: '8px', color: '#6b7280' }}>{item.timestamp}</td>
+                                                <td style={{ padding: '8px', fontWeight: '600', color: '#111827' }}>{item.trackingNumber}</td>
+                                                <td style={{ padding: '8px', color: '#374151' }}>{item.recipientName}</td>
+                                                <td style={{ padding: '8px', color: '#4b5563' }}>{item.city}</td>
+                                                <td style={{ padding: '8px' }}><span style={{ backgroundColor: '#eff6ff', color: '#1d4ed8', border: '1px solid #bfdbfe', padding: '1px 6px', borderRadius: '4px', fontSize: '11px', fontWeight: '600' }}>First Scanned</span></td>
+                                            </tr>
+                                        ))}
+                                        {firstScanHistory.length === 0 && (
+                                            <tr>
+                                                <td colSpan={5} style={{ padding: '24px 8px', textAlign: 'center', color: '#9ca3af' }}>
+                                                    Pull scanner trigger to start counting parcels.
+                                                </td>
+                                            </tr>
+                                        )}
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+                )}
+
+                {/* ═══════════════════════════════════════════════════════
+                    TAB 2 — LMD ALLOCATION (SECOND SCAN)
+                ═══════════════════════════════════════════════════════ */}
+                {activeTab === 'second-scan' && (
                     <div>
 
                         {status === 'ERROR' && (
@@ -521,12 +1050,20 @@ export default function WorkstationDashboard() {
                                         }}
                                         onFocus={(e) => e.target.select()}
                                         placeholder="Scan or type barcode..."
-                                        disabled={status === 'FETCHING'}
+                                        className="scan-input-blink"
                                         style={{ ...inputStyle, flex: 1 }}
                                     />
                                 </form>
                                 {rowItem('Manifest', currentScan?.parcel?.mawbRef || '—')}
                                 {rowItem('Scanned today', <span style={{ color: '#e21b22', fontWeight: '700' }}>{scannedToday}</span>, true)}
+                                {currentScan && status === 'SUCCESS' && (
+                                    <div style={{ marginTop: '12px', fontSize: '11px', color: '#16a34a', fontWeight: '700', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" style={{ verticalAlign: 'middle' }}>
+                                            <polyline points="20 6 9 17 4 12" />
+                                        </svg>
+                                        Saved & Allocated in DB
+                                    </div>
+                                )}
                             </div>
 
                             {/* Assigned Partner Card */}
@@ -605,6 +1142,25 @@ export default function WorkstationDashboard() {
                                         }}>
                                             Zone: <span style={{ fontWeight: '800' }}>{currentScan.assignedZone || '—'}</span>
                                         </div>
+
+                                        {/* Missed First Scan Alert Badge */}
+                                        {currentScan.missedFirstScan && (
+                                            <div style={{
+                                                fontSize: '13px',
+                                                fontWeight: '800',
+                                                color: '#ffffff',
+                                                backgroundColor: '#dc2626',
+                                                border: '1px solid #ffffff',
+                                                padding: '6px 16px',
+                                                borderRadius: '6px',
+                                                display: 'flex',
+                                                alignItems: 'center',
+                                                gap: '6px',
+                                                boxShadow: '0 2px 4px rgba(0,0,0,0.1)'
+                                            }}>
+                                                <span>⚠️ MISSED 1ST SCAN (AUTO RECORDED)</span>
+                                            </div>
+                                        )}
                                     </div>
                                 ) : (
                                     <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '8px', color: '#9ca3af' }}>
@@ -705,7 +1261,7 @@ export default function WorkstationDashboard() {
 
                         {/* Step 1: Select Bin */}
                         <div style={{ ...card, marginBottom: '16px' }}>
-                            <div style={label}>Step 1 — Select Active Dispatch Bin</div>
+                            <div style={label}>Select Active Dispatch Bin</div>
                             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '12px' }}>
                                 {(['PickMe', 'Domex'] as const).map((bin) => (
                                     <button
@@ -804,7 +1360,7 @@ export default function WorkstationDashboard() {
                         <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 1fr', gap: '16px', marginBottom: '16px' }}>
                             {/* Scan Card */}
                             <div style={card}>
-                                <div style={label}>Step 2 — Scan Parcel Barcode</div>
+                                <div style={label}> Scan Parcel Barcode</div>
                                 <form onSubmit={handleVerifySubmit} style={{ display: 'flex', gap: '8px', marginBottom: '18px' }}>
                                     <input
                                         ref={verifyInputRef}
@@ -821,7 +1377,8 @@ export default function WorkstationDashboard() {
                                         }}
                                         onFocus={(e) => e.target.select()}
                                         placeholder={selectedBin ? 'Scan barcode...' : 'Select a bin first...'}
-                                        disabled={!selectedBin || verifyStatus === 'FETCHING'}
+                                        disabled={!selectedBin}
+                                        className={!selectedBin ? '' : 'scan-input-blink'}
                                         style={{ ...inputStyle, flex: 1, backgroundColor: selectedBin ? '#f9fafb' : '#f3f4f6', cursor: selectedBin ? 'text' : 'not-allowed' }}
                                     />
                                 </form>
@@ -1012,6 +1569,54 @@ export default function WorkstationDashboard() {
                             ))}
                         </div>
 
+                        {/* Unsealed Boxes Summary */}
+                        <div style={{ ...card, marginBottom: '20px' }}>
+                            <div style={label}>Box Unsealing Session Summary (1st Scan)</div>
+                            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px', textAlign: 'left' }}>
+                                <thead>
+                                    <tr style={{ borderBottom: '2px solid #e5e7eb' }}>
+                                        {['Timestamp', 'MAWB Ref', 'Bag Number', 'Expected Count', 'Actual Scanned', 'Discrepancy', 'Status'].map(h => (
+                                            <th key={h} style={{ padding: '8px', color: '#6b7280', fontWeight: '600', fontSize: '11px', textTransform: 'uppercase' }}>{h}</th>
+                                        ))}
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {unsealedBoxes.map((box, idx) => {
+                                        const diff = box.scanned - box.expected;
+                                        return (
+                                            <tr key={`box-${idx}`} style={{ borderBottom: '1px solid #f3f4f6' }}>
+                                                <td style={{ padding: '8px', color: '#6b7280' }}>{box.timestamp}</td>
+                                                <td style={{ padding: '8px', fontWeight: '600', color: '#111827' }}>{box.mawb}</td>
+                                                <td style={{ padding: '8px', fontWeight: '700', color: '#4b5563', fontFamily: 'monospace' }}>{box.bagNumber || '—'}</td>
+                                                <td style={{ padding: '8px', color: '#374151' }}>{box.expected}</td>
+                                                <td style={{ padding: '8px', color: '#374151' }}>{box.scanned}</td>
+                                                <td style={{ padding: '8px', fontWeight: '700', color: diff === 0 ? '#10b981' : '#dc2626' }}>
+                                                    {diff === 0 ? '0' : diff > 0 ? `+${diff}` : `${diff}`}
+                                                </td>
+                                                <td style={{ padding: '8px' }}>
+                                                    <span style={{
+                                                        backgroundColor: diff === 0 ? '#ecfdf5' : '#fef2f2',
+                                                        color: diff === 0 ? '#047857' : '#dc2626',
+                                                        border: diff === 0 ? '1px solid #a7f3d0' : '1px solid #fca5a5',
+                                                        padding: '2px 8px', borderRadius: '4px', fontSize: '11px', fontWeight: '600'
+                                                    }}>
+                                                        {diff === 0 ? 'Counted' : 'Discrepancy'}
+                                                    </span>
+                                                </td>
+                                            </tr>
+                                        );
+                                    })}
+                                    {unsealedBoxes.length === 0 && (
+                                        <tr>
+                                            <td colSpan={7} style={{ padding: '24px 8px', textAlign: 'center', color: '#9ca3af' }}>
+                                                No finished unsealing sessions yet.
+                                            </td>
+                                        </tr>
+                                    )}
+                                </tbody>
+                            </table>
+                        </div>
+
                         {/* Audit Table */}
                         <div style={card}>
                             <div style={label}>Full Operational Audit Trail</div>
@@ -1031,7 +1636,15 @@ export default function WorkstationDashboard() {
                                             <td style={{ padding: '10px 8px', color: '#374151' }}>{item.parcel?.recipientName}</td>
                                             <td style={{ padding: '10px 8px', fontWeight: '500' }}>{item.assignedPartner}</td>
                                             <td style={{ padding: '10px 8px', color: '#6b7280' }}>{item.parcel?.city}</td>
-                                            <td style={{ padding: '10px 8px', color: '#e21b22', fontWeight: '500' }}>Allocated</td>
+                                            <td style={{ padding: '10px 8px' }}>
+                                                {item.missedFirstScan ? (
+                                                    <span style={{ backgroundColor: '#fef2f2', color: '#dc2626', border: '1px solid #fca5a5', padding: '2px 8px', borderRadius: '4px', fontWeight: '600', fontSize: '11px' }}>
+                                                        Missed 1st Scan
+                                                    </span>
+                                                ) : (
+                                                    <span style={{ color: '#e21b22', fontWeight: '500' }}>Allocated</span>
+                                                )}
+                                            </td>
                                         </tr>
                                     ))}
                                     {verifyHistory.map((item, idx) => (
@@ -1180,6 +1793,262 @@ export default function WorkstationDashboard() {
                                 Done
                             </button>
                         </div>
+                    </div>
+                </div>
+            )}
+
+            {/* ── DUPLICATE SCAN MODAL ── */}
+            {duplicateModal && (
+                <div style={{
+                    position: 'fixed',
+                    top: 0, left: 0, right: 0, bottom: 0,
+                    backgroundColor: 'rgba(0, 0, 0, 0.6)',
+                    backdropFilter: 'blur(3px)',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    zIndex: 3000,
+                    animation: 'fadeIn 0.2s ease-out'
+                }}>
+                    <div style={{
+                        backgroundColor: '#ffffff',
+                        border: '2px solid #e21b22', // Light border around the popup box in red
+                        //borderTop: '6px solid #e21b22', // SkyNet Red top accent
+                        borderRadius: '12px',
+                        padding: '30px 24px',
+                        width: '450px',
+                        maxWidth: '90%',
+                        boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.15), 0 10px 10px -5px rgba(0, 0, 0, 0.04)',
+                        textAlign: 'center'
+                    }}>
+                        {/* Warning Icon */}
+                        <div style={{
+                            backgroundColor: '#fee2e2',
+                            color: '#e21b22',
+                            width: '56px', height: '56px',
+                            borderRadius: '50%',
+                            display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                            marginBottom: '20px'
+                        }}>
+                            <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                                <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
+                                <line x1="12" y1="9" x2="12" y2="13" />
+                                <line x1="12" y1="17" x2="12.01" y2="17" />
+                            </svg>
+                        </div>
+
+                        {/* Title */}
+                        <h3 style={{ fontSize: '18px', fontWeight: '700', color: '#111827', margin: '0 0 10px 0' }}>
+                            Duplicate Scan Detected
+                        </h3>
+
+                        {/* Content Message */}
+                        <p style={{ fontSize: '14px', color: '#4b5563', lineHeight: '1.6', margin: '0 0 24px 0' }}>
+                            Barcode <strong style={{ color: '#111827', fontSize: '15px', backgroundColor: '#f3f4f6', padding: '3px 8px', borderRadius: '4px', border: '1px solid #e5e7eb', fontFamily: 'monospace' }}>
+                                {duplicateModal.barcode}
+                            </strong> has already been {duplicateModal.type === 'allocate' ? 'scanned and allocated' : 'verified'} today!
+                        </p>
+
+                        {/* Dismiss Action Button */}
+                        <button
+                            onClick={() => {
+                                setDuplicateModal(null);
+                                setTimeout(() => {
+                                    if (activeTab === 'first-scan') firstScanInputRef.current?.focus();
+                                    else if (activeTab === 'second-scan') scanInputRef.current?.focus();
+                                    else if (activeTab === 'verify') verifyInputRef.current?.focus();
+                                }, 50);
+                            }}
+                            style={{
+                                backgroundColor: '#e21b22', // Red button background instead of black
+                                color: '#ffffff',
+                                border: 'none',
+                                borderRadius: '8px',
+                                padding: '12px 24px',
+                                fontSize: '14px',
+                                fontWeight: '600',
+                                width: '100%',
+                                cursor: 'pointer',
+                                transition: 'all 0.15s ease',
+                                boxShadow: '0 2px 4px rgba(0, 0, 0, 0.1)'
+                            }}
+                            onMouseOver={(e) => { e.currentTarget.style.backgroundColor = '#b91c1c'; }} // Darker red on hover
+                            onMouseOut={(e) => { e.currentTarget.style.backgroundColor = '#e21b22'; }}
+                        >
+                            Acknowledge (Press Enter)
+                        </button>
+                    </div>
+                </div>
+            )}
+
+            {/* ── CONFIRM FINISH MODAL ── */}
+            {confirmFinishModal && (
+                <div style={{
+                    position: 'fixed',
+                    top: 0, left: 0, right: 0, bottom: 0,
+                    backgroundColor: 'rgba(0, 0, 0, 0.6)',
+                    backdropFilter: 'blur(3px)',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    zIndex: 3000,
+                    animation: 'fadeIn 0.2s ease-out'
+                }}>
+                    <div style={{
+                        backgroundColor: '#ffffff',
+                        border: '2px solid #e21b22',
+                        borderRadius: '12px',
+                        padding: '30px 24px',
+                        width: '450px',
+                        maxWidth: '90%',
+                        boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.15), 0 10px 10px -5px rgba(0, 0, 0, 0.04)',
+                        textAlign: 'center'
+                    }}>
+                        {/* Question Icon */}
+                        <div style={{
+                            backgroundColor: '#fee2e2',
+                            color: '#e21b22',
+                            width: '56px', height: '56px',
+                            borderRadius: '50%',
+                            display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                            marginBottom: '20px'
+                        }}>
+                            <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                                <circle cx="12" cy="12" r="10" />
+                                <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3" />
+                                <line x1="12" y1="17" x2="12.01" y2="17" />
+                            </svg>
+                        </div>
+
+                        {/* Title */}
+                        <h3 style={{ fontSize: '18px', fontWeight: '700', color: '#111827', margin: '0 0 10px 0' }}>
+                            Finish Box Session?
+                        </h3>
+
+                        {/* Content Message */}
+                        <p style={{ fontSize: '14px', color: '#4b5563', lineHeight: '1.6', margin: '0 0 24px 0' }}>
+                            Are you sure you want to finish and close this box session? This will lock the current count of <strong style={{ color: '#111827' }}>{firstScanHistory.length}</strong> scanned parcels for MAWB <strong style={{ color: '#111827' }}>{firstScanMawb}</strong>.
+                        </p>
+
+                        {/* Actions */}
+                        <div style={{ display: 'flex', gap: '10px' }}>
+                            <button
+                                onClick={handleConfirmFinish}
+                                style={{
+                                    flex: 1,
+                                    backgroundColor: '#e21b22',
+                                    color: '#ffffff',
+                                    border: 'none',
+                                    borderRadius: '8px',
+                                    padding: '12px 18px',
+                                    fontSize: '14px',
+                                    fontWeight: '600',
+                                    cursor: 'pointer',
+                                    transition: 'all 0.15s ease'
+                                }}
+                                onMouseOver={(e) => { e.currentTarget.style.backgroundColor = '#b91c1c'; }}
+                                onMouseOut={(e) => { e.currentTarget.style.backgroundColor = '#e21b22'; }}
+                            >
+                                Yes, Finish Box (Enter)
+                            </button>
+                            <button
+                                onClick={() => {
+                                    setConfirmFinishModal(false);
+                                    setTimeout(() => {
+                                        if (activeTab === 'first-scan') firstScanInputRef.current?.focus();
+                                    }, 50);
+                                }}
+                                style={{
+                                    flex: 1,
+                                    backgroundColor: '#ffffff',
+                                    border: '1px solid #d1d5db',
+                                    color: '#374151',
+                                    borderRadius: '8px',
+                                    padding: '12px 18px',
+                                    fontSize: '14px',
+                                    fontWeight: '600',
+                                    cursor: 'pointer',
+                                    transition: 'all 0.15s ease'
+                                }}
+                                onMouseOver={(e) => { e.currentTarget.style.backgroundColor = '#f9fafb'; }}
+                                onMouseOut={(e) => { e.currentTarget.style.backgroundColor = '#ffffff'; }}
+                            >
+                                Cancel (Esc)
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* ── SUCCESS MODAL ── */}
+            {successModal && (
+                <div style={{
+                    position: 'fixed',
+                    top: 0, left: 0, right: 0, bottom: 0,
+                    backgroundColor: 'rgba(0, 0, 0, 0.6)',
+                    backdropFilter: 'blur(3px)',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    zIndex: 3000,
+                    animation: 'fadeIn 0.2s ease-out'
+                }}>
+                    <div style={{
+                        backgroundColor: '#ffffff',
+                        border: '2px solid #16a34a', // Green theme border
+                        borderRadius: '12px',
+                        padding: '30px 24px',
+                        width: '450px',
+                        maxWidth: '90%',
+                        boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.15), 0 10px 10px -5px rgba(0, 0, 0, 0.04)',
+                        textAlign: 'center'
+                    }}>
+                        {/* Checkmark Icon */}
+                        <div style={{
+                            backgroundColor: '#d1fae5',
+                            color: '#16a34a',
+                            width: '56px', height: '56px',
+                            borderRadius: '50%',
+                            display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                            marginBottom: '20px'
+                        }}>
+                            <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                                <polyline points="20 6 9 17 4 12" />
+                            </svg>
+                        </div>
+
+                        {/* Title */}
+                        <h3 style={{ fontSize: '18px', fontWeight: '700', color: '#111827', margin: '0 0 10px 0' }}>
+                            {successModal.title}
+                        </h3>
+
+                        {/* Content Message */}
+                        <p style={{ fontSize: '14px', color: '#4b5563', lineHeight: '1.6', margin: '0 0 24px 0' }}>
+                            {successModal.message}
+                        </p>
+
+                        {/* Action button */}
+                        <button
+                            onClick={() => {
+                                setSuccessModal(null);
+                                setTimeout(() => {
+                                    if (activeTab === 'first-scan') firstScanInputRef.current?.focus();
+                                    else if (activeTab === 'second-scan') scanInputRef.current?.focus();
+                                    else if (activeTab === 'verify') verifyInputRef.current?.focus();
+                                }, 50);
+                            }}
+                            style={{
+                                backgroundColor: '#16a34a', // Green primary button
+                                color: '#ffffff',
+                                border: 'none',
+                                borderRadius: '8px',
+                                padding: '12px 24px',
+                                fontSize: '14px',
+                                fontWeight: '600',
+                                width: '100%',
+                                cursor: 'pointer',
+                                transition: 'all 0.15s ease',
+                                boxShadow: '0 2px 4px rgba(0, 0, 0, 0.1)'
+                            }}
+                            onMouseOver={(e) => { e.currentTarget.style.backgroundColor = '#15803d'; }}
+                            onMouseOut={(e) => { e.currentTarget.style.backgroundColor = '#16a34a'; }}
+                        >
+                            Acknowledge (Press Enter)
+                        </button>
                     </div>
                 </div>
             )}
