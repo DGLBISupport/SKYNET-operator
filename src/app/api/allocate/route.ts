@@ -75,21 +75,44 @@ export async function POST(request: Request) {
             return NextResponse.json({ success: false, error: 'Missing tracking number' }, { status: 400 });
         }
 
-        const shipmentRef = parseInt(trackingNumber.trim(), 10);
-        if (isNaN(shipmentRef)) {
-            return NextResponse.json({ success: false, error: 'Invalid barcode format. Expected a numeric shipment reference number.' }, { status: 400 });
+        let resolvedShipment: any = null;
+        let shipmentRef: number;
+
+        const isNumeric = /^\d+$/.test(trackingNumber.trim());
+
+        if (isNumeric) {
+            shipmentRef = parseInt(trackingNumber.trim(), 10);
+        } else {
+            // Find by sender_reference (Temu barcode)
+            const temuRes = await fetch(`${supabaseUrl}/rest/v1/shipments?sender_reference=eq.${trackingNumber.trim()}`, { headers });
+            if (temuRes.ok) {
+                const shipments = await temuRes.json();
+                if (shipments && shipments[0]) {
+                    resolvedShipment = shipments[0];
+                    shipmentRef = resolvedShipment.reference_number;
+                } else {
+                    return NextResponse.json({
+                        success: false,
+                        error: `No shipment found matching Temu barcode "${trackingNumber}".`
+                    }, { status: 404 });
+                }
+            } else {
+                const errText = await temuRes.text();
+                return NextResponse.json({ success: false, error: `Database search by Temu barcode failed: ${errText}` }, { status: 500 });
+            }
         }
-
-
 
         // ═══════════════════════════════════════════════════════
         // STAGE 1 — BOX UNSEALING (FIRST SCAN)
         // ═══════════════════════════════════════════════════════
         if (stage === 'first') {
             // 1. Fetch shipment details to check if barcode is valid
-            const shipRes = await fetch(`${supabaseUrl}/rest/v1/shipments?reference_number=eq.${shipmentRef}`, { headers });
-            const shipments = await shipRes.json();
-            const shipment = shipments && shipments[0];
+            let shipment = resolvedShipment;
+            if (!shipment) {
+                const shipRes = await fetch(`${supabaseUrl}/rest/v1/shipments?reference_number=eq.${shipmentRef}`, { headers });
+                const shipments = await shipRes.json();
+                shipment = shipments && shipments[0];
+            }
             if (!shipment) {
                 return NextResponse.json({
                     success: false,
@@ -151,7 +174,8 @@ export async function POST(request: Request) {
                 province: shipment.consignee_state || "Unknown Province",
                 district: shipment.consignee_address_3 || "Unknown District",
                 weight: shipment.weight || 0,
-                mawbRef: finalMawb
+                mawbRef: finalMawb,
+                senderReference: shipment.sender_reference || undefined
             };
 
             return NextResponse.json({
@@ -164,17 +188,19 @@ export async function POST(request: Request) {
         // STAGE 2 — LMD ALLOCATION (SECOND SCAN)
         // ═══════════════════════════════════════════════════════
         // 1. Concurrently fetch service provider allocation and shipment details (parallelized step 1)
-        const [spaRes, shipRes] = await Promise.all([
-            fetch(`${supabaseUrl}/rest/v1/service_provider_allocation?shipment_ref=eq.${shipmentRef}`, { headers }),
-            fetch(`${supabaseUrl}/rest/v1/shipments?reference_number=eq.${shipmentRef}`, { headers })
+        const spaPromise = fetch(`${supabaseUrl}/rest/v1/service_provider_allocation?shipment_ref=eq.${shipmentRef}`, { headers });
+        const shipPromise = resolvedShipment
+            ? Promise.resolve(null)
+            : fetch(`${supabaseUrl}/rest/v1/shipments?reference_number=eq.${shipmentRef}`, { headers }).then(res => res.json());
+
+        const [spaRes, shipResData] = await Promise.all([
+            spaPromise,
+            shipPromise
         ]);
 
-        const [allocations, shipments] = await Promise.all([
-            spaRes.json(),
-            shipRes.json()
-        ]);
+        const allocations = await spaRes.json();
+        const shipment = resolvedShipment || (shipResData && shipResData[0]);
 
-        const shipment = shipments && shipments[0];
         if (!shipment) {
             return NextResponse.json({
                 success: false,
@@ -364,7 +390,8 @@ export async function POST(request: Request) {
             mawbFlight: mawbDetails ? mawbDetails.travel_id : undefined,
             mawbBags: mawbDetails ? mawbDetails.declared_bags : undefined,
             serviceType: shipment.service_type || undefined,
-            businessType: shipment.business_type || undefined
+            businessType: shipment.business_type || undefined,
+            senderReference: shipment.sender_reference || undefined
         };
 
         return NextResponse.json({

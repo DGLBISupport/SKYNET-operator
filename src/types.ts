@@ -19,6 +19,7 @@ export interface SkyNetParcelData {
     mawbBags?: number;
     serviceType?: string;
     businessType?: string;
+    senderReference?: string;
 }
 
 export interface ZoneRule {
