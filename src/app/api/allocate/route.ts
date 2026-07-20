@@ -16,6 +16,93 @@ const cleanAddress = (...parts: (string | null | undefined)[]) => {
     return parts.filter(p => p && p.trim() !== "").map(p => p.trim()).join(", ");
 };
 
+async function resolveZoneAndPartner(
+    supabaseUrl: string,
+    headers: any,
+    shipment: any,
+    allocation?: any
+) {
+    const spId = allocation?.service_provider;
+    const mappedCityId = allocation?.mapped_city;
+    let cityName = shipment.consignee_location_name || "";
+    let districtName = shipment.consignee_address_3 || "";
+    const shipmentRef = shipment.reference_number;
+
+    const cityPromise = mappedCityId
+        ? (cache.cities.has(mappedCityId)
+            ? Promise.resolve(cache.cities.get(mappedCityId))
+            : fetch(`${supabaseUrl}/rest/v1/district_city_mapping?id=eq.${mappedCityId}`, { headers })
+                .then(res => res.json())
+                .then(data => {
+                    const val = data && data[0];
+                    if (val) cache.cities.set(mappedCityId, val);
+                    return val;
+                }))
+        : (cityName
+            ? fetch(`${supabaseUrl}/rest/v1/district_city_mapping?city=ilike.${cityName}`, { headers })
+                .then(res => res.json())
+                .then(data => {
+                    const val = data && data[0];
+                    return val;
+                })
+            : Promise.resolve(null));
+
+    const mappedCity = await cityPromise;
+
+    if (mappedCity) {
+        cityName = mappedCity.city || cityName;
+        districtName = mappedCity.area_name || districtName;
+    }
+
+    // Resolve zone using cache fallback
+    let assignedZone = "Default-Zone";
+    if (mappedCity && mappedCity.zone) {
+        const zoneId = mappedCity.zone;
+        if (cache.zones.has(zoneId)) {
+            assignedZone = cache.zones.get(zoneId)!;
+        } else {
+            const zoneRes = await fetch(`${supabaseUrl}/rest/v1/zones?id=eq.${zoneId}`, { headers });
+            const zones = await zoneRes.json();
+            if (zones && zones[0]) {
+                assignedZone = zones[0].zone_name || "Default-Zone";
+                cache.zones.set(zoneId, assignedZone);
+            }
+        }
+    }
+
+    if (assignedZone === 'Zone-E02') {
+        assignedZone = 'Zone C';
+    }
+
+    // Resolve partner
+    let assignedPartner = "Unknown";
+    if (!spId) {
+        // Allocate dynamically: PickMe (1) or Domex (2)
+        if (assignedZone.toLowerCase().includes('b') || assignedZone.toLowerCase().includes('c') || shipmentRef % 2 === 0) {
+            assignedPartner = 'Domex';
+        } else {
+            assignedPartner = 'PickMe';
+        }
+    } else {
+        // Retrieve provider name from cache or DB
+        if (cache.providers.has(spId)) {
+            assignedPartner = cache.providers.get(spId)!;
+        } else {
+            const spRes = await fetch(`${supabaseUrl}/rest/v1/service_providers?id=eq.${spId}`, { headers });
+            const providers = await spRes.json();
+            if (providers && providers[0]) {
+                assignedPartner = providers[0].name || "Unknown";
+                cache.providers.set(spId, assignedPartner);
+            }
+        }
+        if (assignedPartner.toLowerCase() === 'pickme') assignedPartner = 'PickMe';
+        else if (assignedPartner.toLowerCase() === 'domex') assignedPartner = 'Domex';
+        else if (assignedPartner.toLowerCase() === 'pronto') assignedPartner = 'Pronto';
+    }
+
+    return { assignedZone, assignedPartner, mappedCity };
+}
+
 export async function POST(request: Request) {
     try {
         const { trackingNumber, stage = 'second', mawbRef, bagNumber, expectedCount, scannedCount, status: bagStatus } = await request.json();
@@ -130,6 +217,8 @@ export async function POST(request: Request) {
             
             const finalMawb = mawbRef || shipment.mawb_ref || '603-70659761'; // fallback
 
+            let finalAllocation = allocations && allocations[0];
+
             if (!allocations || allocations.length === 0) {
                 // Insert new allocation row (only first 4 columns: id, created_at, mawb_ref, shipment_ref)
                 const insertRes = await fetch(`${supabaseUrl}/rest/v1/service_provider_allocation`, {
@@ -148,6 +237,8 @@ export async function POST(request: Request) {
                     const errText = await insertRes.text();
                     throw new Error(`Database save failure: ${errText}`);
                 }
+                const inserted = await insertRes.json();
+                finalAllocation = inserted && inserted[0];
             } else {
                 // Update existing record's MAWB reference to associate it with this box session
                 const updateRes = await fetch(`${supabaseUrl}/rest/v1/service_provider_allocation?id=eq.${allocations[0].id}`, {
@@ -155,7 +246,7 @@ export async function POST(request: Request) {
                     headers: {
                         ...headers,
                         "Content-Type": "application/json",
-                        "Prefer": "return=minimal"
+                        "Prefer": "return=representation"
                     },
                     body: JSON.stringify({
                         mawb_ref: finalMawb
@@ -165,7 +256,12 @@ export async function POST(request: Request) {
                     const errText = await updateRes.text();
                     throw new Error(`Database update failure: ${errText}`);
                 }
+                const updated = await updateRes.json();
+                finalAllocation = updated && updated[0];
             }
+
+            // Resolve zone and partner using helper
+            const { assignedZone, assignedPartner } = await resolveZoneAndPartner(supabaseUrl, headers, shipment, finalAllocation);
 
             const skynetData: SkyNetParcelData = {
                 trackingNumber: shipment.reference_number.toString(),
@@ -180,7 +276,9 @@ export async function POST(request: Request) {
 
             return NextResponse.json({
                 success: true,
-                parcel: skynetData
+                parcel: skynetData,
+                assignedZone,
+                assignedPartner
             });
         }
 
