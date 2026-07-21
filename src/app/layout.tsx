@@ -1,3 +1,5 @@
+import { Toaster } from "sonner";
+
 export const metadata = {
   title: 'SKYNET  Parcel Allocation System',
   description: 'SKYNET Parcel Allocation System',
@@ -18,7 +20,10 @@ export default function RootLayout({
         <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
         <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
       </head>
-      <body>{children}</body>
+      <body style={{ margin: 0, padding: 0, fontFamily: "'Inter', sans-serif" }}>
+        {children}
+        <Toaster position="top-right" richColors />
+      </body>
     </html>
   )
 }

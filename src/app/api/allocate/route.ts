@@ -115,7 +115,8 @@ export async function POST(request: Request) {
             status: bagStatus,
             overrideBag,
             registerExtra,
-            extraNote
+            extraNote,
+            operator
         } = await request.json();
 
         const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -153,7 +154,8 @@ export async function POST(request: Request) {
                     expected_count: expectedCount || 0,
                     scanned_count: scannedCount || 0,
                     discrepancy: discrepancy,
-                    status: bagStatus || 'COUNTED'
+                    status: bagStatus || 'COUNTED',
+                    unsealed_by: operator || 'Unknown'
                 })
             });
 

@@ -1,9 +1,112 @@
 'use client';
 
 import { useState, useRef, useEffect, useCallback } from 'react';
+import { useRouter } from 'next/navigation';
 import { AllocationResponse, SkyNetParcelData } from '@/types';
+import { toast } from 'sonner';
 
 export default function WorkstationDashboard() {
+    const router = useRouter();
+    const [currentUser, setCurrentUser] = useState<any>(null);
+
+    useEffect(() => {
+        const userStr = localStorage.getItem('skynet_user');
+        if (!userStr) {
+            router.push('/login');
+        } else {
+            try {
+                setCurrentUser(JSON.parse(userStr));
+            } catch (e) {
+                router.push('/login');
+            }
+        }
+    }, [router]);
+
+    const handleLogout = () => {
+        localStorage.removeItem('skynet_user');
+        router.push('/login');
+    };
+
+    // Fetch active users list for user-switch dropdown
+    useEffect(() => {
+        const fetchUsers = async () => {
+            try {
+                const res = await fetch('/api/auth/users');
+                const data = await res.json();
+                if (data.success && data.users) {
+                    setUsersList(data.users);
+                }
+            } catch (e) {
+                console.error("Failed to load users:", e);
+            }
+        };
+        fetchUsers();
+    }, [currentUser]);
+
+    const handleSwitchUserSubmit = async () => {
+        if (!switchUserModal || !switchUserPassword) return;
+        try {
+            const res = await fetch("/api/auth/login", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    email: switchUserModal.email,
+                    password: switchUserPassword
+                })
+            });
+            const data = await res.json();
+            if (res.ok && data.success) {
+                localStorage.setItem("skynet_user", JSON.stringify(data.user));
+                setCurrentUser(data.user);
+                setSwitchUserModal(null);
+                setSwitchUserPassword('');
+                toast.success(`Successfully switched operator to ${data.user.firstName}`);
+            } else {
+                toast.error(data.error || "Authentication failed.");
+            }
+        } catch (e) {
+            console.error(e);
+            toast.error("Connection error during switch user.");
+        }
+    };
+
+    const handleRenewPinSubmit = async () => {
+        const { email, currentPassword, newPassword, confirmNewPassword } = renewForm;
+        if (!email || !currentPassword || !newPassword || !confirmNewPassword) {
+            toast.error("All fields are required.");
+            return;
+        }
+        if (newPassword !== confirmNewPassword) {
+            toast.error("New passwords do not match.");
+            return;
+        }
+        try {
+            const res = await fetch("/api/auth/renew", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    email,
+                    currentPassword,
+                    newPassword
+                })
+            });
+            const data = await res.json();
+            if (res.ok && data.success) {
+                setRenewPinModal(false);
+                setRenewForm({ email: '', currentPassword: '', newPassword: '', confirmNewPassword: '' });
+                setSuccessModal({
+                    title: "Credentials Renewed!",
+                    message: "Your Password/PIN has been updated and renewed successfully."
+                });
+            } else {
+                toast.error(data.error || "Renewal failed.");
+            }
+        } catch (e) {
+            console.error(e);
+            toast.error("Connection error during renewal.");
+        }
+    };
+
     const [activeTab, setActiveTab] = useState<'first-scan' | 'second-scan' | 'damaged-barcode' | 'verify' | 'config' | 'reports'>('first-scan');
     const [isSidebarExpanded, setIsSidebarExpanded] = useState<boolean>(true);
     const [scannedToday, setScannedToday] = useState<number>(0);
@@ -67,6 +170,16 @@ export default function WorkstationDashboard() {
     const [extraParcelModal, setExtraParcelModal] = useState<{ barcode: string; reason: 'WRONG_BAG' | 'UNASSIGNED' | 'NOT_FOUND'; actualBag: string | null; expectedBag: string; } | null>(null);
     const [extraParcelNote, setExtraParcelNote] = useState('');
     const [verifiedCount, setVerifiedCount] = useState(0);
+    const [usersList, setUsersList] = useState<any[]>([]);
+    const [switchUserModal, setSwitchUserModal] = useState<any | null>(null);
+    const [switchUserPassword, setSwitchUserPassword] = useState('');
+    const [renewPinModal, setRenewPinModal] = useState(false);
+    const [renewForm, setRenewForm] = useState({
+        email: '',
+        currentPassword: '',
+        newPassword: '',
+        confirmNewPassword: ''
+    });
     const [mismatchCount, setMismatchCount] = useState(0);
     const [pendingDispatch, setPendingDispatch] = useState(0);
     const [verifyHistory, setVerifyHistory] = useState<Array<{
@@ -274,7 +387,8 @@ export default function WorkstationDashboard() {
                     bagNumber: firstScanSelectedBag,
                     expectedCount: Number(firstScanExpected),
                     scannedCount: firstScanHistory.length,
-                    status: finalStatus
+                    status: finalStatus,
+                    operator: currentUser ? `${currentUser.firstName} ${currentUser.lastName}` : 'System'
                 }),
             });
             const data = await response.json();
@@ -522,7 +636,8 @@ export default function WorkstationDashboard() {
                     bagNumber: bagNumber,
                     expectedCount: expected,
                     scannedCount: history.length,
-                    status: 'COUNTED'
+                    status: 'COUNTED',
+                    operator: currentUser ? `${currentUser.firstName} ${currentUser.lastName}` : 'System'
                 }),
             });
             const data = await response.json();
@@ -1527,6 +1642,110 @@ export default function WorkstationDashboard() {
                                 <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
                             </svg>
                         </button>
+                        {currentUser && (
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '12px', borderLeft: '1px solid #e5e7eb', paddingLeft: '16px' }}>
+                                {/* Active User Dropdown Switcher */}
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                    <label style={{ fontSize: '11px', fontWeight: '700', color: '#6b7280', textTransform: 'uppercase' }}>Operator:</label>
+                                    <select
+                                        value={currentUser.email}
+                                        onChange={(e) => {
+                                            const selectedEmail = e.target.value;
+                                            if (selectedEmail === currentUser.email) return;
+                                            const targetUser = usersList.find(u => u.email === selectedEmail);
+                                            if (targetUser) {
+                                                setSwitchUserModal(targetUser);
+                                                setSwitchUserPassword('');
+                                            }
+                                        }}
+                                        style={{
+                                            padding: '4px 8px',
+                                            borderRadius: '6px',
+                                            border: '1px solid #d1d5db',
+                                            fontSize: '13px',
+                                            fontWeight: '600',
+                                            color: '#111827',
+                                            outline: 'none',
+                                            cursor: 'pointer',
+                                            backgroundColor: '#f9fafb'
+                                        }}
+                                    >
+                                        <option value={currentUser.email}>
+                                            {currentUser.firstName} {currentUser.lastName} ({currentUser.role})
+                                        </option>
+                                        {usersList
+                                            .filter(u => u.email !== currentUser.email)
+                                            .map(u => (
+                                                <option key={u.id} value={u.email}>
+                                                    {u.first_name} {u.last_name} ({u.role})
+                                                </option>
+                                            ))
+                                        }
+                                    </select>
+                                </div>
+
+                                {/* Renew PIN/Password Button */}
+                                <button
+                                    onClick={() => {
+                                        setRenewForm({
+                                            email: currentUser.email,
+                                            currentPassword: '',
+                                            newPassword: '',
+                                            confirmNewPassword: ''
+                                        });
+                                        setRenewPinModal(true);
+                                    }}
+                                    style={{
+                                        backgroundColor: '#eff6ff',
+                                        color: '#2563eb',
+                                        border: '1px solid #bfdbfe',
+                                        borderRadius: '6px',
+                                        padding: '6px 10px',
+                                        fontSize: '11px',
+                                        fontWeight: '700',
+                                        cursor: 'pointer',
+                                        transition: 'all 0.15s ease',
+                                        display: 'inline-flex',
+                                        alignItems: 'center',
+                                        gap: '4px'
+                                    }}
+                                    onMouseOver={(e) => { e.currentTarget.style.backgroundColor = '#dbeafe'; }}
+                                    onMouseOut={(e) => { e.currentTarget.style.backgroundColor = '#eff6ff'; }}
+                                    title="Renew Password/PIN"
+                                >
+                                    🔑 Renew PIN
+                                </button>
+
+                                {/* Exit Button */}
+                                <button
+                                    onClick={handleLogout}
+                                    style={{
+                                        backgroundColor: '#fee2e2',
+                                        color: '#dc2626',
+                                        border: 'none',
+                                        borderRadius: '6px',
+                                        padding: '6px 10px',
+                                        fontSize: '11px',
+                                        fontWeight: '700',
+                                        cursor: 'pointer',
+                                        transition: 'all 0.15s ease',
+                                        display: 'inline-flex',
+                                        alignItems: 'center',
+                                        gap: '4px'
+                                    }}
+                                    onMouseOver={(e) => { e.currentTarget.style.backgroundColor = '#fecaca'; }}
+                                    onMouseOut={(e) => { e.currentTarget.style.backgroundColor = '#fee2e2'; }}
+                                    title="Sign Out"
+                                >
+                                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                                        <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
+                                        <polyline points="16 17 21 12 16 7" />
+                                        <line x1="21" y1="12" x2="9" y2="12" />
+                                    </svg>
+                                    Exit
+                                </button>
+                            </div>
+                        )}
                         <span style={{ color: '#374151', fontWeight: '600', borderLeft: '1px solid #e5e7eb', paddingLeft: '16px' }}>{timeString}</span>
                     </div>
                 </header>
@@ -3810,6 +4029,229 @@ export default function WorkstationDashboard() {
                     </div>
                 );
             })()}
+
+            {/* ── SWITCH OPERATOR MODAL ── */}
+            {switchUserModal && (
+                <div style={{
+                    position: 'fixed',
+                    top: 0, left: 0, right: 0, bottom: 0,
+                    backgroundColor: 'rgba(0, 0, 0, 0.6)',
+                    backdropFilter: 'blur(3px)',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    zIndex: 3500,
+                    animation: 'fadeIn 0.2s ease-out'
+                }}>
+                    <div style={{
+                        backgroundColor: '#ffffff',
+                        border: '2px solid #e21b22',
+                        borderRadius: '12px',
+                        padding: '30px 24px',
+                        width: '400px',
+                        maxWidth: '90%',
+                        boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.15)',
+                        textAlign: 'center'
+                    }}>
+                        <h3 style={{ fontSize: '18px', fontWeight: '700', color: '#111827', margin: '0 0 10px 0' }}>
+                            Switch Operator
+                        </h3>
+                        <p style={{ fontSize: '14px', color: '#374151', margin: '0 0 20px 0' }}>
+                            Please enter the PIN/Password for <strong>{switchUserModal.first_name} {switchUserModal.last_name}</strong> to complete switch.
+                        </p>
+                        <input
+                            type="password"
+                            placeholder="Enter PIN / Password"
+                            value={switchUserPassword}
+                            onChange={(e) => setSwitchUserPassword(e.target.value)}
+                            onKeyDown={(e) => {
+                                if (e.key === 'Enter') handleSwitchUserSubmit();
+                            }}
+                            style={{
+                                width: '100%',
+                                padding: '10px 12px',
+                                border: '1px solid #d1d5db',
+                                borderRadius: '8px',
+                                fontSize: '14px',
+                                outline: 'none',
+                                boxSizing: 'border-box',
+                                marginBottom: '20px',
+                                textAlign: 'center',
+                                fontWeight: '600',
+                                letterSpacing: '4px'
+                            }}
+                            autoFocus
+                        />
+                        <div style={{ display: 'flex', gap: '10px' }}>
+                            <button
+                                onClick={handleSwitchUserSubmit}
+                                style={{
+                                    flex: 1,
+                                    backgroundColor: '#e21b22',
+                                    color: '#ffffff',
+                                    border: 'none',
+                                    borderRadius: '8px',
+                                    padding: '12px 16px',
+                                    fontSize: '13px',
+                                    fontWeight: '600',
+                                    cursor: 'pointer',
+                                    transition: 'all 0.15s ease'
+                                }}
+                            >
+                                Confirm Switch
+                            </button>
+                            <button
+                                onClick={() => {
+                                    setSwitchUserModal(null);
+                                    setSwitchUserPassword('');
+                                }}
+                                style={{
+                                    flex: 1,
+                                    backgroundColor: '#ffffff',
+                                    border: '1px solid #d1d5db',
+                                    color: '#374151',
+                                    borderRadius: '8px',
+                                    padding: '12px 16px',
+                                    fontSize: '13px',
+                                    fontWeight: '600',
+                                    cursor: 'pointer',
+                                    transition: 'all 0.15s ease'
+                                }}
+                            >
+                                Cancel
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* ── RENEW PASSWORD/PIN MODAL ── */}
+            {renewPinModal && (
+                <div style={{
+                    position: 'fixed',
+                    top: 0, left: 0, right: 0, bottom: 0,
+                    backgroundColor: 'rgba(0, 0, 0, 0.6)',
+                    backdropFilter: 'blur(3px)',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    zIndex: 3500,
+                    animation: 'fadeIn 0.2s ease-out'
+                }}>
+                    <div style={{
+                        backgroundColor: '#ffffff',
+                        border: '2px solid #2563eb',
+                        borderRadius: '12px',
+                        padding: '30px 24px',
+                        width: '420px',
+                        maxWidth: '90%',
+                        boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.15)'
+                    }}>
+                        <h3 style={{ fontSize: '18px', fontWeight: '700', color: '#111827', margin: '0 0 10px 0', textAlign: 'center' }}>
+                            Renew Password or PIN
+                        </h3>
+                        <p style={{ fontSize: '13px', color: '#6b7280', margin: '0 0 20px 0', textAlign: 'center' }}>
+                            Update your access credentials. PINs or passwords can be renewed instantly here.
+                        </p>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '14px', marginBottom: '20px' }}>
+                            <div>
+                                <label style={{ fontSize: '12px', fontWeight: '600', color: '#374151', display: 'block', marginBottom: '4px' }}>Email Address</label>
+                                <input
+                                    type="email"
+                                    disabled
+                                    value={renewForm.email}
+                                    style={{
+                                        width: '100%', padding: '8px 12px',
+                                        border: '1px solid #d1d5db', borderRadius: '6px',
+                                        fontSize: '13px', backgroundColor: '#f3f4f6', color: '#6b7280',
+                                        boxSizing: 'border-box'
+                                    }}
+                                />
+                            </div>
+                            <div>
+                                <label style={{ fontSize: '12px', fontWeight: '600', color: '#374151', display: 'block', marginBottom: '4px' }}>Current Password / PIN</label>
+                                <input
+                                    type="password"
+                                    placeholder="Enter current password or PIN"
+                                    value={renewForm.currentPassword}
+                                    onChange={(e) => setRenewForm({ ...renewForm, currentPassword: e.target.value })}
+                                    style={{
+                                        width: '100%', padding: '8px 12px',
+                                        border: '1px solid #d1d5db', borderRadius: '6px',
+                                        fontSize: '13px', color: '#111827', boxSizing: 'border-box',
+                                        outline: 'none'
+                                    }}
+                                />
+                            </div>
+                            <div>
+                                <label style={{ fontSize: '12px', fontWeight: '600', color: '#374151', display: 'block', marginBottom: '4px' }}>New Password / PIN</label>
+                                <input
+                                    type="password"
+                                    placeholder="Enter new password or PIN"
+                                    value={renewForm.newPassword}
+                                    onChange={(e) => setRenewForm({ ...renewForm, newPassword: e.target.value })}
+                                    style={{
+                                        width: '100%', padding: '8px 12px',
+                                        border: '1px solid #d1d5db', borderRadius: '6px',
+                                        fontSize: '13px', color: '#111827', boxSizing: 'border-box',
+                                        outline: 'none'
+                                    }}
+                                />
+                            </div>
+                            <div>
+                                <label style={{ fontSize: '12px', fontWeight: '600', color: '#374151', display: 'block', marginBottom: '4px' }}>Confirm New Password / PIN</label>
+                                <input
+                                    type="password"
+                                    placeholder="Retype new password or PIN"
+                                    value={renewForm.confirmNewPassword}
+                                    onChange={(e) => setRenewForm({ ...renewForm, confirmNewPassword: e.target.value })}
+                                    style={{
+                                        width: '100%', padding: '8px 12px',
+                                        border: '1px solid #d1d5db', borderRadius: '6px',
+                                        fontSize: '13px', color: '#111827', boxSizing: 'border-box',
+                                        outline: 'none'
+                                    }}
+                                />
+                            </div>
+                        </div>
+                        <div style={{ display: 'flex', gap: '10px' }}>
+                            <button
+                                onClick={handleRenewPinSubmit}
+                                style={{
+                                    flex: 1,
+                                    backgroundColor: '#2563eb',
+                                    color: '#ffffff',
+                                    border: 'none',
+                                    borderRadius: '8px',
+                                    padding: '12px 16px',
+                                    fontSize: '13px',
+                                    fontWeight: '600',
+                                    cursor: 'pointer',
+                                    transition: 'all 0.15s ease'
+                                }}
+                            >
+                                Renew Credentials
+                            </button>
+                            <button
+                                onClick={() => {
+                                    setRenewPinModal(false);
+                                    setRenewForm({ email: '', currentPassword: '', newPassword: '', confirmNewPassword: '' });
+                                }}
+                                style={{
+                                    flex: 1,
+                                    backgroundColor: '#ffffff',
+                                    border: '1px solid #d1d5db',
+                                    color: '#374151',
+                                    borderRadius: '8px',
+                                    padding: '12px 16px',
+                                    fontSize: '13px',
+                                    fontWeight: '600',
+                                    cursor: 'pointer',
+                                    transition: 'all 0.15s ease'
+                                }}
+                            >
+                                Cancel
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
 
             {/* ── CUSTOM CONFIRM MODAL ── */}
             {customConfirmModal && (
