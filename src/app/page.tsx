@@ -145,6 +145,7 @@ export default function WorkstationDashboard() {
         timestamp: string;
         status?: string;
         discrepancy?: number;
+        unsealedBy?: string;
     }>>([]);
 
     const [discrepancyReason, setDiscrepancyReason] = useState('');
@@ -284,7 +285,8 @@ export default function WorkstationDashboard() {
                         scanned: ub.scanned_count,
                         timestamp: new Date(ub.created_at).toLocaleTimeString(),
                         status: ub.status,
-                        discrepancy: ub.discrepancy
+                        discrepancy: ub.discrepancy,
+                        unsealedBy: ub.unsealed_by
                     }));
                     setUnsealedBoxes(mapped);
                 }
@@ -407,7 +409,8 @@ export default function WorkstationDashboard() {
                         scanned: firstScanHistory.length,
                         timestamp: new Date().toLocaleTimeString(),
                         status: finalStatus,
-                        discrepancy: firstScanHistory.length - Number(firstScanExpected)
+                        discrepancy: firstScanHistory.length - Number(firstScanExpected),
+                        unsealedBy: currentUser ? `${currentUser.firstName} ${currentUser.lastName}` : 'System'
                     },
                     ...prev
                 ]);
@@ -656,7 +659,8 @@ export default function WorkstationDashboard() {
                         scanned: history.length,
                         timestamp: new Date().toLocaleTimeString(),
                         status: 'COUNTED',
-                        discrepancy: 0
+                        discrepancy: 0,
+                        unsealedBy: currentUser ? `${currentUser.firstName} ${currentUser.lastName}` : 'System'
                     },
                     ...prev
                 ]);
@@ -1319,19 +1323,19 @@ export default function WorkstationDashboard() {
                     {/* MAWB & Shipment Info */}
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
                         {parcel.mawbRef && (
-                            <div style={{ backgroundColor: '#eff6ff', border: '1px solid #bfdbfe', borderRadius: '8px', padding: '14px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                                <div style={{ color: '#1d4ed8', fontSize: '11px', fontWeight: '700', textTransform: 'uppercase', letterSpacing: '0.5px', borderBottom: '1px solid #dbeafe', paddingBottom: '6px' }}>Master Air Waybill (MAWB)</div>
-                                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1.5fr', gap: '6px 12px', fontSize: '13px', color: '#1e3a8a' }}>
-                                    <span style={{ color: '#60a5fa', fontWeight: '500' }}>Reference:</span>
+                            <div style={{ backgroundColor: '#f3f4f6', border: '1px solid #d1d5db', borderRadius: '8px', padding: '14px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                                <div style={{ color: '#374151', fontSize: '11px', fontWeight: '700', textTransform: 'uppercase', letterSpacing: '0.5px', borderBottom: '1px solid #e5e7eb', paddingBottom: '6px' }}>Master Air Waybill (MAWB)</div>
+                                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1.5fr', gap: '6px 12px', fontSize: '13px', color: '#111827' }}>
+                                    <span style={{ color: '#6b7280', fontWeight: '500' }}>Reference:</span>
                                     <span style={{ fontWeight: '700' }}>{parcel.mawbRef}</span>
 
-                                    <span style={{ color: '#60a5fa', fontWeight: '500' }}>Carrier:</span>
+                                    <span style={{ color: '#6b7280', fontWeight: '500' }}>Carrier:</span>
                                     <span style={{ fontWeight: '600' }}>{parcel.mawbCarrier || '—'}</span>
 
-                                    <span style={{ color: '#60a5fa', fontWeight: '500' }}>Flight ID:</span>
+                                    <span style={{ color: '#6b7280', fontWeight: '500' }}>Flight ID:</span>
                                     <span style={{ fontWeight: '600' }}>{parcel.mawbFlight || '—'}</span>
 
-                                    <span style={{ color: '#60a5fa', fontWeight: '500' }}>Total Bags:</span>
+                                    <span style={{ color: '#6b7280', fontWeight: '500' }}>Total Bags:</span>
                                     <span style={{ fontWeight: '600' }}>{parcel.mawbBags !== undefined ? parcel.mawbBags : '—'}</span>
                                 </div>
                             </div>
@@ -1690,38 +1694,6 @@ export default function WorkstationDashboard() {
                                     </select>
                                 </div>
 
-                                {/* Renew PIN/Password Button */}
-                                <button
-                                    onClick={() => {
-                                        setRenewForm({
-                                            email: currentUser.email,
-                                            currentPassword: '',
-                                            newPassword: '',
-                                            confirmNewPassword: ''
-                                        });
-                                        setRenewPinModal(true);
-                                    }}
-                                    style={{
-                                        backgroundColor: '#eff6ff',
-                                        color: '#2563eb',
-                                        border: '1px solid #bfdbfe',
-                                        borderRadius: '6px',
-                                        padding: '6px 10px',
-                                        fontSize: '11px',
-                                        fontWeight: '700',
-                                        cursor: 'pointer',
-                                        transition: 'all 0.15s ease',
-                                        display: 'inline-flex',
-                                        alignItems: 'center',
-                                        gap: '4px'
-                                    }}
-                                    onMouseOver={(e) => { e.currentTarget.style.backgroundColor = '#dbeafe'; }}
-                                    onMouseOut={(e) => { e.currentTarget.style.backgroundColor = '#eff6ff'; }}
-                                    title="Renew Password/PIN"
-                                >
-                                    🔑 Renew PIN
-                                </button>
-
                                 {/* Exit Button */}
                                 <button
                                     onClick={handleLogout}
@@ -2045,9 +2017,9 @@ export default function WorkstationDashboard() {
                                                         {firstScanBags.filter(b => getBagStatus(b.bagNumber, b.expectedCount) === 'COMPLETED').length}
                                                     </div>
                                                 </div>
-                                                <div style={{ backgroundColor: '#fef3c7', border: '1px solid #fde68a', borderRadius: '8px', padding: '10px 6px', textAlign: 'center' }}>
-                                                    <div style={{ fontSize: '10px', color: '#92400e', textTransform: 'uppercase', fontWeight: '700' }}>Remaining</div>
-                                                    <div style={{ fontSize: '18px', fontWeight: '800', color: '#92400e', marginTop: '2px' }}>
+                                                <div style={{ backgroundColor: '#f3f4f6', border: '1px solid #d1d5db', borderRadius: '8px', padding: '10px 6px', textAlign: 'center' }}>
+                                                    <div style={{ fontSize: '10px', color: '#374151', textTransform: 'uppercase', fontWeight: '700' }}>Remaining</div>
+                                                    <div style={{ fontSize: '18px', fontWeight: '800', color: '#374151', marginTop: '2px' }}>
                                                         {firstScanBags.filter(b => getBagStatus(b.bagNumber, b.expectedCount) !== 'COMPLETED').length}
                                                     </div>
                                                 </div>
@@ -3180,7 +3152,7 @@ export default function WorkstationDashboard() {
                                 <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px', textAlign: 'left' }}>
                                     <thead>
                                         <tr style={{ borderBottom: '2px solid #e5e7eb' }}>
-                                            {['Timestamp', 'MAWB Ref', 'Bag Number', 'Expected Count', 'Actual Scanned', 'Discrepancy', 'Status'].map(h => (
+                                            {['Timestamp', 'MAWB Ref', 'Bag Number', 'Expected Count', 'Actual Scanned', 'Discrepancy', 'Status', 'Unsealed By'].map(h => (
                                                 <th key={h} style={{ padding: '8px', color: '#6b7280', fontWeight: '600', fontSize: '11px', textTransform: 'uppercase' }}>{h}</th>
                                             ))}
                                         </tr>
@@ -3208,12 +3180,13 @@ export default function WorkstationDashboard() {
                                                             {diff === 0 ? 'Counted' : (box.status || 'Discrepancy')}
                                                         </span>
                                                     </td>
+                                                    <td style={{ padding:'8px', color:'#4b5563', fontWeight:'500' }}>{box.unsealedBy || '—'}</td>
                                                 </tr>
                                             );
                                         })}
                                         {unsealedBoxes.length === 0 && (
                                             <tr>
-                                                <td colSpan={7} style={{ padding: '24px 8px', textAlign: 'center', color: '#9ca3af' }}>
+                                                <td colSpan={8} style={{ padding: '24px 8px', textAlign: 'center', color: '#9ca3af' }}>
                                                     No finished unsealing sessions yet.
                                                 </td>
                                             </tr>
@@ -3887,8 +3860,8 @@ export default function WorkstationDashboard() {
                 const isUnassigned = extraParcelModal.reason === 'UNASSIGNED';
                 const isNotFound = extraParcelModal.reason === 'NOT_FOUND';
 
-                const themeColor = isWrongBag ? '#d97706' : isUnassigned ? '#2563eb' : '#dc2626';
-                const bgLight = isWrongBag ? '#fef3c7' : isUnassigned ? '#eff6ff' : '#fef2f2';
+                const themeColor = isWrongBag ? '#e21b22' : isUnassigned ? '#374151' : '#e21b22';
+                const bgLight = isWrongBag ? '#fef2f2' : isUnassigned ? '#f3f4f6' : '#fef2f2';
 
                 let modalTitle = 'Scan Exception';
                 let message = '';
@@ -4176,6 +4149,36 @@ export default function WorkstationDashboard() {
                                 }}
                             >
                                 Cancel
+                            </button>
+                        </div>
+
+                        <div style={{ marginTop: '16px', borderTop: '1px solid #e5e7eb', paddingTop: '12px', textAlign: 'center' }}>
+                            <button
+                                onClick={() => {
+                                    const email = switchUserModal.email;
+                                    setSwitchUserModal(null);
+                                    setSwitchUserFirstName('');
+                                    setSwitchUserPassword('');
+                                    setRenewForm({
+                                        email: email,
+                                        currentPassword: '',
+                                        newPassword: '',
+                                        confirmNewPassword: ''
+                                    });
+                                    setRenewPinModal(true);
+                                }}
+                                style={{
+                                    background: 'none',
+                                    border: 'none',
+                                    color: '#e21b22',
+                                    fontSize: '12px',
+                                    fontWeight: '700',
+                                    cursor: 'pointer',
+                                    textDecoration: 'underline',
+                                    padding: '4px 8px'
+                                }}
+                            >
+                                🔑 Renew Password / PIN
                             </button>
                         </div>
                     </div>
