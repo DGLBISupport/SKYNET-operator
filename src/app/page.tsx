@@ -1806,16 +1806,6 @@ export default function WorkstationDashboard() {
                                                 </select>
                                             </div>
 
-                                            {/* Scanning Tip
-                                            {firstScanMawb && (
-                                                <div style={{ fontSize: '11px', color: '#6b7280', backgroundColor: '#f9fafb', padding: '8px 12px', borderRadius: '6px', border: '1px solid #e5e7eb', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ color: '#e21b22', flexShrink: 0 }}>
-                                                        <circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/>
-                                                    </svg>
-                                                    <span><strong>Tip:</strong> You can select the bag by scanning its barcode directly in the input box below.</span>
-                                                </div>
-                                            )} */}
-
                                             <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 1.2fr 1fr', gap: '12px' }}>
                                                 <div>
                                                     <label style={{ fontSize: '12px', fontWeight: '600', color: '#374151', display: 'block', marginBottom: '6px' }}>
@@ -1837,6 +1827,12 @@ export default function WorkstationDashboard() {
                                                                         setFirstScanError('');
                                                                         setFirstScanHistory([]);
                                                                         setBagBarcodeInput(matchedBag.bagNumber);
+                                                                        setTimeout(() => {
+                                                                            if (firstScanInputRef.current) {
+                                                                                firstScanInputRef.current.focus();
+                                                                                firstScanInputRef.current.select();
+                                                                            }
+                                                                        }, 50);
                                                                     }
                                                                 });
                                                                 return;
@@ -1846,7 +1842,12 @@ export default function WorkstationDashboard() {
                                                             setFirstScanError('');
                                                             setFirstScanHistory([]);
                                                             setBagBarcodeInput(matchedBag.bagNumber);
-                                                            setTimeout(() => bagBarcodeInputRef.current?.select(), 50);
+                                                            setTimeout(() => {
+                                                                if (firstScanInputRef.current) {
+                                                                    firstScanInputRef.current.focus();
+                                                                    firstScanInputRef.current.select();
+                                                                }
+                                                            }, 50);
                                                         } else {
                                                             setInvalidBagParcelModal({
                                                                 barcode: scannedVal,
@@ -1876,7 +1877,26 @@ export default function WorkstationDashboard() {
                                                     </label>
                                                     <select
                                                         value={firstScanSelectedBag}
-                                                        onChange={(e) => setFirstScanSelectedBag(e.target.value)}
+                                                        onChange={(e) => {
+                                                            const selectedBagNum = e.target.value;
+                                                            const matchedBag = firstScanBags.find(b => b.bagNumber === selectedBagNum);
+                                                            if (matchedBag) {
+                                                                setFirstScanSelectedBag(matchedBag.bagNumber);
+                                                                setFirstScanExpected(matchedBag.expectedCount);
+                                                                setFirstScanError('');
+                                                                setFirstScanHistory([]);
+                                                                setBagBarcodeInput(matchedBag.bagNumber);
+                                                                setTimeout(() => {
+                                                                    if (firstScanInputRef.current) {
+                                                                        firstScanInputRef.current.focus();
+                                                                        firstScanInputRef.current.select();
+                                                                    }
+                                                                }, 50);
+                                                            } else {
+                                                                setFirstScanSelectedBag('');
+                                                                setFirstScanExpected('');
+                                                            }
+                                                        }}
                                                         disabled={!firstScanMawb}
                                                         style={{ ...inputStyle, width: '100%', backgroundColor: !firstScanMawb ? '#f3f4f6' : '#ffffff' }}
                                                     >
