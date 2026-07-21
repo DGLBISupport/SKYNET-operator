@@ -29,7 +29,18 @@ export default function WorkstationDashboard() {
     const [firstScanCurrentScan, setFirstScanCurrentScan] = useState<{ assignedPartner?: string; assignedZone?: string } | null>(null);
     const [firstScanStatus, setFirstScanStatus] = useState<'READY' | 'FETCHING' | 'SUCCESS' | 'ERROR'>('READY');
     const [firstScanError, setFirstScanError] = useState('');
-    const [unsealedBoxes, setUnsealedBoxes] = useState<Array<{ mawb: string; bagNumber?: string; expected: number; scanned: number; timestamp: string }>>([]);
+    const [unsealedBoxes, setUnsealedBoxes] = useState<Array<{
+        mawb: string;
+        bagNumber?: string;
+        expected: number;
+        scanned: number;
+        timestamp: string;
+        status?: string;
+        discrepancy?: number;
+    }>>([]);
+
+    const [discrepancyReason, setDiscrepancyReason] = useState('');
+    const [customDiscrepancyNote, setCustomDiscrepancyNote] = useState('');
 
     // Tab 2: Scan & Allocate (Second Scan)
     const [barcodeInput, setBarcodeInput] = useState('');
@@ -50,6 +61,11 @@ export default function WorkstationDashboard() {
     const [duplicateModal, setDuplicateModal] = useState<{ barcode: string; type: 'allocate' | 'verify' } | null>(null);
     const [confirmFinishModal, setConfirmFinishModal] = useState(false);
     const [successModal, setSuccessModal] = useState<{ title: string; message: string } | null>(null);
+    const [invalidBagParcelModal, setInvalidBagParcelModal] = useState<{ barcode: string; expectedBag: string; actualBag: string | null; reason: 'WRONG_BAG' | 'NOT_FOUND' | 'BAG_ALREADY_COMPLETED' | 'INVALID_BAG' | 'NO_BAG_SELECTED' } | null>(null);
+    const [customConfirmModal, setCustomConfirmModal] = useState<{ title: string; message: string; onConfirm: () => void } | null>(null);
+    const [overageCheckModal, setOverageCheckModal] = useState<{ bagNumber: string; expected: number; history: any[] } | null>(null);
+    const [extraParcelModal, setExtraParcelModal] = useState<{ barcode: string; reason: 'WRONG_BAG' | 'UNASSIGNED' | 'NOT_FOUND'; actualBag: string | null; expectedBag: string; } | null>(null);
+    const [extraParcelNote, setExtraParcelNote] = useState('');
     const [verifiedCount, setVerifiedCount] = useState(0);
     const [mismatchCount, setMismatchCount] = useState(0);
     const [pendingDispatch, setPendingDispatch] = useState(0);
@@ -147,7 +163,9 @@ export default function WorkstationDashboard() {
                         bagNumber: ub.bag_number,
                         expected: ub.expected_count,
                         scanned: ub.scanned_count,
-                        timestamp: new Date(ub.created_at).toLocaleTimeString()
+                        timestamp: new Date(ub.created_at).toLocaleTimeString(),
+                        status: ub.status,
+                        discrepancy: ub.discrepancy
                     }));
                     setUnsealedBoxes(mapped);
                 }
@@ -232,10 +250,17 @@ export default function WorkstationDashboard() {
         if (!firstScanMawb || !firstScanSelectedBag || firstScanExpected === '') return;
 
         const isMatch = firstScanHistory.length === Number(firstScanExpected);
+
+        // Determine status and discrepancy
+        const diff = firstScanHistory.length - Number(firstScanExpected);
+        let finalStatus = 'COUNTED';
         if (!isMatch) {
-            setFirstScanError("Cannot close session: Scanned count does not match expected database count.");
-            setConfirmFinishModal(false);
-            return;
+            const prefix = diff < 0 ? 'Shortage' : 'Overage';
+            if (discrepancyReason === 'Other (Custom Note)' && customDiscrepancyNote.trim()) {
+                finalStatus = `${prefix}: ${customDiscrepancyNote.trim()}`;
+            } else {
+                finalStatus = `${prefix}: ${discrepancyReason || 'Discrepancy'}`;
+            }
         }
 
         try {
@@ -249,7 +274,7 @@ export default function WorkstationDashboard() {
                     bagNumber: firstScanSelectedBag,
                     expectedCount: Number(firstScanExpected),
                     scannedCount: firstScanHistory.length,
-                    status: 'COUNTED'
+                    status: finalStatus
                 }),
             });
             const data = await response.json();
@@ -260,14 +285,16 @@ export default function WorkstationDashboard() {
                         bagNumber: firstScanSelectedBag,
                         expected: Number(firstScanExpected),
                         scanned: firstScanHistory.length,
-                        timestamp: new Date().toLocaleTimeString()
+                        timestamp: new Date().toLocaleTimeString(),
+                        status: finalStatus,
+                        discrepancy: firstScanHistory.length - Number(firstScanExpected)
                     },
                     ...prev
                 ]);
 
                 setSuccessModal({
-                    title: "Bag Counted & Saved",
-                    message: `Bag "${firstScanSelectedBag}" has been successfully unsealed and stored in database. Count: ${firstScanHistory.length} parcels.`
+                    title: "Bag Session Finished",
+                    message: `Bag "${firstScanSelectedBag}" has been finished and saved. Status: ${finalStatus}.`
                 });
 
                 handleClearFirstScan();
@@ -279,17 +306,25 @@ export default function WorkstationDashboard() {
         } finally {
             setFirstScanStatus('READY');
             setConfirmFinishModal(false);
+            setDiscrepancyReason('');
+            setCustomDiscrepancyNote('');
         }
     };
 
-    // Keyboard wedge support for confirmFinishModal and successModal
+    // Keyboard wedge support for confirmFinishModal, successModal, invalidBagParcelModal, customConfirmModal, overageCheckModal, and extraParcelModal
     useEffect(() => {
-        if (!confirmFinishModal && !successModal) return;
+        if (!confirmFinishModal && !successModal && !invalidBagParcelModal && !customConfirmModal && !overageCheckModal && !extraParcelModal) return;
         const handleModalKey = (e: KeyboardEvent) => {
             if (successModal) {
                 if (e.key === 'Enter' || e.key === 'Escape' || e.key === ' ') {
                     e.preventDefault();
                     setSuccessModal(null);
+                    setFirstScanInput('');
+                    setBarcodeInput('');
+                    setVerifyBarcodeInput('');
+                    if (firstScanInputRef.current) firstScanInputRef.current.value = '';
+                    if (scanInputRef.current) scanInputRef.current.value = '';
+                    if (verifyInputRef.current) verifyInputRef.current.value = '';
                     setTimeout(() => {
                         if (activeTab === 'first-scan') firstScanInputRef.current?.focus();
                         else if (activeTab === 'second-scan') scanInputRef.current?.focus();
@@ -304,15 +339,96 @@ export default function WorkstationDashboard() {
                 } else if (e.key === 'Escape') {
                     e.preventDefault();
                     setConfirmFinishModal(false);
+                    setDiscrepancyReason('');
+                    setCustomDiscrepancyNote('');
+                    setFirstScanInput('');
+                    if (firstScanInputRef.current) firstScanInputRef.current.value = '';
                     setTimeout(() => {
                         if (activeTab === 'first-scan') firstScanInputRef.current?.focus();
+                    }, 50);
+                }
+            } else if (invalidBagParcelModal) {
+                if (e.key === 'Enter' || e.key === 'Escape' || e.key === ' ') {
+                    e.preventDefault();
+                    setInvalidBagParcelModal(null);
+                    setFirstScanInput('');
+                    setBagBarcodeInput('');
+                    setBarcodeInput('');
+                    setVerifyBarcodeInput('');
+                    if (firstScanInputRef.current) firstScanInputRef.current.value = '';
+                    if (bagBarcodeInputRef.current) bagBarcodeInputRef.current.value = '';
+                    if (scanInputRef.current) scanInputRef.current.value = '';
+                    if (verifyInputRef.current) verifyInputRef.current.value = '';
+                    setTimeout(() => {
+                        if (activeTab === 'first-scan') {
+                            if (!firstScanSelectedBag && bagBarcodeInputRef.current) {
+                                bagBarcodeInputRef.current.focus();
+                            } else {
+                                firstScanInputRef.current?.focus();
+                            }
+                        }
+                    }, 50);
+                }
+            } else if (customConfirmModal) {
+                if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault();
+                    customConfirmModal.onConfirm();
+                    setCustomConfirmModal(null);
+                } else if (e.key === 'Escape') {
+                    e.preventDefault();
+                    setCustomConfirmModal(null);
+                    setFirstScanInput('');
+                    setBarcodeInput('');
+                    setVerifyBarcodeInput('');
+                    if (firstScanInputRef.current) firstScanInputRef.current.value = '';
+                    if (scanInputRef.current) scanInputRef.current.value = '';
+                    if (verifyInputRef.current) verifyInputRef.current.value = '';
+                    setTimeout(() => {
+                        if (activeTab === 'first-scan') firstScanInputRef.current?.focus();
+                    }, 50);
+                }
+            } else if (overageCheckModal) {
+                if (e.key === 'Enter') {
+                    e.preventDefault();
+                    // Enter = "No extra parcels, close bag"
+                    const { bagNumber, expected, history } = overageCheckModal;
+                    setOverageCheckModal(null);
+                    autoFinishBag(bagNumber, expected, history);
+                } else if (e.key === ' ') {
+                    e.preventDefault();
+                    // Space = "Yes, there are more parcels — continue scanning"
+                    setOverageCheckModal(null);
+                    setTimeout(() => firstScanInputRef.current?.focus(), 50);
+                }
+            } else if (extraParcelModal) {
+                if (e.key === 'Enter') {
+                    e.preventDefault();
+                    const isNotFound = extraParcelModal.reason === 'NOT_FOUND';
+                    const canSubmit = !isNotFound || extraParcelNote.trim() !== '';
+                    if (canSubmit) {
+                        handleFirstScanSubmitOverride(extraParcelModal.barcode, {
+                            overrideBag: extraParcelModal.reason === 'WRONG_BAG' || extraParcelModal.reason === 'UNASSIGNED',
+                            registerExtra: isNotFound,
+                            note: extraParcelNote
+                        });
+                    }
+                } else if (e.key === 'Escape') {
+                    e.preventDefault();
+                    setExtraParcelModal(null);
+                    setExtraParcelNote('');
+                    setTimeout(() => {
+                        if (firstScanInputRef.current) {
+                            firstScanInputRef.current.value = '';
+                            setFirstScanInput('');
+                            firstScanInputRef.current.focus();
+                        }
                     }, 50);
                 }
             }
         };
         window.addEventListener('keydown', handleModalKey);
         return () => window.removeEventListener('keydown', handleModalKey);
-    }, [confirmFinishModal, successModal, activeTab, firstScanMawb, firstScanExpected, firstScanHistory]);
+    }, [confirmFinishModal, successModal, invalidBagParcelModal, customConfirmModal, overageCheckModal, extraParcelModal, extraParcelNote, activeTab, firstScanMawb, firstScanExpected, firstScanHistory]);
 
 
 
@@ -370,10 +486,84 @@ export default function WorkstationDashboard() {
         return 'PENDING';
     };
 
+    const getSortedBags = () => {
+        return [...firstScanBags].sort((a, b) => {
+            const aIsActive = a.bagNumber === firstScanSelectedBag;
+            const bIsActive = b.bagNumber === firstScanSelectedBag;
+            if (aIsActive && !bIsActive) return -1;
+            if (!aIsActive && bIsActive) return 1;
+
+            const aUnsealedIndex = unsealedBoxes.findIndex(ub => ub.mawb === firstScanMawb && ub.bagNumber === a.bagNumber);
+            const bUnsealedIndex = unsealedBoxes.findIndex(ub => ub.mawb === firstScanMawb && ub.bagNumber === b.bagNumber);
+
+            const aIsCompleted = aUnsealedIndex !== -1;
+            const bIsCompleted = bUnsealedIndex !== -1;
+
+            if (aIsCompleted && !bIsCompleted) return -1;
+            if (!aIsCompleted && bIsCompleted) return 1;
+
+            if (aIsCompleted && bIsCompleted) {
+                return aUnsealedIndex - bUnsealedIndex;
+            }
+
+            return a.bagNumber.localeCompare(b.bagNumber);
+        });
+    };
+
+    const autoFinishBag = async (bagNumber: string, expected: number, history: any[]) => {
+        try {
+            setFirstScanStatus('FETCHING');
+            const response = await fetch('/api/allocate', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    stage: 'finish-bag',
+                    mawbRef: firstScanMawb,
+                    bagNumber: bagNumber,
+                    expectedCount: expected,
+                    scannedCount: history.length,
+                    status: 'COUNTED'
+                }),
+            });
+            const data = await response.json();
+            if (data.success) {
+                setUnsealedBoxes(prev => [
+                    {
+                        mawb: firstScanMawb,
+                        bagNumber: bagNumber,
+                        expected: expected,
+                        scanned: history.length,
+                        timestamp: new Date().toLocaleTimeString(),
+                        status: 'COUNTED',
+                        discrepancy: 0
+                    },
+                    ...prev
+                ]);
+
+                setSuccessModal({
+                    title: "Bag Completed!",
+                    message: `All parcels are checked. Bag "${bagNumber}" is finished and saved to database. Count: ${history.length} parcels.`
+                });
+
+                handleClearFirstScan();
+            } else {
+                setFirstScanError(data.error || "Failed to save unsealing log to database.");
+            }
+        } catch (err: any) {
+            setFirstScanError(err.message || "Failed to connect to server.");
+        } finally {
+            setFirstScanStatus('READY');
+        }
+    };
+
     const handleFirstScanSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
         const barcode = firstScanInput.trim();
         if (!barcode || !firstScanMawb) return;
+
+        // Clear input instantly to prevent barcode concatenation
+        setFirstScanInput('');
+        if (firstScanInputRef.current) firstScanInputRef.current.value = '';
 
         // Auto select input text so next scan overwrites it
         setTimeout(() => {
@@ -383,33 +573,73 @@ export default function WorkstationDashboard() {
         // 1. Smart Bag Barcode Scan Detection
         const matchedBag = firstScanBags.find(b => b.bagNumber.toLowerCase() === barcode.toLowerCase());
         if (matchedBag) {
-            if (firstScanSelectedBag === matchedBag.bagNumber) {
-                setFirstScanInput('');
+            // Check if this bag is already completed
+            const isCompleted = getBagStatus(matchedBag.bagNumber, matchedBag.expectedCount) === 'COMPLETED';
+            if (isCompleted) {
+                setInvalidBagParcelModal({
+                    barcode: matchedBag.bagNumber,
+                    expectedBag: matchedBag.bagNumber,
+                    actualBag: null,
+                    reason: 'BAG_ALREADY_COMPLETED'
+                });
                 return;
             }
-            // Check if there is already an active bag session with scans
-            if (firstScanSelectedBag && firstScanHistory.length > 0) {
-                const confirmSwitch = window.confirm(`You are currently scanning Bag "${firstScanSelectedBag}" with ${firstScanHistory.length} scanned parcels. Are you sure you want to switch to Bag "${matchedBag.bagNumber}"? Current progress in the active box will be cleared.`);
-                if (!confirmSwitch) {
-                    setFirstScanInput('');
-                    return;
-                }
+
+            if (firstScanSelectedBag === matchedBag.bagNumber) {
+                return;
+            }
+
+            // Check if there is already an active bag session (any selected bag, even without scans)
+            if (firstScanSelectedBag) {
+                const historyNote = firstScanHistory.length > 0
+                    ? ` with ${firstScanHistory.length} scanned parcel${firstScanHistory.length !== 1 ? 's' : ''}`
+                    : '';
+                const progressNote = firstScanHistory.length > 0
+                    ? ' Current progress in the active box will be cleared.'
+                    : '';
+                setCustomConfirmModal({
+                    title: "Switch Bag Session?",
+                    message: `You are currently scanning Bag "${firstScanSelectedBag}"${historyNote}. Are you sure you want to switch to Bag "${matchedBag.bagNumber}"?${progressNote}`,
+                    onConfirm: () => {
+                        setFirstScanSelectedBag(matchedBag.bagNumber);
+                        setFirstScanExpected(matchedBag.expectedCount);
+                        setFirstScanError('');
+                        setFirstScanLastScanned('');
+                        setFirstScanStatus('READY');
+                        setFirstScanHistory([]);
+                    }
+                });
+                return;
             }
             setFirstScanSelectedBag(matchedBag.bagNumber);
             setFirstScanExpected(matchedBag.expectedCount);
             setFirstScanError('');
-            setFirstScanInput('');
             setFirstScanLastScanned('');
             setFirstScanStatus('READY');
             setFirstScanHistory([]);
+            return;
+        } else if (barcode.toUpperCase().startsWith('SKYT')) {
+            setInvalidBagParcelModal({
+                barcode: barcode,
+                expectedBag: '',
+                actualBag: null,
+                reason: 'INVALID_BAG'
+            });
+            setFirstScanError(`Bag barcode "${barcode}" not found in this MAWB.`);
+            setFirstScanStatus('ERROR');
             return;
         }
 
         // 2. Regular Parcel Barcode Scan
         if (!firstScanSelectedBag) {
-            setFirstScanError(`Please select a bag or scan a valid Bag Barcode first.`);
+            setInvalidBagParcelModal({
+                barcode: barcode,
+                expectedBag: '',
+                actualBag: null,
+                reason: 'NO_BAG_SELECTED'
+            });
+            setFirstScanError(`Bag barcode "${barcode}" not found in this MAWB.`);
             setFirstScanStatus('ERROR');
-            setFirstScanInput('');
             return;
         }
 
@@ -433,14 +663,16 @@ export default function WorkstationDashboard() {
                 body: JSON.stringify({
                     trackingNumber: barcode,
                     stage: 'first',
-                    mawbRef: firstScanMawb
+                    mawbRef: firstScanMawb,
+                    bagNumber: firstScanSelectedBag
                 }),
             });
-            const data: AllocationResponse = await response.json();
+            const data: any = await response.json();
             if (data.success && data.parcel) {
                 const now = new Date();
                 const timeStr = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
-                setFirstScanHistory(prev => [
+
+                const newHistory = [
                     {
                         trackingNumber: barcode,
                         recipientName: data.parcel?.recipientName || 'Unknown Recipient',
@@ -449,20 +681,160 @@ export default function WorkstationDashboard() {
                         assignedPartner: data.assignedPartner,
                         assignedZone: data.assignedZone
                     },
-                    ...prev
-                ]);
+                    ...firstScanHistory
+                ];
+
+                setFirstScanHistory(newHistory);
                 setFirstScanCurrentScan({
                     assignedPartner: data.assignedPartner,
                     assignedZone: data.assignedZone
                 });
                 setScannedToday((prev) => prev + 1);
                 setFirstScanStatus('SUCCESS');
+
+                // Check if bag count has reached expected — show "extra parcels?" check first
+                if (newHistory.length === Number(firstScanExpected)) {
+                    setOverageCheckModal({
+                        bagNumber: firstScanSelectedBag,
+                        expected: Number(firstScanExpected),
+                        history: newHistory
+                    });
+                }
             } else {
-                throw new Error(data.error || 'Unknown scan error');
+                if (data.error === 'NOT_IN_BAG') {
+                    if (data.actualBag) {
+                        setExtraParcelModal({
+                            barcode: barcode,
+                            reason: 'WRONG_BAG',
+                            actualBag: data.actualBag,
+                            expectedBag: firstScanSelectedBag
+                        });
+                    } else {
+                        setExtraParcelModal({
+                            barcode: barcode,
+                            reason: 'UNASSIGNED',
+                            actualBag: null,
+                            expectedBag: firstScanSelectedBag
+                        });
+                    }
+                    setFirstScanError(data.message || 'Parcel belongs to a different bag or is unassigned.');
+                    setFirstScanStatus('ERROR');
+                } else if (data.error === 'NOT_FOUND') {
+                    setExtraParcelModal({
+                        barcode: barcode,
+                        reason: 'NOT_FOUND',
+                        actualBag: null,
+                        expectedBag: firstScanSelectedBag
+                    });
+                    setFirstScanError(`Parcel "${barcode}" not found in database.`);
+                    setFirstScanStatus('ERROR');
+                } else {
+                    setInvalidBagParcelModal({
+                        barcode: barcode,
+                        expectedBag: firstScanSelectedBag,
+                        actualBag: null,
+                        reason: 'NOT_FOUND'
+                    });
+                    setFirstScanError(data.error || 'Unknown scan error');
+                    setFirstScanStatus('ERROR');
+                }
             }
         } catch (err: any) {
+            setInvalidBagParcelModal({
+                barcode: barcode,
+                expectedBag: firstScanSelectedBag,
+                actualBag: null,
+                reason: 'NOT_FOUND'
+            });
             setFirstScanError(err.message || 'API connection failure');
             setFirstScanStatus('ERROR');
+        }
+    };
+
+    const handleFirstScanSubmitOverride = async (
+        barcode: string,
+        opts: { overrideBag?: boolean; registerExtra?: boolean; note?: string }
+    ) => {
+        setFirstScanStatus('FETCHING');
+        setFirstScanError('');
+        setFirstScanLastScanned(barcode);
+
+        try {
+            const response = await fetch('/api/allocate', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    trackingNumber: barcode,
+                    stage: 'first',
+                    mawbRef: firstScanMawb,
+                    bagNumber: firstScanSelectedBag,
+                    overrideBag: opts.overrideBag,
+                    registerExtra: opts.registerExtra,
+                    extraNote: opts.note
+                }),
+            });
+            const data: any = await response.json();
+            if (data.success && data.parcel) {
+                const now = new Date();
+                const timeStr = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+
+                const newHistory = [
+                    {
+                        trackingNumber: barcode,
+                        recipientName: data.parcel?.recipientName || 'Unknown Recipient',
+                        city: data.parcel?.city || 'Unknown City',
+                        timestamp: timeStr,
+                        assignedPartner: data.assignedPartner,
+                        assignedZone: data.assignedZone
+                    },
+                    ...firstScanHistory
+                ];
+
+                setFirstScanHistory(newHistory);
+                setFirstScanCurrentScan({
+                    assignedPartner: data.assignedPartner,
+                    assignedZone: data.assignedZone
+                });
+                setScannedToday((prev) => prev + 1);
+                setFirstScanStatus('SUCCESS');
+
+                // Check if bag count has reached expected — show "extra parcels?" check first
+                if (newHistory.length === Number(firstScanExpected)) {
+                    setOverageCheckModal({
+                        bagNumber: firstScanSelectedBag,
+                        expected: Number(firstScanExpected),
+                        history: newHistory
+                    });
+                }
+
+                setSuccessModal({
+                    title: opts.registerExtra ? "Extra Parcel Registered" : "Parcel Re-assigned",
+                    message: opts.registerExtra
+                        ? `Untracked parcel "${barcode}" has been registered in Bag "${firstScanSelectedBag}" with note: "${opts.note || 'None'}".`
+                        : `Parcel "${barcode}" has been re-assigned to Bag "${firstScanSelectedBag}".`
+                });
+            } else {
+                setInvalidBagParcelModal({
+                    barcode: barcode,
+                    expectedBag: firstScanSelectedBag,
+                    actualBag: null,
+                    reason: 'NOT_FOUND'
+                });
+                setFirstScanError(data.error || 'Failed to update database.');
+                setFirstScanStatus('ERROR');
+            }
+        } catch (err: any) {
+            setInvalidBagParcelModal({
+                barcode: barcode,
+                expectedBag: firstScanSelectedBag,
+                actualBag: null,
+                reason: 'NOT_FOUND'
+            });
+            setFirstScanError(err.message || 'API connection failure');
+            setFirstScanStatus('ERROR');
+        } finally {
+            setExtraParcelModal(null);
+            setExtraParcelNote('');
         }
     };
 
@@ -481,6 +853,10 @@ export default function WorkstationDashboard() {
         e.preventDefault();
         const barcode = barcodeInput.trim();
         if (!barcode) return;
+
+        // Clear input instantly to prevent barcode concatenation
+        setBarcodeInput('');
+        if (scanInputRef.current) scanInputRef.current.value = '';
 
         // Auto select input text so next scan overwrites it
         setTimeout(() => {
@@ -530,6 +906,10 @@ export default function WorkstationDashboard() {
         e.preventDefault();
         const barcode = verifyBarcodeInput.trim();
         if (!barcode || !selectedBin) return;
+
+        // Clear input instantly to prevent barcode concatenation
+        setVerifyBarcodeInput('');
+        if (verifyInputRef.current) verifyInputRef.current.value = '';
 
         // Auto select input text so next scan overwrites it
         setTimeout(() => {
@@ -1166,11 +1546,6 @@ export default function WorkstationDashboard() {
                 ═══════════════════════════════════════════════════════ */}
                     {activeTab === 'first-scan' && (
                         <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-                            {firstScanError && (
-                                <div style={{ backgroundColor: '#fef2f2', border: '1px solid #fca5a5', color: '#dc2626', padding: '12px 16px', borderRadius: '8px', display: 'flex', alignItems: 'center', gap: '8px', fontSize: '14px', fontWeight: '500' }}>
-                                    Scan Error: {firstScanError}
-                                </div>
-                            )}
 
                             {/* Two Column Grid */}
                             <div style={{
@@ -1205,8 +1580,8 @@ export default function WorkstationDashboard() {
                                                     )}
                                                 </select>
                                             </div>
-                                            
-                                            {/* Scanning Tip */}
+
+                                            {/* Scanning Tip
                                             {firstScanMawb && (
                                                 <div style={{ fontSize: '11px', color: '#6b7280', backgroundColor: '#f9fafb', padding: '8px 12px', borderRadius: '6px', border: '1px solid #e5e7eb', display: 'flex', alignItems: 'center', gap: '6px' }}>
                                                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ color: '#e21b22', flexShrink: 0 }}>
@@ -1214,7 +1589,7 @@ export default function WorkstationDashboard() {
                                                     </svg>
                                                     <span><strong>Tip:</strong> You can select the bag by scanning its barcode directly in the input box below.</span>
                                                 </div>
-                                            )}
+                                            )} */}
 
                                             <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 1.2fr 1fr', gap: '12px' }}>
                                                 <div>
@@ -1223,15 +1598,23 @@ export default function WorkstationDashboard() {
                                                     </label>
                                                     <form onSubmit={(e) => {
                                                         e.preventDefault();
-                                                        if (!bagBarcodeInput) return;
-                                                        const matchedBag = firstScanBags.find(b => b.bagNumber.toLowerCase() === bagBarcodeInput.trim().toLowerCase());
+                                                        const scannedVal = bagBarcodeInput.trim();
+                                                        if (!scannedVal) return;
+                                                        const matchedBag = firstScanBags.find(b => b.bagNumber.toLowerCase() === scannedVal.toLowerCase());
                                                         if (matchedBag) {
-                                                            if (firstScanSelectedBag && firstScanHistory.length > 0 && firstScanSelectedBag !== matchedBag.bagNumber) {
-                                                                const confirmSwitch = window.confirm(`You are currently scanning Bag "${firstScanSelectedBag}". Are you sure you want to switch to Bag "${matchedBag.bagNumber}"? Current progress in the active box will be cleared.`);
-                                                                if (!confirmSwitch) {
-                                                                    setBagBarcodeInput('');
-                                                                    return;
-                                                                }
+                                                            if (firstScanSelectedBag && firstScanSelectedBag !== matchedBag.bagNumber) {
+                                                                setCustomConfirmModal({
+                                                                    title: "Switch Bag Session?",
+                                                                    message: `You are currently scanning Bag "${firstScanSelectedBag}". Are you sure you want to switch to Bag "${matchedBag.bagNumber}"? Current progress in the active box will be cleared.`,
+                                                                    onConfirm: () => {
+                                                                        setFirstScanSelectedBag(matchedBag.bagNumber);
+                                                                        setFirstScanExpected(matchedBag.expectedCount);
+                                                                        setFirstScanError('');
+                                                                        setFirstScanHistory([]);
+                                                                        setBagBarcodeInput(matchedBag.bagNumber);
+                                                                    }
+                                                                });
+                                                                return;
                                                             }
                                                             setFirstScanSelectedBag(matchedBag.bagNumber);
                                                             setFirstScanExpected(matchedBag.expectedCount);
@@ -1240,7 +1623,13 @@ export default function WorkstationDashboard() {
                                                             setBagBarcodeInput(matchedBag.bagNumber);
                                                             setTimeout(() => bagBarcodeInputRef.current?.select(), 50);
                                                         } else {
-                                                            setFirstScanError(`Bag barcode "${bagBarcodeInput}" not found in this MAWB.`);
+                                                            setInvalidBagParcelModal({
+                                                                barcode: scannedVal,
+                                                                expectedBag: '',
+                                                                actualBag: null,
+                                                                reason: 'INVALID_BAG'
+                                                            });
+                                                            setFirstScanError(`Bag barcode "${scannedVal}" not found in this MAWB.`);
                                                             setTimeout(() => bagBarcodeInputRef.current?.select(), 50);
                                                         }
                                                     }}>
@@ -1309,10 +1698,10 @@ export default function WorkstationDashboard() {
                                                         }
                                                     }}
                                                     disabled={!firstScanMawb}
-                                                    placeholder={firstScanMawb 
-                                                        ? (firstScanSelectedBag 
-                                                            ? `Scan parcel inside Bag ${firstScanSelectedBag}...` 
-                                                            : "Scan Bag Barcode or select a bag first...") 
+                                                    placeholder={firstScanMawb
+                                                        ? (firstScanSelectedBag
+                                                            ? `Scan parcel inside Bag ${firstScanSelectedBag}...`
+                                                            : "Scan Bag Barcode or select a bag first...")
                                                         : "Select MAWB first"}
                                                     className={!firstScanMawb ? '' : 'scan-input-blink'}
                                                     style={{ ...inputStyle, flex: 1, backgroundColor: !firstScanMawb ? '#f3f4f6' : '#ffffff' }}
@@ -1391,11 +1780,7 @@ export default function WorkstationDashboard() {
                                             </table>
                                         </div>
                                     </div>
-                                </div>
 
-                                {/* Right Column: Bags Progress & Partner Allocation Stats */}
-                                <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-                                    
                                     {/* Bags Progress overview Card */}
                                     {firstScanMawb && (
                                         <div style={card}>
@@ -1427,7 +1812,7 @@ export default function WorkstationDashboard() {
                                             {firstScanBags.length > 0 && firstScanBags.filter(b => getBagStatus(b.bagNumber, b.expectedCount) !== 'COMPLETED').length === 0 && (
                                                 <div style={{ backgroundColor: '#f0fdf4', border: '1px solid #bbf7d0', color: '#166534', padding: '12px 16px', borderRadius: '8px', marginBottom: '16px', fontSize: '13px', fontWeight: '600', display: 'flex', alignItems: 'center', gap: '8px' }}>
                                                     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ color: '#16a34a' }}>
-                                                        <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/>
+                                                        <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14" /><polyline points="22 4 12 14.01 9 11.01" />
                                                     </svg>
                                                     <span>All bags for this MAWB have been unsealed successfully!</span>
                                                 </div>
@@ -1435,12 +1820,13 @@ export default function WorkstationDashboard() {
 
                                             {/* Bags list */}
                                             <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', maxHeight: '350px', overflowY: 'auto', paddingRight: '4px' }}>
-                                                {firstScanBags.map((bag) => {
+                                                {getSortedBags().map((bag) => {
                                                     const expected = bag.expectedCount;
                                                     const scanned = getBagScannedCount(bag.bagNumber);
                                                     const status = getBagStatus(bag.bagNumber, expected);
                                                     const remaining = expected - scanned;
-                                                    
+                                                    const unsealed = unsealedBoxes.find(ub => ub.mawb === firstScanMawb && ub.bagNumber === bag.bagNumber);
+
                                                     let bgColor = '#ffffff';
                                                     let borderColor = '#e5e7eb';
                                                     let textColor = '#374151';
@@ -1471,7 +1857,14 @@ export default function WorkstationDashboard() {
                                                         <div
                                                             key={bag.bagNumber}
                                                             onClick={() => {
-                                                                if (status !== 'COMPLETED') {
+                                                                if (status === 'COMPLETED') {
+                                                                    setInvalidBagParcelModal({
+                                                                        barcode: bag.bagNumber,
+                                                                        expectedBag: bag.bagNumber,
+                                                                        actualBag: null,
+                                                                        reason: 'BAG_ALREADY_COMPLETED'
+                                                                    });
+                                                                } else {
                                                                     setFirstScanSelectedBag(bag.bagNumber);
                                                                     // Refocus scan input
                                                                     setTimeout(() => firstScanInputRef.current?.focus(), 50);
@@ -1490,21 +1883,36 @@ export default function WorkstationDashboard() {
                                                                 transition: 'all 0.15s ease'
                                                             }}
                                                         >
-                                                            <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
+                                                            <div style={{ display: 'flex', flexDirection: 'column', gap: '2px', maxWidth: '65%' }}>
                                                                 <span style={{ fontWeight: '700', fontSize: '13px', color: textColor }}>
                                                                     Bag: {bag.bagNumber}
                                                                 </span>
-                                                                <span style={{ fontSize: '11px', color: descColor }}>
-                                                                    {status === 'COMPLETED' 
-                                                                        ? 'Unsealed successfully'
+                                                                <span style={{ fontSize: '11px', color: descColor, wordBreak: 'break-word' }}>
+                                                                    {status === 'COMPLETED'
+                                                                        ? (unsealed && unsealed.status && unsealed.status !== 'COUNTED'
+                                                                            ? `Unsealed with note: ${unsealed.status}`
+                                                                            : 'Unsealed successfully')
                                                                         : status === 'ONGOING'
                                                                             ? `${remaining} parcels remaining`
                                                                             : `Awaiting unsealing (${expected} expected)`
                                                                     }
                                                                 </span>
                                                             </div>
-                                                            
+
                                                             <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                                                {scanned !== expected && status === 'COMPLETED' && (
+                                                                    <span style={{
+                                                                        fontSize: '10px',
+                                                                        fontWeight: '700',
+                                                                        color: scanned < expected ? '#dc2626' : '#ea580c',
+                                                                        backgroundColor: scanned < expected ? '#fee2e2' : '#ffedd5',
+                                                                        padding: '2px 6px',
+                                                                        borderRadius: '4px',
+                                                                        whiteSpace: 'nowrap'
+                                                                    }}>
+                                                                        {scanned < expected ? `-${expected - scanned} Missing` : `+${scanned - expected} Extra`}
+                                                                    </span>
+                                                                )}
                                                                 <span style={{ fontWeight: '700', fontSize: '12px', color: textColor }}>
                                                                     {scanned} / {expected}
                                                                 </span>
@@ -1526,6 +1934,10 @@ export default function WorkstationDashboard() {
                                             </div>
                                         </div>
                                     )}
+                                </div>
+
+                                {/* Right Column: Bags Progress & Partner Allocation Stats */}
+                                <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
 
                                     {/* Live Discrepancy & Verification Dashboard Card */}
                                     <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
@@ -1663,30 +2075,39 @@ export default function WorkstationDashboard() {
                                             <div style={{ display: 'flex', gap: '8px', marginTop: '16px' }}>
                                                 <button
                                                     onClick={() => {
+                                                        setDiscrepancyReason('');
+                                                        setCustomDiscrepancyNote('');
                                                         setConfirmFinishModal(true);
                                                     }}
-                                                    disabled={firstScanHistory.length === 0 || firstScanExpected === '' || firstScanHistory.length !== firstScanExpected}
+                                                    disabled={firstScanHistory.length === 0 || firstScanExpected === ''}
                                                     style={{
                                                         flex: 1,
-                                                        backgroundColor: '#1f2937',
+                                                        backgroundColor: firstScanHistory.length === Number(firstScanExpected) ? '#1f2937' : firstScanHistory.length < Number(firstScanExpected) ? '#1d4ed8' : '#b45309',
                                                         color: '#ffffff',
                                                         border: 'none',
                                                         borderRadius: '6px',
                                                         padding: '10px',
                                                         fontSize: '13px',
                                                         fontWeight: '600',
-                                                        cursor: (firstScanHistory.length === 0 || firstScanExpected === '' || firstScanHistory.length !== firstScanExpected) ? 'not-allowed' : 'pointer',
-                                                        opacity: (firstScanHistory.length === 0 || firstScanExpected === '' || firstScanHistory.length !== firstScanExpected) ? 0.5 : 1,
+                                                        cursor: (firstScanHistory.length === 0 || firstScanExpected === '') ? 'not-allowed' : 'pointer',
+                                                        opacity: (firstScanHistory.length === 0 || firstScanExpected === '') ? 0.5 : 1,
                                                         textAlign: 'center'
                                                     }}
                                                 >
-                                                    Finish Box (Save & Close)
+                                                    {firstScanHistory.length === Number(firstScanExpected)
+                                                        ? '✓ Finish Box (Save & Close)'
+                                                        : firstScanHistory.length < Number(firstScanExpected)
+                                                            ? `⚠ Finish with Shortage (${Number(firstScanExpected) - firstScanHistory.length} Missing)`
+                                                            : `⚠ Finish with Overage (+${firstScanHistory.length - Number(firstScanExpected)} Extra)`
+                                                    }
                                                 </button>
                                                 <button
                                                     onClick={() => {
-                                                        if (window.confirm("Clear all scanned records for this box?")) {
-                                                            handleClearFirstScan();
-                                                        }
+                                                        setCustomConfirmModal({
+                                                            title: 'Clear Scanned Records?',
+                                                            message: 'Are you sure you want to clear all scanned records for this box? This action will reset your current scanning progress.',
+                                                            onConfirm: () => handleClearFirstScan()
+                                                        });
                                                     }}
                                                     style={{
                                                         backgroundColor: '#ffffff',
@@ -2539,7 +2960,7 @@ export default function WorkstationDashboard() {
                                                             border: diff === 0 ? '1px solid #a7f3d0' : '1px solid #fca5a5',
                                                             padding: '2px 8px', borderRadius: '4px', fontSize: '11px', fontWeight: '600'
                                                         }}>
-                                                            {diff === 0 ? 'Counted' : 'Discrepancy'}
+                                                            {diff === 0 ? 'Counted' : (box.status || 'Discrepancy')}
                                                         </span>
                                                     </td>
                                                 </tr>
@@ -2819,7 +3240,579 @@ export default function WorkstationDashboard() {
             )}
 
             {/* ── CONFIRM FINISH MODAL ── */}
-            {confirmFinishModal && (
+            {confirmFinishModal && (() => {
+                const isExact = firstScanHistory.length === Number(firstScanExpected);
+                const diff = firstScanHistory.length - Number(firstScanExpected);
+                const isShortage = diff < 0;
+                const isOverage = diff > 0;
+                const accentColor = isExact ? '#16a34a' : isShortage ? '#1d4ed8' : '#b45309';
+                const shortageOptions = ['Missing Parcels', 'Stolen or Lost in Transit', 'Damaged & Discarded', 'Other (Custom Note)'];
+                const overageOptions = ['Extra Parcels Scanned', 'Wrongly Routed to Bag', 'Other (Custom Note)'];
+                const options = isShortage ? shortageOptions : overageOptions;
+                const canConfirm = isExact || (discrepancyReason !== '' && (discrepancyReason !== 'Other (Custom Note)' || customDiscrepancyNote.trim() !== ''));
+                return (
+                    <div style={{
+                        position: 'fixed',
+                        top: 0, left: 0, right: 0, bottom: 0,
+                        backgroundColor: 'rgba(0, 0, 0, 0.6)',
+                        backdropFilter: 'blur(3px)',
+                        display: 'flex', alignItems: 'center', justifyContent: 'center',
+                        zIndex: 3000,
+                        animation: 'fadeIn 0.2s ease-out'
+                    }}>
+                        <div style={{
+                            backgroundColor: '#ffffff',
+                            border: `2px solid ${accentColor}`,
+                            borderRadius: '12px',
+                            padding: '28px 24px',
+                            width: '500px',
+                            maxWidth: '92%',
+                            boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.15), 0 10px 10px -5px rgba(0, 0, 0, 0.04)',
+                            textAlign: 'center'
+                        }}>
+                            {/* Icon */}
+                            <div style={{
+                                backgroundColor: isExact ? '#d1fae5' : isShortage ? '#dbeafe' : '#fef3c7',
+                                color: accentColor,
+                                width: '56px', height: '56px',
+                                borderRadius: '50%',
+                                display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                                marginBottom: '16px'
+                            }}>
+                                {isExact ? (
+                                    <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12" /></svg>
+                                ) : (
+                                    <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" /><line x1="12" y1="9" x2="12" y2="13" /><line x1="12" y1="17" x2="12.01" y2="17" /></svg>
+                                )}
+                            </div>
+
+                            {/* Title */}
+                            <h3 style={{ fontSize: '18px', fontWeight: '700', color: '#111827', margin: '0 0 8px 0' }}>
+                                {isExact ? '✓ Finish Box Session?' : isShortage ? '⚠ Shortage Detected' : '⚠ Overage Detected'}
+                            </h3>
+
+                            {/* Count Summary */}
+                            <div style={{
+                                display: 'inline-flex', gap: '20px', alignItems: 'center',
+                                backgroundColor: '#f9fafb', border: '1px solid #e5e7eb',
+                                borderRadius: '8px', padding: '10px 20px', margin: '0 0 16px 0', fontSize: '14px'
+                            }}>
+                                <span>Expected: <strong style={{ color: '#111827' }}>{firstScanExpected}</strong></span>
+                                <span style={{ color: '#9ca3af' }}>|</span>
+                                <span>Scanned: <strong style={{ color: accentColor }}>{firstScanHistory.length}</strong></span>
+                                {!isExact && (
+                                    <>
+                                        <span style={{ color: '#9ca3af' }}>|</span>
+                                        <span style={{ fontWeight: '700', color: accentColor }}>
+                                            {isShortage ? `${diff} Missing` : `+${diff} Extra`}
+                                        </span>
+                                    </>
+                                )}
+                            </div>
+
+                            {/* Message */}
+                            <p style={{ fontSize: '13px', color: '#6b7280', lineHeight: '1.6', margin: '0 0 20px 0' }}>
+                                {isExact
+                                    ? `All ${firstScanHistory.length} parcels verified. Bag "${firstScanSelectedBag}" will be marked as COUNTED.`
+                                    : isShortage
+                                        ? `Bag "${firstScanSelectedBag}" has ${Math.abs(diff)} fewer parcel${Math.abs(diff) !== 1 ? 's' : ''} than expected. Please select a shortage reason before closing.`
+                                        : `Bag "${firstScanSelectedBag}" has ${diff} extra parcel${diff !== 1 ? 's' : ''} beyond the expected count. Please select an overage reason before closing.`
+                                }
+                            </p>
+
+                            {/* Discrepancy Reason Form (only when mismatch) */}
+                            {!isExact && (
+                                <div style={{ textAlign: 'left', marginBottom: '20px' }}>
+                                    <div style={{ fontSize: '12px', fontWeight: '700', color: '#374151', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '8px' }}>
+                                        {isShortage ? 'Shortage Reason' : 'Overage Reason'} <span style={{ color: '#e21b22' }}>*</span>
+                                    </div>
+                                    <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                                        {options.map((opt) => (
+                                            <label key={opt} style={{
+                                                display: 'flex', alignItems: 'center', gap: '10px',
+                                                padding: '9px 12px',
+                                                backgroundColor: discrepancyReason === opt ? (isShortage ? '#eff6ff' : '#fffbeb') : '#f9fafb',
+                                                border: `1px solid ${discrepancyReason === opt ? accentColor : '#e5e7eb'}`,
+                                                borderRadius: '8px', cursor: 'pointer', fontSize: '13px', fontWeight: '500',
+                                                color: discrepancyReason === opt ? accentColor : '#374151',
+                                                transition: 'all 0.15s ease'
+                                            }}>
+                                                <input
+                                                    type="radio"
+                                                    name="discrepancyReason"
+                                                    value={opt}
+                                                    checked={discrepancyReason === opt}
+                                                    onChange={() => {
+                                                        setDiscrepancyReason(opt);
+                                                        if (opt !== 'Other (Custom Note)') setCustomDiscrepancyNote('');
+                                                    }}
+                                                    style={{ accentColor: accentColor }}
+                                                />
+                                                {opt}
+                                            </label>
+                                        ))}
+                                    </div>
+                                    {discrepancyReason === 'Other (Custom Note)' && (
+                                        <textarea
+                                            value={customDiscrepancyNote}
+                                            onChange={(e) => setCustomDiscrepancyNote(e.target.value)}
+                                            placeholder="Describe the reason for the discrepancy..."
+                                            rows={3}
+                                            style={{
+                                                width: '100%', marginTop: '10px', padding: '10px 12px',
+                                                border: `1px solid ${accentColor}`, borderRadius: '8px',
+                                                fontSize: '13px', color: '#111827', resize: 'vertical',
+                                                outline: 'none', boxSizing: 'border-box', fontFamily: 'inherit'
+                                            }}
+                                        />
+                                    )}
+                                    {!discrepancyReason && (
+                                        <p style={{ fontSize: '12px', color: '#e21b22', marginTop: '8px', fontWeight: '500' }}>
+                                            ⚠ You must select a reason to close this bag.
+                                        </p>
+                                    )}
+                                </div>
+                            )}
+
+                            {/* Actions */}
+                            <div style={{ display: 'flex', gap: '10px' }}>
+                                <button
+                                    onClick={handleConfirmFinish}
+                                    disabled={!canConfirm}
+                                    style={{
+                                        flex: 1,
+                                        backgroundColor: canConfirm ? accentColor : '#9ca3af',
+                                        color: '#ffffff',
+                                        border: 'none',
+                                        borderRadius: '8px',
+                                        padding: '12px 18px',
+                                        fontSize: '14px',
+                                        fontWeight: '600',
+                                        cursor: canConfirm ? 'pointer' : 'not-allowed',
+                                        transition: 'all 0.15s ease'
+                                    }}
+                                    onMouseOver={(e) => { if (canConfirm) e.currentTarget.style.opacity = '0.85'; }}
+                                    onMouseOut={(e) => { e.currentTarget.style.opacity = '1'; }}
+                                >
+                                    {isExact ? 'Yes, Confirm (Enter/Space)' : 'Submit & Close Bag (Enter)'}
+                                </button>
+                                <button
+                                    onClick={() => {
+                                        setConfirmFinishModal(false);
+                                        setDiscrepancyReason('');
+                                        setCustomDiscrepancyNote('');
+                                        setTimeout(() => {
+                                            if (activeTab === 'first-scan') firstScanInputRef.current?.focus();
+                                        }, 50);
+                                    }}
+                                    style={{
+                                        flex: 1,
+                                        backgroundColor: '#ffffff',
+                                        border: '1px solid #d1d5db',
+                                        color: '#374151',
+                                        borderRadius: '8px',
+                                        padding: '12px 18px',
+                                        fontSize: '14px',
+                                        fontWeight: '600',
+                                        cursor: 'pointer',
+                                        transition: 'all 0.15s ease'
+                                    }}
+                                    onMouseOver={(e) => { e.currentTarget.style.backgroundColor = '#f9fafb'; }}
+                                    onMouseOut={(e) => { e.currentTarget.style.backgroundColor = '#ffffff'; }}
+                                >
+                                    Cancel (Esc)
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                );
+            })()}
+
+            {/* ── OVERAGE CHECK MODAL (fires when count hits expected) ── */}
+            {overageCheckModal && (
+                <div style={{
+                    position: 'fixed',
+                    top: 0, left: 0, right: 0, bottom: 0,
+                    backgroundColor: 'rgba(0, 0, 0, 0.6)',
+                    backdropFilter: 'blur(3px)',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    zIndex: 3000,
+                    animation: 'fadeIn 0.2s ease-out'
+                }}>
+                    <div style={{
+                        backgroundColor: '#ffffff',
+                        border: '2px solid #16a34a',
+                        borderRadius: '12px',
+                        padding: '30px 24px',
+                        width: '480px',
+                        maxWidth: '92%',
+                        boxShadow: '0 20px 25px -5px rgba(0,0,0,0.15)',
+                        textAlign: 'center'
+                    }}>
+                        {/* Icon */}
+                        <div style={{
+                            backgroundColor: '#d1fae5', color: '#16a34a',
+                            width: '56px', height: '56px', borderRadius: '50%',
+                            display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                            marginBottom: '16px'
+                        }}>
+                            <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12" /></svg>
+                        </div>
+
+                        <h3 style={{ fontSize: '18px', fontWeight: '700', color: '#111827', margin: '0 0 8px 0' }}>
+                            All {overageCheckModal.expected} Parcels Scanned!
+                        </h3>
+
+                        {/* Count pill */}
+                        <div style={{
+                            display: 'inline-flex', gap: '16px', alignItems: 'center',
+                            backgroundColor: '#f0fdf4', border: '1px solid #bbf7d0',
+                            borderRadius: '8px', padding: '8px 18px', margin: '0 0 16px 0', fontSize: '14px'
+                        }}>
+                            <span>Expected: <strong style={{ color: '#111827' }}>{overageCheckModal.expected}</strong></span>
+                            <span style={{ color: '#9ca3af' }}>|</span>
+                            <span>Scanned: <strong style={{ color: '#16a34a' }}>{overageCheckModal.history.length}</strong></span>
+                        </div>
+
+                        <p style={{ fontSize: '14px', color: '#4b5563', lineHeight: '1.6', margin: '0 0 20px 0' }}>
+                            Bag <strong style={{ color: '#111827' }}>&quot;{overageCheckModal.bagNumber}&quot;</strong> has reached its expected count.
+                            Are there any <strong style={{ color: '#b45309' }}>additional (extra) parcels</strong> still in this bag?
+                        </p>
+
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                            {/* No extra parcels → auto-close bag as COUNTED */}
+                            <button
+                                onClick={async () => {
+                                    const { bagNumber, expected, history } = overageCheckModal;
+                                    setOverageCheckModal(null);
+                                    await autoFinishBag(bagNumber, expected, history);
+                                }}
+                                style={{
+                                    backgroundColor: '#16a34a', color: '#ffffff',
+                                    border: 'none', borderRadius: '8px',
+                                    padding: '12px 18px', fontSize: '14px', fontWeight: '600',
+                                    cursor: 'pointer', width: '100%', transition: 'all 0.15s ease'
+                                }}
+                                onMouseOver={(e) => { e.currentTarget.style.backgroundColor = '#15803d'; }}
+                                onMouseOut={(e) => { e.currentTarget.style.backgroundColor = '#16a34a'; }}
+                            >
+                                ✓ No Extra Parcels — Close Bag (Enter)
+                            </button>
+
+                            {/* Yes, extra parcels → keep scanning, overage will be shown on Finish */}
+                            <button
+                                onClick={() => {
+                                    setOverageCheckModal(null);
+                                    setTimeout(() => firstScanInputRef.current?.focus(), 50);
+                                }}
+                                style={{
+                                    backgroundColor: '#fffbeb', color: '#b45309',
+                                    border: '2px solid #fcd34d', borderRadius: '8px',
+                                    padding: '12px 18px', fontSize: '14px', fontWeight: '600',
+                                    cursor: 'pointer', width: '100%', transition: 'all 0.15s ease'
+                                }}
+                                onMouseOver={(e) => { e.currentTarget.style.backgroundColor = '#fef3c7'; }}
+                                onMouseOut={(e) => { e.currentTarget.style.backgroundColor = '#fffbeb'; }}
+                            >
+                                Yes, There Are More Parcels — Continue Scanning (Space)
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* ── INVALID PARCEL / SCAN ERROR MODAL ── */}
+            {invalidBagParcelModal && (
+                <div style={{
+                    position: 'fixed',
+                    top: 0, left: 0, right: 0, bottom: 0,
+                    backgroundColor: 'rgba(0, 0, 0, 0.6)',
+                    backdropFilter: 'blur(3px)',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    zIndex: 3000,
+                    animation: 'fadeIn 0.2s ease-out'
+                }}>
+                    <div style={{
+                        backgroundColor: '#ffffff',
+                        border: '2px solid #dc2626',
+                        borderRadius: '12px',
+                        padding: '30px 24px',
+                        width: '450px',
+                        maxWidth: '90%',
+                        boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.15)',
+                        textAlign: 'center'
+                    }}>
+                        {/* Red Warning Icon */}
+                        <div style={{
+                            backgroundColor: '#fee2e2',
+                            color: '#dc2626',
+                            width: '56px', height: '56px',
+                            borderRadius: '50%',
+                            display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                            marginBottom: '20px'
+                        }}>
+                            <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                                <circle cx="12" cy="12" r="10" />
+                                <line x1="12" y1="8" x2="12" y2="12" />
+                                <line x1="12" y1="16" x2="12.01" y2="16" />
+                            </svg>
+                        </div>
+
+                        {/* Title */}
+                        <h3 style={{ fontSize: '18px', fontWeight: '700', color: '#111827', margin: '0 0 12px 0' }}>
+                            {invalidBagParcelModal.reason === 'BAG_ALREADY_COMPLETED' ? 'Bag Already Completed' : 'Scan Error'}
+                        </h3>
+
+                        {/* Content Message */}
+                        <p style={{ fontSize: '14px', color: '#374151', lineHeight: '1.6', margin: '0 0 16px 0', fontWeight: '500' }}>
+                            {invalidBagParcelModal.reason === 'WRONG_BAG'
+                                ? `This parcel belongs to Bag "${invalidBagParcelModal.actualBag || 'Unknown'}", not "${invalidBagParcelModal.expectedBag}".`
+                                : invalidBagParcelModal.reason === 'NOT_FOUND'
+                                    ? `Parcel "${invalidBagParcelModal.barcode}" was not found in the database.`
+                                    : invalidBagParcelModal.reason === 'BAG_ALREADY_COMPLETED'
+                                        ? `Bag "${invalidBagParcelModal.expectedBag}" has already been completed and unsealed!`
+                                        : `Bag barcode "${invalidBagParcelModal.barcode}" not found in this MAWB.`}
+                        </p>
+
+                        {/* Format notice popup alert */}
+                        {(invalidBagParcelModal.reason === 'INVALID_BAG' || invalidBagParcelModal.reason === 'NO_BAG_SELECTED') && (
+                            <div style={{
+                                backgroundColor: '#fef2f2',
+                                border: '1px solid #fca5a5',
+                                borderRadius: '8px',
+                                padding: '12px 14px',
+                                fontSize: '13px',
+                                color: '#991b1b',
+                                marginBottom: '20px',
+                                textAlign: 'left',
+                                lineHeight: '1.5'
+                            }}>
+                                <strong style={{ display: 'block', marginBottom: '4px' }}>💡 Barcode Format Notice:</strong>
+                                <span>
+                                    {invalidBagParcelModal.barcode.match(/^\d+$/) ? `"${invalidBagParcelModal.barcode}" appears to be a parcel tracking number, not a Bag Barcode. ` : ''}
+                                    Bag Barcodes follow the format <strong>SKYTxxxxxxxxxxxx</strong> (e.g., <code>SKYT260704960688</code>). Please scan or select a valid Bag Barcode first.
+                                </span>
+                            </div>
+                        )}
+
+                        {/* Action Button */}
+                        <button
+                            onClick={() => {
+                                setInvalidBagParcelModal(null);
+                                setFirstScanInput('');
+                                setBagBarcodeInput('');
+                                setBarcodeInput('');
+                                setVerifyBarcodeInput('');
+                                if (firstScanInputRef.current) firstScanInputRef.current.value = '';
+                                if (bagBarcodeInputRef.current) bagBarcodeInputRef.current.value = '';
+                                if (scanInputRef.current) scanInputRef.current.value = '';
+                                if (verifyInputRef.current) verifyInputRef.current.value = '';
+                                setTimeout(() => {
+                                    if (activeTab === 'first-scan') {
+                                        if (!firstScanSelectedBag && bagBarcodeInputRef.current) {
+                                            bagBarcodeInputRef.current.focus();
+                                        } else {
+                                            firstScanInputRef.current?.focus();
+                                        }
+                                    }
+                                }, 50);
+                            }}
+                            style={{
+                                backgroundColor: '#dc2626',
+                                color: '#ffffff',
+                                border: 'none',
+                                borderRadius: '8px',
+                                padding: '12px 24px',
+                                fontSize: '14px',
+                                fontWeight: '600',
+                                width: '100%',
+                                cursor: 'pointer',
+                                transition: 'all 0.15s ease'
+                            }}
+                        >
+                            Dismiss (Press Enter / Space)
+                        </button>
+                    </div>
+                </div>
+            )}
+
+            {/* ── INTERACTIVE EXTRA PARCEL RESOLUTION MODAL ── */}
+            {extraParcelModal && (() => {
+                const isWrongBag = extraParcelModal.reason === 'WRONG_BAG';
+                const isUnassigned = extraParcelModal.reason === 'UNASSIGNED';
+                const isNotFound = extraParcelModal.reason === 'NOT_FOUND';
+
+                const themeColor = isWrongBag ? '#d97706' : isUnassigned ? '#2563eb' : '#dc2626';
+                const bgLight = isWrongBag ? '#fef3c7' : isUnassigned ? '#eff6ff' : '#fef2f2';
+
+                let modalTitle = 'Scan Exception';
+                let message = '';
+                let actionText = 'Proceed';
+
+                if (isWrongBag) {
+                    modalTitle = '⚠ Wrong Bag Detected';
+                    message = `Parcel "${extraParcelModal.barcode}" belongs to Bag "${extraParcelModal.actualBag || 'Unknown'}", not "${extraParcelModal.expectedBag}".`;
+                    actionText = `Move to Bag "${extraParcelModal.expectedBag}"`;
+                } else if (isUnassigned) {
+                    modalTitle = 'ℹ Unassigned Parcel';
+                    message = `Parcel "${extraParcelModal.barcode}" is in the database but not assigned to any bag.`;
+                    actionText = `Assign to Bag "${extraParcelModal.expectedBag}"`;
+                } else if (isNotFound) {
+                    modalTitle = '🚨 Parcel Not in Manifest';
+                    message = `Parcel "${extraParcelModal.barcode}" was not found in the manifest/database.`;
+                    actionText = `Register & Add to Bag "${extraParcelModal.expectedBag}"`;
+                }
+
+                const canSubmit = !isNotFound || extraParcelNote.trim() !== '';
+
+                return (
+                    <div style={{
+                        position: 'fixed',
+                        top: 0, left: 0, right: 0, bottom: 0,
+                        backgroundColor: 'rgba(0, 0, 0, 0.6)',
+                        backdropFilter: 'blur(3px)',
+                        display: 'flex', alignItems: 'center', justifyContent: 'center',
+                        zIndex: 3000,
+                        animation: 'fadeIn 0.2s ease-out'
+                    }}>
+                        <div style={{
+                            backgroundColor: '#ffffff',
+                            border: `2px solid ${themeColor}`,
+                            borderRadius: '12px',
+                            padding: '30px 24px',
+                            width: '480px',
+                            maxWidth: '92%',
+                            boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.15)',
+                            textAlign: 'center'
+                        }}>
+                            {/* Icon */}
+                            <div style={{
+                                backgroundColor: bgLight,
+                                color: themeColor,
+                                width: '56px', height: '56px',
+                                borderRadius: '50%',
+                                display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                                marginBottom: '16px'
+                            }}>
+                                {isNotFound ? (
+                                    <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                                        <polygon points="7.86 2 16.14 2 22 7.86 22 16.14 16.14 22 7.86 22 2 16.14 2 7.86 7.86 2" />
+                                        <line x1="12" y1="8" x2="12" y2="12" />
+                                        <line x1="12" y1="16" x2="12.01" y2="16" />
+                                    </svg>
+                                ) : (
+                                    <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                                        <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
+                                        <line x1="12" y1="9" x2="12" y2="13" />
+                                        <line x1="12" y1="17" x2="12.01" y2="17" />
+                                    </svg>
+                                )}
+                            </div>
+
+                            {/* Title */}
+                            <h3 style={{ fontSize: '18px', fontWeight: '700', color: '#111827', margin: '0 0 10px 0' }}>
+                                {modalTitle}
+                            </h3>
+
+                            {/* Main Message */}
+                            <p style={{ fontSize: '14px', color: '#374151', lineHeight: '1.5', margin: '0 0 16px 0', fontWeight: '500' }}>
+                                {message}
+                            </p>
+
+                            {/* Subtitle instructions */}
+                            <p style={{ fontSize: '13px', color: '#6b7280', margin: '0 0 20px 0', lineHeight: '1.4' }}>
+                                {isWrongBag
+                                    ? `Do you want to keep the parcel in Bag "${extraParcelModal.actualBag}" or move/override it to your active Bag "${extraParcelModal.expectedBag}"?`
+                                    : isUnassigned
+                                        ? `Do you want to assign this untracked parcel to the currently unsealing Bag "${extraParcelModal.expectedBag}"?`
+                                        : `This untracked parcel will be added. Admin will be notified of this discrepancy. Please provide a brief note/reason below.`}
+                            </p>
+
+                            {/* Note field */}
+                            <div style={{ textAlign: 'left', marginBottom: '20px' }}>
+                                <label style={{ fontSize: '12px', fontWeight: '700', color: '#374151', textTransform: 'uppercase', display: 'block', marginBottom: '6px' }}>
+                                    Discrepancy Note {isNotFound && <span style={{ color: '#dc2626' }}>*</span>}
+                                </label>
+                                <textarea
+                                    value={extraParcelNote}
+                                    onChange={(e) => setExtraParcelNote(e.target.value)}
+                                    placeholder={isNotFound ? "Enter a reason (e.g. Received extra without manifest item)..." : "Optional comments..."}
+                                    rows={2}
+                                    style={{
+                                        width: '100%', padding: '10px 12px',
+                                        border: '1px solid #d1d5db', borderRadius: '8px',
+                                        fontSize: '13px', color: '#111827', resize: 'vertical',
+                                        outline: 'none', boxSizing: 'border-box', fontFamily: 'inherit'
+                                    }}
+                                />
+                                {isNotFound && !canSubmit && (
+                                    <p style={{ fontSize: '11px', color: '#dc2626', marginTop: '6px', fontWeight: '500' }}>
+                                        ⚠ Note/Reason is required to register a parcel not in manifest.
+                                    </p>
+                                )}
+                            </div>
+
+                            {/* Actions */}
+                            <div style={{ display: 'flex', gap: '10px' }}>
+                                <button
+                                    onClick={() => {
+                                        handleFirstScanSubmitOverride(extraParcelModal.barcode, {
+                                            overrideBag: isWrongBag || isUnassigned,
+                                            registerExtra: isNotFound,
+                                            note: extraParcelNote
+                                        });
+                                    }}
+                                    disabled={!canSubmit}
+                                    style={{
+                                        flex: 1,
+                                        backgroundColor: canSubmit ? themeColor : '#9ca3af',
+                                        color: '#ffffff',
+                                        border: 'none',
+                                        borderRadius: '8px',
+                                        padding: '12px 16px',
+                                        fontSize: '13px',
+                                        fontWeight: '600',
+                                        cursor: canSubmit ? 'pointer' : 'not-allowed',
+                                        transition: 'all 0.15s ease'
+                                    }}
+                                >
+                                    {actionText}
+                                </button>
+                                <button
+                                    onClick={() => {
+                                        setExtraParcelModal(null);
+                                        setExtraParcelNote('');
+                                        setTimeout(() => {
+                                            if (firstScanInputRef.current) {
+                                                firstScanInputRef.current.value = '';
+                                                setFirstScanInput('');
+                                                firstScanInputRef.current.focus();
+                                            }
+                                        }, 50);
+                                    }}
+                                    style={{
+                                        flex: 1,
+                                        backgroundColor: '#ffffff',
+                                        border: '1px solid #d1d5db',
+                                        color: '#374151',
+                                        borderRadius: '8px',
+                                        padding: '12px 16px',
+                                        fontSize: '13px',
+                                        fontWeight: '600',
+                                        cursor: 'pointer',
+                                        transition: 'all 0.15s ease'
+                                    }}
+                                >
+                                    Cancel (Esc)
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                );
+            })()}
+
+            {/* ── CUSTOM CONFIRM MODAL ── */}
+            {customConfirmModal && (
                 <div style={{
                     position: 'fixed',
                     top: 0, left: 0, right: 0, bottom: 0,
@@ -2834,12 +3827,12 @@ export default function WorkstationDashboard() {
                         border: '2px solid #e21b22',
                         borderRadius: '12px',
                         padding: '30px 24px',
-                        width: '450px',
+                        width: '460px',
                         maxWidth: '90%',
-                        boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.15), 0 10px 10px -5px rgba(0, 0, 0, 0.04)',
+                        boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.15)',
                         textAlign: 'center'
                     }}>
-                        {/* Question Icon */}
+                        {/* Warning Icon */}
                         <div style={{
                             backgroundColor: '#fee2e2',
                             color: '#e21b22',
@@ -2849,26 +3842,30 @@ export default function WorkstationDashboard() {
                             marginBottom: '20px'
                         }}>
                             <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                                <circle cx="12" cy="12" r="10" />
-                                <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3" />
+                                <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
+                                <line x1="12" y1="9" x2="12" y2="13" />
                                 <line x1="12" y1="17" x2="12.01" y2="17" />
                             </svg>
                         </div>
 
                         {/* Title */}
                         <h3 style={{ fontSize: '18px', fontWeight: '700', color: '#111827', margin: '0 0 10px 0' }}>
-                            Finish Box Session?
+                            {customConfirmModal.title}
                         </h3>
 
                         {/* Content Message */}
                         <p style={{ fontSize: '14px', color: '#4b5563', lineHeight: '1.6', margin: '0 0 24px 0' }}>
-                            Are you sure you want to finish and close this box session? This will lock the current count of <strong style={{ color: '#111827' }}>{firstScanHistory.length}</strong> scanned parcels for MAWB <strong style={{ color: '#111827' }}>{firstScanMawb}</strong>.
+                            {customConfirmModal.message}
                         </p>
 
                         {/* Actions */}
                         <div style={{ display: 'flex', gap: '10px' }}>
                             <button
-                                onClick={handleConfirmFinish}
+                                onClick={() => {
+                                    const action = customConfirmModal.onConfirm;
+                                    setCustomConfirmModal(null);
+                                    action();
+                                }}
                                 style={{
                                     flex: 1,
                                     backgroundColor: '#e21b22',
@@ -2881,14 +3878,12 @@ export default function WorkstationDashboard() {
                                     cursor: 'pointer',
                                     transition: 'all 0.15s ease'
                                 }}
-                                onMouseOver={(e) => { e.currentTarget.style.backgroundColor = '#b91c1c'; }}
-                                onMouseOut={(e) => { e.currentTarget.style.backgroundColor = '#e21b22'; }}
                             >
-                                Yes, Finish Box (Enter)
+                                Yes, Confirm (Enter/Space)
                             </button>
                             <button
                                 onClick={() => {
-                                    setConfirmFinishModal(false);
+                                    setCustomConfirmModal(null);
                                     setTimeout(() => {
                                         if (activeTab === 'first-scan') firstScanInputRef.current?.focus();
                                     }, 50);
@@ -2905,8 +3900,6 @@ export default function WorkstationDashboard() {
                                     cursor: 'pointer',
                                     transition: 'all 0.15s ease'
                                 }}
-                                onMouseOver={(e) => { e.currentTarget.style.backgroundColor = '#f9fafb'; }}
-                                onMouseOut={(e) => { e.currentTarget.style.backgroundColor = '#ffffff'; }}
                             >
                                 Cancel (Esc)
                             </button>

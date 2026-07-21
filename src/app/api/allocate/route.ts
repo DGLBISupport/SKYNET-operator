@@ -105,7 +105,18 @@ async function resolveZoneAndPartner(
 
 export async function POST(request: Request) {
     try {
-        const { trackingNumber, stage = 'second', mawbRef, bagNumber, expectedCount, scannedCount, status: bagStatus } = await request.json();
+        const { 
+            trackingNumber, 
+            stage = 'second', 
+            mawbRef, 
+            bagNumber, 
+            expectedCount, 
+            scannedCount, 
+            status: bagStatus,
+            overrideBag,
+            registerExtra,
+            extraNote
+        } = await request.json();
 
         const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
         const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
@@ -200,11 +211,90 @@ export async function POST(request: Request) {
                 const shipments = await shipRes.json();
                 shipment = shipments && shipments[0];
             }
+
+            // Handle registerExtra if shipment is NOT found
+            if (!shipment && registerExtra) {
+                let trackingStr = trackingNumber.trim();
+                let refToInsert = shipmentRef;
+                if (!isNumeric) {
+                    refToInsert = Math.floor(100000000 + Math.random() * 900000000);
+                }
+                const newShipment = {
+                    reference_number: refToInsert,
+                    bag_number: bagNumber,
+                    mawb_ref: mawbRef || '603-70659761',
+                    consignee_name: 'Untracked Extra Parcel',
+                    consignee_location_name: 'Unknown City',
+                    consignee_state: 'Unknown Province',
+                    consignee_address_3: 'Unknown District',
+                    weight: 0.1,
+                    sender_reference: isNumeric ? null : trackingStr,
+                    goods_description: extraNote ? `Extra: ${extraNote}` : 'Untracked extra parcel registered by unsealing staff'
+                };
+
+                const insertShipRes = await fetch(`${supabaseUrl}/rest/v1/shipments`, {
+                    method: 'POST',
+                    headers: {
+                        ...headers,
+                        "Content-Type": "application/json",
+                        "Prefer": "return=representation"
+                    },
+                    body: JSON.stringify(newShipment)
+                });
+
+                if (insertShipRes.ok) {
+                    const insertedShipments = await insertShipRes.json();
+                    shipment = insertedShipments && insertedShipments[0];
+                    if (shipment) {
+                        shipmentRef = shipment.reference_number;
+                    }
+                } else {
+                    const errText = await insertShipRes.text();
+                    return NextResponse.json({ success: false, error: `Failed to register extra shipment: ${errText}` }, { status: 500 });
+                }
+            }
+
             if (!shipment) {
                 return NextResponse.json({
                     success: false,
-                    error: `Shipment reference number ${shipmentRef} not found in database.`
+                    error: 'NOT_FOUND',
+                    message: `Shipment reference number ${shipmentRef} not found in database.`
                 }, { status: 404 });
+            }
+
+            // Handle overrideBag if shipment is found but bag number doesn't match
+            if (bagNumber) {
+                const shipmentBag = shipment.bag_number || '';
+                if (shipmentBag.toLowerCase() !== bagNumber.toLowerCase()) {
+                    if (overrideBag) {
+                        // Update bag_number in database
+                        const updateShipRes = await fetch(`${supabaseUrl}/rest/v1/shipments?reference_number=eq.${shipmentRef}`, {
+                            method: 'PATCH',
+                            headers: {
+                                ...headers,
+                                "Content-Type": "application/json"
+                            },
+                            body: JSON.stringify({
+                                bag_number: bagNumber,
+                                goods_description: extraNote ? `Overage: ${extraNote}` : (shipment.goods_description || '')
+                            })
+                        });
+                        if (updateShipRes.ok) {
+                            shipment.bag_number = bagNumber;
+                        } else {
+                            const errText = await updateShipRes.text();
+                            return NextResponse.json({ success: false, error: `Failed to update shipment bag: ${errText}` }, { status: 500 });
+                        }
+                    } else {
+                        return NextResponse.json({
+                            success: false,
+                            error: 'NOT_IN_BAG',
+                            message: `This parcel belongs to Bag "${shipment.bag_number || 'Unknown'}", not the currently selected Bag "${bagNumber}".`,
+                            actualBag: shipment.bag_number || null,
+                            expectedBag: bagNumber
+                        }, { status: 400 });
+                    }
+                }
             }
 
             // 2. Check if already exists in allocations
@@ -537,15 +627,28 @@ export async function GET(request: Request) {
                 searchMawb = '6331c8b6-9182-4e36-86f1-73a2431f5bc8';
             }
             
-            const res = await fetch(`${supabaseUrl}/rest/v1/shipments?mawb_reference=eq.${searchMawb}&select=bag_number`, { headers });
-            if (!res.ok) {
-                const errText = await res.text();
-                return NextResponse.json({ success: false, error: errText }, { status: 500 });
+            let allShipments: any[] = [];
+            let offset = 0;
+            const limit = 1000;
+            let hasMore = true;
+
+            while (hasMore) {
+                const res = await fetch(`${supabaseUrl}/rest/v1/shipments?mawb_reference=eq.${searchMawb}&select=bag_number&limit=${limit}&offset=${offset}`, { headers });
+                if (!res.ok) {
+                    const errText = await res.text();
+                    return NextResponse.json({ success: false, error: errText }, { status: 500 });
+                }
+                const shipments = await res.json();
+                allShipments = allShipments.concat(shipments);
+                if (shipments.length < limit) {
+                    hasMore = false;
+                } else {
+                    offset += limit;
+                }
             }
-            const shipments = await res.json();
             
             const bagCountsMap: Record<string, number> = {};
-            shipments.forEach((s: any) => {
+            allShipments.forEach((s: any) => {
                 if (s.bag_number) {
                     bagCountsMap[s.bag_number] = (bagCountsMap[s.bag_number] || 0) + 1;
                 }
