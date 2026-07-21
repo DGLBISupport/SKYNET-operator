@@ -19,6 +19,7 @@ export default function SignupPage() {
     email: "",
     password: "",
     confirmPassword: "",
+    pin: "",
   });
 
   const [formError, setFormError] = useState({
@@ -27,6 +28,7 @@ export default function SignupPage() {
     email: "",
     password: "",
     confirmPassword: "",
+    pin: "",
   });
 
   const validateFormData = () => {
@@ -36,6 +38,7 @@ export default function SignupPage() {
       email: "",
       password: "",
       confirmPassword: "",
+      pin: "",
     };
 
     if (!formData.firstName && !formData.lastName && !formData.email && !formData.password && !formData.confirmPassword) {
@@ -86,6 +89,20 @@ export default function SignupPage() {
       return false;
     }
 
+    if (!formData.pin) {
+      newErrors.pin = "4-digit quick-switch PIN is required";
+      setFormError(newErrors);
+      toast.error("PIN is required");
+      return false;
+    }
+
+    if (!/^\d{4}$/.test(formData.pin)) {
+      newErrors.pin = "PIN must be exactly 4 digits";
+      setFormError(newErrors);
+      toast.error("PIN must be exactly 4 digits (numeric only)");
+      return false;
+    }
+
     setFormError(newErrors);
     return true;
   };
@@ -106,6 +123,7 @@ export default function SignupPage() {
           lastName: formData.lastName.trim(),
           email: formData.email.trim(),
           password: formData.password,
+          pin: formData.pin,
         }),
       });
 
@@ -206,6 +224,19 @@ export default function SignupPage() {
                 onChange={(e) => setFormData({ ...formData, confirmPassword: e.target.value })}
               />
               {formError.confirmPassword && <p style={{ color: "#dc2626", fontSize: "11px", margin: "4px 0 0 0" }}>{formError.confirmPassword}</p>}
+            </div>
+            <div>
+              <Label htmlFor="pin">4-Digit Quick-Switch PIN (numeric only)</Label>
+              <Input
+                id="pin"
+                type="text"
+                maxLength={4}
+                placeholder="1234"
+                required
+                value={formData.pin}
+                onChange={(e) => setFormData({ ...formData, pin: e.target.value.replace(/\D/g, "") })}
+              />
+              {formError.pin && <p style={{ color: "#dc2626", fontSize: "11px", margin: "4px 0 0 0" }}>{formError.pin}</p>}
             </div>
           </div>
         </CardContent>

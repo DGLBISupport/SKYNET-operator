@@ -44,14 +44,18 @@ export default function WorkstationDashboard() {
     }, [currentUser]);
 
     const handleSwitchUserSubmit = async () => {
-        if (!switchUserModal || !switchUserPassword) return;
+        if (!switchUserModal || !switchUserFirstName || !switchUserPassword) {
+            toast.error("Both First name and 4-digit PIN are required.");
+            return;
+        }
         try {
-            const res = await fetch("/api/auth/login", {
+            const res = await fetch("/api/auth/switch", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({
                     email: switchUserModal.email,
-                    password: switchUserPassword
+                    firstName: switchUserFirstName,
+                    pin: switchUserPassword
                 })
             });
             const data = await res.json();
@@ -59,10 +63,11 @@ export default function WorkstationDashboard() {
                 localStorage.setItem("skynet_user", JSON.stringify(data.user));
                 setCurrentUser(data.user);
                 setSwitchUserModal(null);
+                setSwitchUserFirstName('');
                 setSwitchUserPassword('');
                 toast.success(`Successfully switched operator to ${data.user.firstName}`);
             } else {
-                toast.error(data.error || "Authentication failed.");
+                toast.error(data.error || "Switching failed.");
             }
         } catch (e) {
             console.error(e);
@@ -172,6 +177,7 @@ export default function WorkstationDashboard() {
     const [verifiedCount, setVerifiedCount] = useState(0);
     const [usersList, setUsersList] = useState<any[]>([]);
     const [switchUserModal, setSwitchUserModal] = useState<any | null>(null);
+    const [switchUserFirstName, setSwitchUserFirstName] = useState('');
     const [switchUserPassword, setSwitchUserPassword] = useState('');
     const [renewPinModal, setRenewPinModal] = useState(false);
     const [renewForm, setRenewForm] = useState({
@@ -4054,32 +4060,64 @@ export default function WorkstationDashboard() {
                         <h3 style={{ fontSize: '18px', fontWeight: '700', color: '#111827', margin: '0 0 10px 0' }}>
                             Switch Operator
                         </h3>
-                        <p style={{ fontSize: '14px', color: '#374151', margin: '0 0 20px 0' }}>
-                            Please enter the PIN/Password for <strong>{switchUserModal.first_name} {switchUserModal.last_name}</strong> to complete switch.
+                        <p style={{ fontSize: '13px', color: '#6b7280', margin: '0 0 20px 0' }}>
+                            Verify identity for <strong>{switchUserModal.first_name} {switchUserModal.last_name}</strong> to switch profile.
                         </p>
-                        <input
-                            type="password"
-                            placeholder="Enter PIN / Password"
-                            value={switchUserPassword}
-                            onChange={(e) => setSwitchUserPassword(e.target.value)}
-                            onKeyDown={(e) => {
-                                if (e.key === 'Enter') handleSwitchUserSubmit();
-                            }}
-                            style={{
-                                width: '100%',
-                                padding: '10px 12px',
-                                border: '1px solid #d1d5db',
-                                borderRadius: '8px',
-                                fontSize: '14px',
-                                outline: 'none',
-                                boxSizing: 'border-box',
-                                marginBottom: '20px',
-                                textAlign: 'center',
-                                fontWeight: '600',
-                                letterSpacing: '4px'
-                            }}
-                            autoFocus
-                        />
+                        
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', textAlign: 'left', marginBottom: '20px' }}>
+                            <div>
+                                <label style={{ fontSize: '11px', fontWeight: '700', color: '#374151', display: 'block', marginBottom: '4px', textTransform: 'uppercase' }}>
+                                    First Name
+                                </label>
+                                <input
+                                    type="text"
+                                    placeholder="Enter First Name (e.g. Shashini)"
+                                    value={switchUserFirstName}
+                                    onChange={(e) => setSwitchUserFirstName(e.target.value)}
+                                    onKeyDown={(e) => {
+                                        if (e.key === 'Enter') handleSwitchUserSubmit();
+                                    }}
+                                    style={{
+                                        width: '100%',
+                                        padding: '10px 12px',
+                                        border: '1px solid #d1d5db',
+                                        borderRadius: '8px',
+                                        fontSize: '13px',
+                                        outline: 'none',
+                                        boxSizing: 'border-box'
+                                    }}
+                                    autoFocus
+                                />
+                            </div>
+                            <div>
+                                <label style={{ fontSize: '11px', fontWeight: '700', color: '#374151', display: 'block', marginBottom: '4px', textTransform: 'uppercase' }}>
+                                    4-Digit Quick-Switch PIN
+                                </label>
+                                <input
+                                    type="password"
+                                    maxLength={4}
+                                    placeholder="••••"
+                                    value={switchUserPassword}
+                                    onChange={(e) => setSwitchUserPassword(e.target.value.replace(/\D/g, ''))}
+                                    onKeyDown={(e) => {
+                                        if (e.key === 'Enter') handleSwitchUserSubmit();
+                                    }}
+                                    style={{
+                                        width: '100%',
+                                        padding: '10px 12px',
+                                        border: '1px solid #d1d5db',
+                                        borderRadius: '8px',
+                                        fontSize: '14px',
+                                        outline: 'none',
+                                        boxSizing: 'border-box',
+                                        textAlign: 'center',
+                                        fontWeight: '700',
+                                        letterSpacing: '6px'
+                                    }}
+                                />
+                            </div>
+                        </div>
+
                         <div style={{ display: 'flex', gap: '10px' }}>
                             <button
                                 onClick={handleSwitchUserSubmit}
@@ -4101,6 +4139,7 @@ export default function WorkstationDashboard() {
                             <button
                                 onClick={() => {
                                     setSwitchUserModal(null);
+                                    setSwitchUserFirstName('');
                                     setSwitchUserPassword('');
                                 }}
                                 style={{

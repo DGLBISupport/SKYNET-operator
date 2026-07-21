@@ -1,5 +1,7 @@
 import { NextResponse } from "next/server";
 
+export const dynamic = "force-dynamic";
+
 export async function GET() {
   try {
     const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -19,6 +21,7 @@ export async function GET() {
 
     const res = await fetch(`${supabaseUrl}/rest/v1/users?status=eq.ACTIVE&select=id,first_name,last_name,email,username,role`, {
       headers,
+      cache: 'no-store'
     });
 
     if (!res.ok) {

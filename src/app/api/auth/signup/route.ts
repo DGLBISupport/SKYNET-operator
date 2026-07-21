@@ -3,11 +3,18 @@ import crypto from "crypto";
 
 export async function POST(request: Request) {
   try {
-    const { email, password, firstName, lastName } = await request.json();
+    const { email, password, firstName, lastName, pin } = await request.json();
 
-    if (!email || !password || !firstName || !lastName) {
+    if (!email || !password || !firstName || !lastName || !pin) {
       return NextResponse.json(
-        { success: false, error: "Missing required fields" },
+        { success: false, error: "Missing required fields." },
+        { status: 400 }
+      );
+    }
+
+    if (!/^\d{4}$/.test(pin)) {
+      return NextResponse.json(
+        { success: false, error: "PIN must be exactly 4 digits." },
         { status: 400 }
       );
     }
@@ -50,10 +57,15 @@ export async function POST(request: Request) {
       );
     }
 
-    // 2. Hash password using SHA-256
+    // 2. Hash password and pin using SHA-256
     const hashedPassword = crypto
       .createHash("sha256")
       .update(password)
+      .digest("hex");
+
+    const hashedPin = crypto
+      .createHash("sha256")
+      .update(pin)
       .digest("hex");
 
     // 3. Insert user into users table
@@ -66,6 +78,7 @@ export async function POST(request: Request) {
         hashed_password: hashedPassword,
         first_name: firstName,
         last_name: lastName,
+        phone_number: hashedPin,
         status: "ACTIVE",
         role: "operator",
       }),
