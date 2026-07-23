@@ -1417,6 +1417,56 @@ export default function WorkstationDashboard() {
             return;
         }
 
+        // ── PRE-CHECK DUPLICATE across ALL outbound bags in current manifest ──
+        const cleanBarcodeLMD = barcode.trim().toLowerCase();
+        let foundBag: any = null;
+        let preExistingLMD: any = null;
+
+        for (const b of (outboundBags || [])) {
+            const p = (b.parcels || []).find((item: any) =>
+                item.trackingNumber?.trim().toLowerCase() === cleanBarcodeLMD ||
+                item.senderReference?.trim().toLowerCase() === cleanBarcodeLMD
+            );
+            if (p) {
+                foundBag = b;
+                preExistingLMD = p;
+                break;
+            }
+        }
+
+        if (preExistingLMD && foundBag) {
+            const skynetCode = preExistingLMD.trackingNumber || barcode;
+            const temuCode = preExistingLMD.senderReference;
+            const isTemu = preExistingLMD._scannedVia === 'TEMU';
+            const isSealed = foundBag.status === 'SEALED';
+
+            const dupMsg = isSealed
+                ? `Already scanned — parcel (${skynetCode}) is ALREADY sealed in Bag "${foundBag.bagNumber}". Cannot assign to another bag.`
+                : foundBag.bagNumber !== activeOutboundBag.bagNumber
+                    ? `Already scanned — parcel (${skynetCode}) is ALREADY assigned to Bag "${foundBag.bagNumber}".`
+                    : isTemu
+                        ? `This parcel (${skynetCode}) was already added to Bag "${activeOutboundBag.bagNumber}" using its Temu Barcode "${temuCode}". Cannot scan Skynet barcode again.`
+                        : `Already scanned — this barcode is already assigned to Bag "${activeOutboundBag.bagNumber}".`;
+
+            setStatus('ERROR');
+            setErrorMessage(dupMsg);
+            setValidationCard({
+                status: 'INCORRECT',
+                reason: 'DUPLICATE',
+                error: dupMsg,
+                bagNumber: activeOutboundBag.bagNumber
+            });
+            setDuplicateModal({
+                barcode,
+                skynetTrackingNumber: skynetCode,
+                senderReference: temuCode,
+                originalMethod: isTemu ? `Temu Barcode (${temuCode})` : `Skynet Barcode (${skynetCode})`,
+                message: dupMsg,
+                type: 'allocate'
+            });
+            return;
+        }
+
         setStatus('FETCHING');
         setErrorMessage('');
         setLastScanned(barcode);
@@ -1480,30 +1530,30 @@ export default function WorkstationDashboard() {
                 }
 
             } else {
-                // Validation: INCORRECT!
+                // Validation: INCORRECT — show popup, do NOT update Parcel Validation Result
                 setStatus('ERROR');
                 const errMsg = data.error || `Parcel validation failed for "${barcode}".`;
                 setErrorMessage(errMsg);
 
-                setValidationCard({
-                    status: 'INCORRECT',
-                    reason: data.reason || 'VALIDATION_FAILED',
-                    error: errMsg,
-                    parcel: data.parcel,
-                    assignedPartner: data.assignedPartner,
-                    assignedZone: data.assignedZone,
-                    bagNumber: activeOutboundBag.bagNumber
+                // Show popup modal with error — Parcel Validation Result stays unchanged
+                setDuplicateModal({
+                    barcode,
+                    skynetTrackingNumber: data.parcel?.trackingNumber || barcode,
+                    senderReference: data.parcel?.senderReference,
+                    originalMethod: `Scan`,
+                    message: errMsg,
+                    type: 'allocate'
                 });
             }
 
         } catch (err: any) {
             setErrorMessage(err.message || 'API connection failure');
             setStatus('ERROR');
-            setValidationCard({
-                status: 'INCORRECT',
-                reason: 'API_ERROR',
-                error: err.message || 'API connection failure',
-                bagNumber: activeOutboundBag.bagNumber
+            setDuplicateModal({
+                barcode,
+                skynetTrackingNumber: barcode,
+                message: err.message || 'API connection failure',
+                type: 'allocate'
             });
         }
     };
@@ -2519,73 +2569,75 @@ export default function WorkstationDashboard() {
                                 </div>
                             </div>
 
-                            {/* ASSIGNED PARTNER Card (Placed directly below Box Setup & Unsealing) */}
-                            <div style={{
-                                backgroundColor: firstScanCurrentScan?.assignedPartner === 'Domex'
-                                    ? '#7b0f1a'
-                                    : firstScanCurrentScan?.assignedPartner === 'Pronto'
-                                        ? '#ea580c'
-                                        : '#ffcc00', // Signature PickMe Yellow
-                                borderRadius: '16px',
-                                padding: '24px 20px',
-                                boxShadow: '0 4px 12px rgba(0,0,0,0.06)',
-                                display: 'flex',
-                                flexDirection: 'column',
-                                alignItems: 'center',
-                                justifyContent: 'center',
-                                transition: 'all 0.2s ease-in-out'
-                            }}>
+                            {/* ASSIGNED PARTNER Card (only shown after a barcode scan) */}
+                            {firstScanCurrentScan && (
                                 <div style={{
-                                    fontSize: '12px',
-                                    fontWeight: '800',
-                                    color: firstScanCurrentScan?.assignedPartner === 'Domex' || firstScanCurrentScan?.assignedPartner === 'Pronto' ? '#ffffff' : '#000000',
-                                    textTransform: 'uppercase',
-                                    letterSpacing: '0.8px',
-                                    marginBottom: '16px',
-                                    textAlign: 'center'
-                                }}>
-                                    ASSIGNED PARTNER
-                                </div>
-
-                                {/* Center White Card for Partner Logo */}
-                                <div style={{
-                                    backgroundColor: '#ffffff',
+                                    backgroundColor: firstScanCurrentScan.assignedPartner === 'Domex'
+                                        ? '#7b0f1a'
+                                        : firstScanCurrentScan.assignedPartner === 'Pronto'
+                                            ? '#ea580c'
+                                            : '#ffcc00',
                                     borderRadius: '16px',
-                                    padding: '16px 28px',
-                                    width: '100%',
-                                    maxWidth: '300px',
-                                    height: '130px',
+                                    padding: '24px 20px',
+                                    boxShadow: '0 4px 12px rgba(0,0,0,0.06)',
                                     display: 'flex',
+                                    flexDirection: 'column',
                                     alignItems: 'center',
                                     justifyContent: 'center',
-                                    boxShadow: '0 4px 12px rgba(0,0,0,0.08)',
-                                    marginBottom: '16px',
-                                    boxSizing: 'border-box'
+                                    transition: 'all 0.2s ease-in-out'
                                 }}>
-                                    {firstScanCurrentScan?.assignedPartner === 'Domex' ? (
-                                        <img src="/domex_logo.png" alt="Domex" style={{ maxHeight: '95px', maxWidth: '90%', objectFit: 'contain' }} />
-                                    ) : firstScanCurrentScan?.assignedPartner === 'Pronto' ? (
-                                        <span style={{ color: '#ea580c', fontWeight: '900', fontSize: '34px', letterSpacing: '1px' }}>PRONTO</span>
-                                    ) : (
-                                        <img src="/pick_me_logo.png" alt="PickMe" style={{ maxHeight: '95px', maxWidth: '90%', objectFit: 'contain' }} />
-                                    )}
-                                </div>
+                                    <div style={{
+                                        fontSize: '12px',
+                                        fontWeight: '800',
+                                        color: firstScanCurrentScan.assignedPartner === 'Domex' || firstScanCurrentScan.assignedPartner === 'Pronto' ? '#ffffff' : '#000000',
+                                        textTransform: 'uppercase',
+                                        letterSpacing: '0.8px',
+                                        marginBottom: '16px',
+                                        textAlign: 'center'
+                                    }}>
+                                        ASSIGNED PARTNER
+                                    </div>
 
-                                {/* Zone Pill Badge */}
-                                <div style={{
-                                    display: 'inline-flex',
-                                    alignItems: 'center',
-                                    justifyContent: 'center',
-                                    backgroundColor: 'rgba(0, 0, 0, 0.04)',
-                                    border: '1px solid rgba(0, 0, 0, 0.2)',
-                                    borderRadius: '20px',
-                                    padding: '6px 20px',
-                                    fontSize: '13.5px',
-                                    color: firstScanCurrentScan?.assignedPartner === 'Domex' || firstScanCurrentScan?.assignedPartner === 'Pronto' ? '#ffffff' : '#000000'
-                                }}>
-                                    Zone: <span style={{ fontWeight: '800', marginLeft: '4px' }}>{firstScanCurrentScan?.assignedZone || 'Default-Zone'}</span>
+                                    {/* Center White Card for Partner Logo */}
+                                    <div style={{
+                                        backgroundColor: '#ffffff',
+                                        borderRadius: '16px',
+                                        padding: '16px 28px',
+                                        width: '100%',
+                                        maxWidth: '300px',
+                                        height: '130px',
+                                        display: 'flex',
+                                        alignItems: 'center',
+                                        justifyContent: 'center',
+                                        boxShadow: '0 4px 12px rgba(0,0,0,0.08)',
+                                        marginBottom: '16px',
+                                        boxSizing: 'border-box'
+                                    }}>
+                                        {firstScanCurrentScan.assignedPartner === 'Domex' ? (
+                                            <img src="/domex_logo.png" alt="Domex" style={{ maxHeight: '95px', maxWidth: '90%', objectFit: 'contain' }} />
+                                        ) : firstScanCurrentScan.assignedPartner === 'Pronto' ? (
+                                            <span style={{ color: '#ea580c', fontWeight: '900', fontSize: '34px', letterSpacing: '1px' }}>PRONTO</span>
+                                        ) : (
+                                            <img src="/pick_me_logo.png" alt="PickMe" style={{ maxHeight: '95px', maxWidth: '90%', objectFit: 'contain' }} />
+                                        )}
+                                    </div>
+
+                                    {/* Zone Pill Badge */}
+                                    <div style={{
+                                        display: 'inline-flex',
+                                        alignItems: 'center',
+                                        justifyContent: 'center',
+                                        backgroundColor: 'rgba(0, 0, 0, 0.04)',
+                                        border: '1px solid rgba(0, 0, 0, 0.2)',
+                                        borderRadius: '20px',
+                                        padding: '6px 20px',
+                                        fontSize: '13.5px',
+                                        color: firstScanCurrentScan.assignedPartner === 'Domex' || firstScanCurrentScan.assignedPartner === 'Pronto' ? '#ffffff' : '#000000'
+                                    }}>
+                                        Zone: <span style={{ fontWeight: '800', marginLeft: '4px' }}>{firstScanCurrentScan.assignedZone || 'Default-Zone'}</span>
+                                    </div>
                                 </div>
-                            </div>
+                            )}
 
                             {/* 2 Column Grid: Scanned Parcels Table (Left) and MAWB Bags Progress Overview (Right) */}
                             <div style={{
@@ -3017,18 +3069,14 @@ export default function WorkstationDashboard() {
                                                 }}
                                                 disabled={secondScanManifestStatus === 'CLOSED'}
                                                 style={{
-                                                    backgroundColor: secondScanManifestStatus === 'CLOSED' ? '#9ca3af' : '#374151',
-                                                    color: '#ffffff',
-                                                    border: '1px solid #1f2937',
+                                                    backgroundColor: secondScanManifestStatus === 'CLOSED' ? '#9ca3af' : '#ffffff',
+                                                    color: secondScanManifestStatus === 'CLOSED' ? '#ffffff' : '#374151',
+                                                    border: secondScanManifestStatus === 'CLOSED' ? '1px solid #9ca3af' : '1px solid #d1d5db',
                                                     borderRadius: '8px',
-                                                    padding: '10px 16px',
-                                                    fontSize: '13px',
+                                                    padding: '10px 14px',
+                                                    fontSize: '12px',
                                                     fontWeight: '600',
-                                                    cursor: secondScanManifestStatus === 'CLOSED' ? 'not-allowed' : 'pointer',
-                                                    display: 'flex',
-                                                    alignItems: 'center',
-                                                    gap: '6px',
-                                                    boxShadow: '0 1px 2px rgba(0,0,0,0.05)'
+                                                    cursor: secondScanManifestStatus === 'CLOSED' ? 'not-allowed' : 'pointer'
                                                 }}
                                             >
                                                 + Create New Outbound Bag
@@ -3073,7 +3121,7 @@ export default function WorkstationDashboard() {
 
                                                 const partnerBgColor =
                                                     partner === 'PickMe' ? '#facc15' :
-                                                        partner === 'Domex' ? '#2563eb' :
+                                                        partner === 'Domex' ? '#e53935' :
                                                             partner === 'Pronto' ? '#d97706' : '#4b5563';
 
                                                 const partnerTextColor =
@@ -3081,7 +3129,7 @@ export default function WorkstationDashboard() {
 
                                                 const partnerBorderColor =
                                                     partner === 'PickMe' ? '#eab308' :
-                                                        partner === 'Domex' ? '#2563eb' :
+                                                        partner === 'Domex' ? '#e53935' :
                                                             partner === 'Pronto' ? '#d97706' : '#e21b22';
 
                                                 return (
@@ -3090,24 +3138,18 @@ export default function WorkstationDashboard() {
                                                         onClick={() => setActiveOutboundBag(bag)}
                                                         style={{
                                                             backgroundColor: '#ffffff',
-                                                            color: '#111827',
+                                                            color: '#374151',
                                                             border: isActive
                                                                 ? `2px solid ${partnerBorderColor}`
-                                                                : partner === 'PickMe'
-                                                                    ? '1.5px solid #fde047'
-                                                                    : '1px solid #d1d5db',
-                                                            borderRadius: '6px',
-                                                            padding: '7px 12px',
+                                                                : '1px solid #d1d5db',
+                                                            borderRadius: '8px',
+                                                            padding: '10px 14px',
                                                             fontSize: '12px',
-                                                            fontWeight: '700',
+                                                            fontWeight: '600',
                                                             cursor: 'pointer',
                                                             display: 'inline-flex',
                                                             alignItems: 'center',
-                                                            gap: '8px',
-                                                            transition: 'all 0.15s ease',
-                                                            boxShadow: isActive
-                                                                ? (partner === 'PickMe' ? '0 2px 8px rgba(234, 179, 8, 0.35)' : '0 2px 8px rgba(226, 27, 34, 0.2)')
-                                                                : '0 1px 2px rgba(0,0,0,0.05)'
+                                                            gap: '8px'
                                                         }}
                                                     >
                                                         <span>{bag.bagNumber}</span>
@@ -3143,12 +3185,120 @@ export default function WorkstationDashboard() {
                                                 </span>
                                             )}
                                         </div>
+
+                                        {/* Horizontal Active Outbound Bag Box (Box Unsealing Theme) */}
+                                        {activeOutboundBag && (
+                                            <div style={{
+                                                backgroundColor: '#ffffff',
+                                                border: activeOutboundBag.status === 'SEALED' ? '2px solid #ef4444' : '1px solid #e5e7eb',
+                                                borderRadius: '8px',
+                                                padding: '12px 18px',
+                                                marginTop: '12px',
+                                                display: 'flex',
+                                                alignItems: 'center',
+                                                justifyContent: 'space-between',
+                                                flexWrap: 'wrap',
+                                                gap: '14px',
+                                                boxShadow: '0 1px 3px rgba(0,0,0,0.04)'
+                                            }}>
+                                                {/* Left Info */}
+                                                <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
+                                                    <div>
+                                                        <div style={{ fontSize: '10px', fontWeight: '700', color: '#6b7280', textTransform: 'uppercase' }}>
+                                                            Active Outbound Bag
+                                                        </div>
+                                                        <div style={{ fontSize: '15px', fontWeight: '800', color: '#111827', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                                            <span>{activeOutboundBag.bagNumber}</span>
+                                                            <span style={{
+                                                                backgroundColor: activeOutboundBag.targetPartner === 'PickMe' ? '#facc15' : activeOutboundBag.targetpartner === 'Domex' ? '#e53935' : activeOutboundBag.targetPartner === 'Pronto' ? '#d97706' : '#4b5563',
+                                                                color: activeOutboundBag.targetPartner === 'PickMe' ? '#111827' : '#ffffff',
+                                                                fontSize: '10px',
+                                                                fontWeight: '800',
+                                                                padding: '2px 7px',
+                                                                borderRadius: '4px'
+                                                            }}>
+                                                                {activeOutboundBag.targetPartner || 'ALL'}
+                                                            </span>
+                                                        </div>
+                                                    </div>
+
+                                                    <div style={{ borderLeft: '1px solid #e5e7eb', paddingLeft: '16px', display: 'flex', gap: '16px' }}>
+                                                        <div>
+                                                            <div style={{ fontSize: '10px', color: '#6b7280', textTransform: 'uppercase' }}>Parcels Inside</div>
+                                                            <div style={{ fontSize: '14px', fontWeight: '800', color: '#047857' }}>{activeOutboundBag.parcelCount || 0} Pcs</div>
+                                                        </div>
+                                                        <div>
+                                                            <div style={{ fontSize: '10px', color: '#6b7280', textTransform: 'uppercase' }}>Total Weight</div>
+                                                            <div style={{ fontSize: '14px', fontWeight: '800', color: '#111827' }}>{activeOutboundBag.totalWeight || '0.00'} kg</div>
+                                                        </div>
+                                                        <div>
+                                                            <div style={{ fontSize: '10px', color: '#6b7280', textTransform: 'uppercase' }}>Status</div>
+                                                            <span style={{
+                                                                backgroundColor: activeOutboundBag.status === 'SEALED' ? '#dc2626' : '#ecfdf5',
+                                                                color: activeOutboundBag.status === 'SEALED' ? '#ffffff' : '#047857',
+                                                                fontSize: '10px',
+                                                                fontWeight: '800',
+                                                                padding: '2px 8px',
+                                                                borderRadius: '4px'
+                                                            }}>
+                                                                {activeOutboundBag.status || 'OPEN'}
+                                                            </span>
+                                                        </div>
+                                                    </div>
+                                                </div>
+
+                                                {/* Right: Seal & Close Bag Now button */}
+                                                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                                    {activeOutboundBag.status === 'OPEN' ? (
+                                                        <button
+                                                            onClick={() => {
+                                                                setCustomConfirmModal({
+                                                                    title: "Seal & Close Outbound Bag?",
+                                                                    message: `Are you sure you want to SEAL and CLOSE Outbound Bag "${activeOutboundBag.bagNumber}"? Once sealed, no additional parcels can be added to this bag.`,
+                                                                    onConfirm: () => handleSealOutboundBag(activeOutboundBag.bagNumber)
+                                                                });
+                                                            }}
+                                                            disabled={activeOutboundBag.parcelCount === 0}
+                                                            style={{
+                                                                backgroundColor: '#ffffff',
+                                                                border: '1px solid #d1d5db',
+                                                                color: '#374151',
+                                                                borderRadius: '8px',
+                                                                padding: '10px 14px',
+                                                                fontSize: '12px',
+                                                                fontWeight: '600',
+                                                                cursor: activeOutboundBag.parcelCount === 0 ? 'not-allowed' : 'pointer',
+                                                                opacity: activeOutboundBag.parcelCount === 0 ? 0.5 : 1
+                                                            }}
+                                                        >
+                                                            🔒 Seal &amp; Close Bag Now
+                                                        </button>
+                                                    ) : (
+                                                        <button
+                                                            onClick={() => setPrintOutboundBagLabelModal(activeOutboundBag)}
+                                                            style={{
+                                                                backgroundColor: '#ffffff',
+                                                                border: '1px solid #d1d5db',
+                                                                color: '#374151',
+                                                                borderRadius: '8px',
+                                                                padding: '10px 14px',
+                                                                fontSize: '12px',
+                                                                fontWeight: '600',
+                                                                cursor: 'pointer'
+                                                            }}
+                                                        >
+                                                            🖨 Print Bag Label
+                                                        </button>
+                                                    )}
+                                                </div>
+                                            </div>
+                                        )}
                                     </div>
                                 </div>
                             </div>
 
                             {/* ── MAIN SCANNING & VALIDATION GRID ── */}
-                            <div style={{ display: 'grid', gridTemplateColumns: '1fr 340px', gap: '20px', marginBottom: '20px' }}>
+                            <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: '20px', marginBottom: '20px' }}>
 
                                 {/* LEFT COLUMN: BARCODE INPUT & REAL-TIME VALIDATION CARD */}
                                 <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
@@ -3189,83 +3339,96 @@ export default function WorkstationDashboard() {
                                         {rowItem('Workstation Scanned Today', <span style={{ color: '#e21b22', fontWeight: '700' }}>{scannedToday}</span>, true)}
                                     </div>
 
-                                    {/* REAL-TIME VALIDATION CARD (CORRECT VS INCORRECT) */}
+                                    {/* REAL-TIME VALIDATION CARD — Only shown on CORRECT scan */}
                                     <div style={{
                                         ...card,
-                                        padding: '24px',
-                                        border: validationCard
-                                            ? (validationCard.status === 'CORRECT' ? '3px solid #059669' : '3px solid #dc2626')
-                                            : '1px solid #e5e7eb',
-                                        backgroundColor: validationCard
-                                            ? (validationCard.status === 'CORRECT' ? '#ecfdf5' : '#fef2f2')
-                                            : '#ffffff',
+                                        padding: '0',
+                                        overflow: 'hidden',
+                                        border: '1px solid #e5e7eb',
                                         transition: 'all 0.2s ease-in-out'
                                     }}>
-                                        <div style={{ fontSize: '11px', fontWeight: '800', color: '#6b7280', textTransform: 'uppercase', marginBottom: '14px', letterSpacing: '0.5px' }}>
+                                        <div style={{ fontSize: '11px', fontWeight: '800', color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.5px', padding: '14px 18px 10px' }}>
                                             Parcel Validation Result
                                         </div>
 
-                                        {validationCard ? (
-                                            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '14px', paddingTop: '6px' }}>
-                                                {/* INCORRECT REASON ALERT */}
-                                                {validationCard.status === 'INCORRECT' && (
-                                                    <div style={{ width: '100%', backgroundColor: '#ffffff', border: '2px dashed #fca5a5', padding: '14px 16px', borderRadius: '8px', color: '#991b1b' }}>
-                                                        <div style={{ fontWeight: '800', fontSize: '14px', marginBottom: '4px' }}>
-                                                            ⚠️ Reason: {validationCard.error || 'Validation Mismatch'}
-                                                        </div>
-                                                        <div style={{ fontSize: '12px', fontWeight: '700', color: '#b91c1c', marginTop: '6px' }}>
-                                                            ⛔ DO NOT PUT PARCEL IN BAG! Send back to sorting table for re-classification.
-                                                        </div>
-                                                    </div>
-                                                )}
-
-                                                {/* LMD PARTNER SHOWING BOX WITH PROVIDER BRAND COLOR */}
+                                        {validationCard && validationCard.status === 'CORRECT' ? (
+                                            <div style={{ display: 'flex', flexDirection: 'column', gap: '0' }}>
+                                                {/* FULL-WIDTH PARTNER BANNER */}
                                                 <div style={{
-                                                    backgroundColor: validationCard.assignedPartner === 'PickMe' ? '#facc15' :
-                                                        validationCard.assignedPartner === 'Domex' ? '#2563eb' :
-                                                            validationCard.assignedPartner === 'Pronto' ? '#d97706' : '#374151',
-                                                    padding: '16px 28px',
-                                                    borderRadius: '12px',
+                                                    backgroundColor: validationCard.assignedPartner === 'Domex'
+                                                        ? '#7b0f1a'
+                                                        : validationCard.assignedPartner === 'Pronto'
+                                                            ? '#ea580c'
+                                                            : '#ffcc00',
+                                                    padding: '24px 20px',
                                                     display: 'flex',
+                                                    flexDirection: 'column',
                                                     alignItems: 'center',
                                                     justifyContent: 'center',
-                                                    height: '95px',
-                                                    width: '260px',
-                                                    boxShadow: '0 4px 14px rgba(0,0,0,0.12)',
-                                                    border: validationCard.assignedPartner === 'PickMe' ? '2px solid #eab308' : 'none'
+                                                    transition: 'all 0.2s ease-in-out',
+                                                    gap: '14px'
                                                 }}>
-                                                    {validationCard.assignedPartner === 'PickMe' ? (
-                                                        <img src="/pick_me_logo.png" alt="PickMe" style={{ maxHeight: '100%', maxWidth: '100%', objectFit: 'contain' }} />
-                                                    ) : validationCard.assignedPartner === 'Domex' ? (
-                                                        <img src="/domex_logo.png" alt="Domex" style={{ maxHeight: '100%', maxWidth: '100%', objectFit: 'contain', filter: 'brightness(0) invert(1)' }} />
-                                                    ) : (
-                                                        <span style={{ color: '#ffffff', fontWeight: '900', fontSize: '26px', letterSpacing: '1px' }}>PRONTO</span>
-                                                    )}
+                                                    <div style={{
+                                                        fontSize: '12px',
+                                                        fontWeight: '800',
+                                                        color: validationCard.assignedPartner === 'Domex' || validationCard.assignedPartner === 'Pronto' ? '#ffffff' : '#000000',
+                                                        textTransform: 'uppercase',
+                                                        letterSpacing: '0.8px',
+                                                        textAlign: 'center'
+                                                    }}>
+                                                        ASSIGNED PARTNER
+                                                    </div>
+
+                                                    {/* White Logo Card */}
+                                                    <div style={{
+                                                        backgroundColor: '#ffffff',
+                                                        borderRadius: '16px',
+                                                        padding: '16px 28px',
+                                                        width: '100%',
+                                                        maxWidth: '300px',
+                                                        height: '120px',
+                                                        display: 'flex',
+                                                        alignItems: 'center',
+                                                        justifyContent: 'center',
+                                                        boxShadow: '0 4px 12px rgba(0,0,0,0.08)',
+                                                        boxSizing: 'border-box'
+                                                    }}>
+                                                        {validationCard.assignedPartner === 'Domex' ? (
+                                                            <img src="/domex_logo.png" alt="Domex" style={{ maxHeight: '95px', maxWidth: '90%', objectFit: 'contain' }} />
+                                                        ) : validationCard.assignedPartner === 'Pronto' ? (
+                                                            <span style={{ color: '#ea580c', fontWeight: '900', fontSize: '34px', letterSpacing: '1px' }}>PRONTO</span>
+                                                        ) : (
+                                                            <img src="/pick_me_logo.png" alt="PickMe" style={{ maxHeight: '95px', maxWidth: '90%', objectFit: 'contain' }} />
+                                                        )}
+                                                    </div>
+
+                                                    {/* Zone Pill Badge */}
+                                                    <div style={{
+                                                        display: 'inline-flex',
+                                                        alignItems: 'center',
+                                                        justifyContent: 'center',
+                                                        backgroundColor: 'rgba(0,0,0,0.04)',
+                                                        border: '1px solid rgba(0,0,0,0.2)',
+                                                        borderRadius: '20px',
+                                                        padding: '6px 20px',
+                                                        fontSize: '13.5px',
+                                                        color: validationCard.assignedPartner === 'Domex' || validationCard.assignedPartner === 'Pronto' ? '#ffffff' : '#000000'
+                                                    }}>
+                                                        Zone: <span style={{ fontWeight: '800', marginLeft: '4px' }}>{validationCard.assignedZone || 'Default-Zone'}</span>
+                                                    </div>
                                                 </div>
 
-                                                {/* ZONE BADGE */}
+                                                {/* Green success footer */}
                                                 <div style={{
+                                                    padding: '10px 18px',
+                                                    textAlign: 'center',
                                                     fontSize: '13px',
-                                                    fontWeight: '600',
-                                                    color: '#111827',
-                                                    backgroundColor: '#ffffff',
-                                                    padding: '4px 16px',
-                                                    borderRadius: '16px',
-                                                    border: '1px solid #d1d5db'
+                                                    fontWeight: '800',
+                                                    color: '#059669',
+                                                    backgroundColor: '#ecfdf5'
                                                 }}>
-                                                    Zone: <span style={{ fontWeight: '800' }}>{validationCard.assignedZone || '—'}</span>
+                                                    ✓ CORRECT — Assigned to Bag {validationCard.bagNumber}
                                                 </div>
-
-                                                {/* SMALL TEXT BELOW */}
-                                                {validationCard.status === 'CORRECT' ? (
-                                                    <div style={{ fontSize: '13px', fontWeight: '800', color: '#059669', textAlign: 'center', marginTop: '2px' }}>
-                                                        ✓ CORRECT — Assigned to Bag {validationCard.bagNumber}
-                                                    </div>
-                                                ) : (
-                                                    <div style={{ fontSize: '13px', fontWeight: '800', color: '#dc2626', textAlign: 'center', marginTop: '2px' }}>
-                                                        ✕ INCORRECT — Return to Sorting Process
-                                                    </div>
-                                                )}
                                             </div>
                                         ) : (
                                             <div style={{ textAlign: 'center', padding: '30px 10px', color: '#9ca3af' }}>
@@ -3279,115 +3442,6 @@ export default function WorkstationDashboard() {
                                     </div>
                                 </div>
 
-                                {/* RIGHT COLUMN: ACTIVE OUTBOUND BAG SUMMARY & SEALING CONTROL */}
-                                <div>
-                                    {activeOutboundBag ? (
-                                        <div style={{
-                                            ...card,
-                                            border: activeOutboundBag.status === 'SEALED' ? '2px solid #ef4444' : '2px solid #111827',
-                                            backgroundColor: activeOutboundBag.status === 'SEALED' ? '#fff5f5' : '#ffffff'
-                                        }}>
-                                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px', borderBottom: '1px solid #e5e7eb', paddingBottom: '10px' }}>
-                                                <div style={{ fontSize: '12px', fontWeight: '800', color: '#6b7280', textTransform: 'uppercase' }}>
-                                                    Active Outbound Bag
-                                                </div>
-                                                <span style={{
-                                                    backgroundColor: activeOutboundBag.status === 'SEALED' ? '#dc2626' : '#10b981',
-                                                    color: '#ffffff',
-                                                    padding: '3px 8px',
-                                                    borderRadius: '4px',
-                                                    fontSize: '11px',
-                                                    fontWeight: '900',
-                                                    textTransform: 'uppercase'
-                                                }}>
-                                                    {activeOutboundBag.status === 'SEALED' ? '🔒 SEALED & CLOSED' : '● OPEN & ACTIVE'}
-                                                </span>
-                                            </div>
-
-                                            <div style={{ fontSize: '18px', fontWeight: '900', color: '#111827', marginBottom: '4px', wordBreak: 'break-all' }}>
-                                                {activeOutboundBag.bagNumber}
-                                            </div>
-
-                                            <div style={{ fontSize: '12px', fontWeight: '700', color: '#e21b22', marginBottom: '16px' }}>
-                                                Target Courier: <strong>{activeOutboundBag.targetPartner || 'ALL PARTNERS'}</strong> ({activeOutboundBag.destinationHub || 'Main Hub'})
-                                            </div>
-
-                                            {/* BAG METRICS GRID */}
-                                            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px', marginBottom: '20px' }}>
-                                                <div style={{ backgroundColor: '#f9fafb', border: '1px solid #e5e7eb', borderRadius: '8px', padding: '12px', textAlign: 'center' }}>
-                                                    <div style={{ fontSize: '10px', color: '#6b7280', textTransform: 'uppercase', fontWeight: '700' }}>Parcel Count</div>
-                                                    <div style={{ fontSize: '26px', fontWeight: '900', color: '#047857' }}>
-                                                        {activeOutboundBag.parcelCount || 0}
-                                                    </div>
-                                                </div>
-                                                <div style={{ backgroundColor: '#f9fafb', border: '1px solid #e5e7eb', borderRadius: '8px', padding: '12px', textAlign: 'center' }}>
-                                                    <div style={{ fontSize: '10px', color: '#6b7280', textTransform: 'uppercase', fontWeight: '700' }}>Total Weight</div>
-                                                    <div style={{ fontSize: '26px', fontWeight: '900', color: '#111827' }}>
-                                                        {activeOutboundBag.totalWeight || '0.00'}<span style={{ fontSize: '14px', fontWeight: '600' }}>kg</span>
-                                                    </div>
-                                                </div>
-                                            </div>
-
-                                            {/* SEAL & CLOSE BAG ACTION BUTTON */}
-                                            {activeOutboundBag.status === 'OPEN' ? (
-                                                <button
-                                                    onClick={() => {
-                                                        setCustomConfirmModal({
-                                                            title: "Seal & Close Outbound Bag?",
-                                                            message: `Are you sure you want to SEAL and CLOSE Outbound Bag "${activeOutboundBag.bagNumber}"? Once sealed, no additional parcels can be added to this bag.`,
-                                                            onConfirm: () => handleSealOutboundBag(activeOutboundBag.bagNumber)
-                                                        });
-                                                    }}
-                                                    disabled={activeOutboundBag.parcelCount === 0}
-                                                    style={{
-                                                        width: '100%',
-                                                        backgroundColor: activeOutboundBag.parcelCount === 0 ? '#9ca3af' : '#111827',
-                                                        color: '#ffffff',
-                                                        border: 'none',
-                                                        borderRadius: '8px',
-                                                        padding: '12px',
-                                                        fontSize: '13px',
-                                                        fontWeight: '800',
-                                                        cursor: activeOutboundBag.parcelCount === 0 ? 'not-allowed' : 'pointer',
-                                                        display: 'flex',
-                                                        alignItems: 'center',
-                                                        justifyContent: 'center',
-                                                        gap: '8px',
-                                                        boxShadow: '0 4px 6px -1px rgba(0,0,0,0.15)'
-                                                    }}
-                                                >
-                                                    🔒 Seal & Close Bag Now
-                                                </button>
-                                            ) : (
-                                                <button
-                                                    onClick={() => setPrintOutboundBagLabelModal(activeOutboundBag)}
-                                                    style={{
-                                                        width: '100%',
-                                                        backgroundColor: '#e21b22',
-                                                        color: '#ffffff',
-                                                        border: 'none',
-                                                        borderRadius: '8px',
-                                                        padding: '12px',
-                                                        fontSize: '13px',
-                                                        fontWeight: '800',
-                                                        cursor: 'pointer',
-                                                        display: 'flex',
-                                                        alignItems: 'center',
-                                                        justifyContent: 'center',
-                                                        gap: '8px',
-                                                        boxShadow: '0 2px 4px rgba(226, 27, 34, 0.2)'
-                                                    }}
-                                                >
-                                                    🖨 Print Bag Thermal Label
-                                                </button>
-                                            )}
-                                        </div>
-                                    ) : (
-                                        <div style={{ ...card, textAlign: 'center', padding: '30px', color: '#9ca3af' }}>
-                                            Select or create an outbound bag.
-                                        </div>
-                                    )}
-                                </div>
                             </div>
 
                             {/* ── TABLE: SCANNED PARCELS IN ACTIVE OUTBOUND BAG ── */}
@@ -3841,14 +3895,14 @@ export default function WorkstationDashboard() {
                                     ? selectedBin === 'PickMe'
                                         ? '#854d0e' // dark yellow
                                         : selectedBin === 'Domex'
-                                            ? '#1e40af' // dark blue
+                                            ? '#991b1b' // dark red
                                             : '#c2410c' // dark orange
                                     : '#b45309',
                                 backgroundColor: selectedBin
                                     ? selectedBin === 'PickMe'
                                         ? '#fef9c3' // light yellow
                                         : selectedBin === 'Domex'
-                                            ? '#dbeafe' // light blue
+                                            ? '#fee2e2' // light red
                                             : '#ffedd5' // light orange
                                     : '#fffbeb',
                                 fontWeight: '500'
@@ -4029,7 +4083,7 @@ export default function WorkstationDashboard() {
                                                             <div style={{
                                                                 width: `${rule.weightPercentage}%`,
                                                                 height: '100%',
-                                                                backgroundColor: rule.partnerCode === 'PickMe' ? '#16a34a' : rule.partnerCode === 'Domex' ? '#2563eb' : '#f59e0b',
+                                                                backgroundColor: rule.partnerCode === 'PickMe' ? '#16a34a' : rule.partnerCode === 'Domex' ? '#e53935' : '#f59e0b',
                                                                 borderRadius: '3px'
                                                             }} />
                                                         </div>
@@ -4298,115 +4352,130 @@ export default function WorkstationDashboard() {
                 </div>
             )}
 
-            {/* ── DUPLICATE SCAN MODAL ── */}
-            {duplicateModal && (
-                <div style={{
-                    position: 'fixed',
-                    top: 0, left: 0, right: 0, bottom: 0,
-                    backgroundColor: 'rgba(0, 0, 0, 0.6)',
-                    backdropFilter: 'blur(3px)',
-                    display: 'flex', alignItems: 'center', justifyContent: 'center',
-                    zIndex: 3000,
-                    animation: 'fadeIn 0.2s ease-out'
-                }}>
+            {/* ── DUPLICATE / MISMATCH WARNING MODAL ── */}
+            {duplicateModal && (() => {
+                const isPartnerMismatch = duplicateModal.message?.toLowerCase().includes('partner mismatch');
+                const isManifestMismatch = duplicateModal.message?.toLowerCase().includes('manifest mismatch');
+                const isMismatch = isPartnerMismatch || isManifestMismatch;
+                const isTemuDuplicate = (duplicateModal.originalMethod?.toLowerCase().includes('temu') || duplicateModal.message?.toLowerCase().includes('temu barcode')) && !isMismatch;
+
+                const titleText = isPartnerMismatch
+                    ? 'Courier Partner Mismatch'
+                    : isManifestMismatch
+                        ? 'Manifest Mismatch'
+                        : 'Duplicate Scan Detected';
+
+                const warningText = isPartnerMismatch
+                    ? '⚠️ Courier Partner Mismatch'
+                    : isManifestMismatch
+                        ? '⚠️ Manifest Mismatch'
+                        : '⚠️ Duplicate Scan Warning';
+
+                return (
                     <div style={{
-                        backgroundColor: '#ffffff',
-                        border: '2px solid #e21b22', // Light border around the popup box in red
-                        //borderTop: '6px solid #e21b22', // SkyNet Red top accent
-                        borderRadius: '12px',
-                        padding: '30px 24px',
-                        width: '450px',
-                        maxWidth: '90%',
-                        boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.15), 0 10px 10px -5px rgba(0, 0, 0, 0.04)',
-                        textAlign: 'center'
+                        position: 'fixed',
+                        top: 0, left: 0, right: 0, bottom: 0,
+                        backgroundColor: 'rgba(0, 0, 0, 0.6)',
+                        backdropFilter: 'blur(3px)',
+                        display: 'flex', alignItems: 'center', justifyContent: 'center',
+                        zIndex: 3000,
+                        animation: 'fadeIn 0.2s ease-out'
                     }}>
-                        {/* Warning Icon */}
                         <div style={{
-                            backgroundColor: '#fee2e2',
-                            color: '#e21b22',
-                            width: '56px', height: '56px',
-                            borderRadius: '50%',
-                            display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-                            marginBottom: '20px'
+                            backgroundColor: '#ffffff',
+                            border: '2px solid #e21b22',
+                            borderRadius: '12px',
+                            padding: '30px 24px',
+                            width: '450px',
+                            maxWidth: '90%',
+                            boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.15), 0 10px 10px -5px rgba(0, 0, 0, 0.04)',
+                            textAlign: 'center'
                         }}>
-                            <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                                <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
-                                <line x1="12" y1="9" x2="12" y2="13" />
-                                <line x1="12" y1="17" x2="12.01" y2="17" />
-                            </svg>
-                        </div>
-
-                        {/* Title */}
-                        <h3 style={{ fontSize: '18px', fontWeight: '700', color: '#111827', margin: '0 0 10px 0' }}>
-                            Duplicate Scan Detected
-                        </h3>
-
-                        {/* Content Message */}
-                        {duplicateModal.message ? (
-                            <div style={{ fontSize: '13px', color: '#374151', lineHeight: '1.5', margin: '0 0 20px 0', textAlign: 'left', backgroundColor: '#fef2f2', border: '1px solid #fca5a5', borderRadius: '8px', padding: '14px 16px' }}>
-                                <div style={{ fontWeight: '800', color: '#dc2626', marginBottom: '8px', fontSize: '14px', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                                    <span>⚠️ Duplicate Scan Warning</span>
-                                </div>
-                                <div style={{ fontSize: '13px', color: '#111827', fontWeight: '600', marginBottom: '10px', lineHeight: '1.4' }}>
-                                    {duplicateModal.message}
-                                </div>
-                                <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', borderTop: '1px solid #fca5a5', paddingTop: '8px', marginTop: '8px' }}>
-                                    {duplicateModal.skynetTrackingNumber && (
-                                        <div style={{ fontSize: '12px', color: '#374151' }}>
-                                            • <strong>Skynet Tracking No:</strong> <span style={{ fontWeight: '700', color: '#111827' }}>{duplicateModal.skynetTrackingNumber}</span>
-                                        </div>
-                                    )}
-                                    {duplicateModal.senderReference && (
-                                        <div style={{ fontSize: '12px', color: '#374151' }}>
-                                            • <strong>Temu Barcode:</strong> <span style={{ fontWeight: '700', color: '#dc2626' }}>{duplicateModal.senderReference}</span>
-                                        </div>
-                                    )}
-                                    {duplicateModal.originalMethod && (
-                                        <div style={{ fontSize: '12px', marginTop: '4px', fontWeight: '700', color: '#991b1b', backgroundColor: '#fee2e2', padding: '4px 8px', borderRadius: '4px' }}>
-                                            Already Scanned Via: {duplicateModal.originalMethod}
-                                        </div>
-                                    )}
-                                </div>
+                            {/* Warning Icon */}
+                            <div style={{
+                                backgroundColor: '#fee2e2',
+                                color: '#e21b22',
+                                width: '56px', height: '56px',
+                                borderRadius: '50%',
+                                display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                                marginBottom: '20px'
+                            }}>
+                                <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                                    <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
+                                    <line x1="12" y1="9" x2="12" y2="13" />
+                                    <line x1="12" y1="17" x2="12.01" y2="17" />
+                                </svg>
                             </div>
-                        ) : (
-                            <p style={{ fontSize: '14px', color: '#4b5563', lineHeight: '1.6', margin: '0 0 24px 0' }}>
-                                Barcode <strong style={{ color: '#111827', fontSize: '15px', backgroundColor: '#f3f4f6', padding: '3px 8px', borderRadius: '4px', border: '1px solid #e5e7eb' }}>
-                                    {duplicateModal.barcode}
-                                </strong> has already been {duplicateModal.type === 'allocate' ? 'scanned and allocated' : 'verified'} today!
-                            </p>
-                        )}
 
-                        {/* Dismiss Action Button */}
-                        <button
-                            onClick={() => {
-                                setDuplicateModal(null);
-                                setTimeout(() => {
-                                    if (activeTab === 'first-scan') firstScanInputRef.current?.focus();
-                                    else if (activeTab === 'second-scan') scanInputRef.current?.focus();
-                                    else if (activeTab === 'verify') verifyInputRef.current?.focus();
-                                }, 50);
-                            }}
-                            style={{
-                                backgroundColor: '#e21b22', // Red button background instead of black
-                                color: '#ffffff',
-                                border: 'none',
-                                borderRadius: '8px',
-                                padding: '12px 24px',
-                                fontSize: '14px',
-                                fontWeight: '600',
-                                width: '100%',
-                                cursor: 'pointer',
-                                transition: 'all 0.15s ease',
-                                boxShadow: '0 2px 4px rgba(0, 0, 0, 0.1)'
-                            }}
-                            onMouseOver={(e) => { e.currentTarget.style.backgroundColor = '#b91c1c'; }} // Darker red on hover
-                            onMouseOut={(e) => { e.currentTarget.style.backgroundColor = '#e21b22'; }}
-                        >
-                            Acknowledge (Press Enter)
-                        </button>
+                            {/* Title */}
+                            <h3 style={{ fontSize: '18px', fontWeight: '700', color: '#111827', margin: '0 0 10px 0' }}>
+                                {titleText}
+                            </h3>
+
+                            {/* Content Message */}
+                            {duplicateModal.message ? (
+                                <div style={{ fontSize: '13px', color: '#374151', lineHeight: '1.5', margin: '0 0 20px 0', textAlign: 'left', backgroundColor: '#fef2f2', border: '1px solid #fca5a5', borderRadius: '8px', padding: '14px 16px' }}>
+                                    <div style={{ fontWeight: '800', color: '#dc2626', marginBottom: isMismatch ? '4px' : '8px', fontSize: '14px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                                        <span>{warningText}</span>
+                                    </div>
+                                    <div style={{ fontSize: '13px', color: '#111827', fontWeight: '600', marginBottom: (!isMismatch && isTemuDuplicate) ? '10px' : '0', lineHeight: '1.4' }}>
+                                        {duplicateModal.message}
+                                    </div>
+                                    {!isMismatch && isTemuDuplicate && (
+                                        <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', borderTop: '1px solid #fca5a5', paddingTop: '8px', marginTop: '8px' }}>
+                                            {duplicateModal.senderReference && (
+                                                <div style={{ fontSize: '12px', color: '#374151' }}>
+                                                    • <strong>Temu Barcode:</strong> <span style={{ fontWeight: '700', color: '#dc2626' }}>{duplicateModal.senderReference}</span>
+                                                </div>
+                                            )}
+                                            {duplicateModal.originalMethod && (
+                                                <div style={{ fontSize: '12px', marginTop: '4px', fontWeight: '700', color: '#991b1b', backgroundColor: '#fee2e2', padding: '4px 8px', borderRadius: '4px' }}>
+                                                    Already Scanned Via: {duplicateModal.originalMethod}
+                                                </div>
+                                            )}
+                                        </div>
+                                    )}
+                                </div>
+                            ) : (
+                                <p style={{ fontSize: '14px', color: '#4b5563', lineHeight: '1.6', margin: '0 0 24px 0' }}>
+                                    Barcode <strong style={{ color: '#111827', fontSize: '15px', backgroundColor: '#f3f4f6', padding: '3px 8px', borderRadius: '4px', border: '1px solid #e5e7eb' }}>
+                                        {duplicateModal.barcode}
+                                    </strong> has already been {duplicateModal.type === 'allocate' ? 'scanned and allocated' : 'verified'} today!
+                                </p>
+                            )}
+
+                            {/* Dismiss Action Button */}
+                            <button
+                                onClick={() => {
+                                    setDuplicateModal(null);
+                                    setTimeout(() => {
+                                        if (activeTab === 'first-scan') firstScanInputRef.current?.focus();
+                                        else if (activeTab === 'second-scan') scanInputRef.current?.focus();
+                                        else if (activeTab === 'verify') verifyInputRef.current?.focus();
+                                    }, 50);
+                                }}
+                                style={{
+                                    backgroundColor: '#e21b22', // Red button background instead of black
+                                    color: '#ffffff',
+                                    border: 'none',
+                                    borderRadius: '8px',
+                                    padding: '12px 24px',
+                                    fontSize: '14px',
+                                    fontWeight: '600',
+                                    width: '100%',
+                                    cursor: 'pointer',
+                                    transition: 'all 0.15s ease',
+                                    boxShadow: '0 2px 4px rgba(0, 0, 0, 0.1)'
+                                }}
+                                onMouseOver={(e) => { e.currentTarget.style.backgroundColor = '#b91c1c'; }} // Darker red on hover
+                                onMouseOut={(e) => { e.currentTarget.style.backgroundColor = '#e21b22'; }}
+                            >
+                                Acknowledge (Press Enter)
+                            </button>
+                        </div>
                     </div>
-                </div>
-            )}
+                );
+            })()}
 
             {/* ── CONFIRM FINISH MODAL ── */}
             {confirmFinishModal && (() => {
