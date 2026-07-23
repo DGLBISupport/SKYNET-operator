@@ -116,7 +116,10 @@ export async function POST(request: Request) {
             overrideBag,
             registerExtra,
             extraNote,
-            operator
+            operator,
+            targetMawb,
+            targetPartner,
+            outboundBagNumber
         } = await request.json();
 
         const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -176,29 +179,32 @@ export async function POST(request: Request) {
         }
 
         let resolvedShipment: any = null;
-        let shipmentRef: number;
-
-        const isNumeric = /^\d+$/.test(trackingNumber.trim());
+        let shipmentRef: number = 0;
+        const cleanBar = trackingNumber.trim();
+        const isNumeric = /^\d+$/.test(cleanBar);
 
         if (isNumeric) {
-            shipmentRef = parseInt(trackingNumber.trim(), 10);
-        } else {
+            shipmentRef = parseInt(cleanBar, 10);
+            // First search both reference_number and sender_reference
+            const searchRes = await fetch(`${supabaseUrl}/rest/v1/shipments?or=(reference_number.eq.${shipmentRef},sender_reference.eq.${encodeURIComponent(cleanBar)})`, { headers });
+            if (searchRes.ok) {
+                const shipments = await searchRes.json();
+                if (shipments && shipments[0]) {
+                    resolvedShipment = shipments[0];
+                    shipmentRef = resolvedShipment.reference_number;
+                }
+            }
+        }
+
+        if (!resolvedShipment) {
             // Find by sender_reference (Temu barcode)
-            const temuRes = await fetch(`${supabaseUrl}/rest/v1/shipments?sender_reference=eq.${trackingNumber.trim()}`, { headers });
+            const temuRes = await fetch(`${supabaseUrl}/rest/v1/shipments?sender_reference=eq.${encodeURIComponent(cleanBar)}`, { headers });
             if (temuRes.ok) {
                 const shipments = await temuRes.json();
                 if (shipments && shipments[0]) {
                     resolvedShipment = shipments[0];
                     shipmentRef = resolvedShipment.reference_number;
-                } else {
-                    return NextResponse.json({
-                        success: false,
-                        error: `No shipment found matching Temu barcode "${trackingNumber}".`
-                    }, { status: 404 });
                 }
-            } else {
-                const errText = await temuRes.text();
-                return NextResponse.json({ success: false, error: `Database search by Temu barcode failed: ${errText}` }, { status: 500 });
             }
         }
 
@@ -224,7 +230,7 @@ export async function POST(request: Request) {
                 const newShipment = {
                     reference_number: refToInsert,
                     bag_number: bagNumber,
-                    mawb_ref: mawbRef || '603-70659761',
+                    mawb_ref: mawbRef || '',
                     consignee_name: 'Untracked Extra Parcel',
                     consignee_location_name: 'Unknown City',
                     consignee_state: 'Unknown Province',
@@ -307,7 +313,7 @@ export async function POST(request: Request) {
             }
             const allocations = await spaRes.json();
             
-            const finalMawb = mawbRef || shipment.mawb_ref || '603-70659761'; // fallback
+            const finalMawb = mawbRef || shipment.mawb_ref || '';
 
             let finalAllocation = allocations && allocations[0];
 
@@ -404,7 +410,7 @@ export async function POST(request: Request) {
         // If no allocation row exists (Missed First Scan):
         if (!allocation) {
             missedFirstScan = true;
-            const finalMawb = shipment.mawb_ref || '603-70659761'; // fallback
+            const finalMawb = shipment.mawb_ref || '';
 
             // Auto-record to first scan (insert new row with first 4 columns)
             const insertRes = await fetch(`${supabaseUrl}/rest/v1/service_provider_allocation`, {
@@ -584,8 +590,33 @@ export async function POST(request: Request) {
             senderReference: shipment.sender_reference || undefined
         };
 
+        // Perform Validation Checks:
+        let validationStatus: 'CORRECT' | 'INCORRECT' = 'CORRECT';
+        let validationReason: string | undefined = undefined;
+        let validationError: string | undefined = undefined;
+
+        // 1. Manifest Mismatch Check
+        const parcelMawb = allocation.mawb_ref || shipment.mawb_ref;
+        if (targetMawb && parcelMawb && parcelMawb.trim().toLowerCase() !== targetMawb.trim().toLowerCase()) {
+            validationStatus = 'INCORRECT';
+            validationReason = 'MANIFEST_MISMATCH';
+            validationError = `Manifest Mismatch: Parcel belongs to Manifest "${parcelMawb}", not selected Manifest "${targetMawb}".`;
+        }
+
+        // 2. Partner Mismatch Check
+        if (validationStatus === 'CORRECT' && targetPartner && targetPartner !== 'ALL') {
+            if (assignedPartner.trim().toLowerCase() !== targetPartner.trim().toLowerCase()) {
+                validationStatus = 'INCORRECT';
+                validationReason = 'PARTNER_MISMATCH';
+                validationError = `Courier Partner Mismatch: Parcel is assigned to "${assignedPartner}", but active Bag is assigned to "${targetPartner}".`;
+            }
+        }
+
         return NextResponse.json({
-            success: true,
+            success: validationStatus === 'CORRECT',
+            validation: validationStatus,
+            reason: validationReason,
+            error: validationError,
             parcel: skynetData,
             assignedZone,
             assignedPartner,
@@ -602,7 +633,9 @@ export async function GET(request: Request) {
         const urlObj = new URL(request.url);
         const getMawbs = urlObj.searchParams.get('mawbs') === 'true';
         const getBags = urlObj.searchParams.get('getBags') === 'true';
+        const getBagParcels = urlObj.searchParams.get('getBagParcels') === 'true';
         const mawbRefParam = urlObj.searchParams.get('mawbRef');
+        const bagNumberParam = urlObj.searchParams.get('bagNumber');
         const getUnsealedBags = urlObj.searchParams.get('getUnsealedBags') === 'true';
 
         const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -623,45 +656,173 @@ export async function GET(request: Request) {
         }
 
         if (getBags && mawbRefParam) {
-            // Map test reference to the UUID reference if it's the fallback MAWB
-            let searchMawb = mawbRefParam;
-            if (mawbRefParam === '603-70659761') {
-                searchMawb = '6331c8b6-9182-4e36-86f1-73a2431f5bc8';
-            }
-            
+            const searchMawb = mawbRefParam.trim();
+            const cleanSearchMawb = encodeURIComponent(searchMawb);
+
             let allShipments: any[] = [];
             let offset = 0;
             const limit = 1000;
             let hasMore = true;
 
+            // 1. Primary query on shipments table with ilike matching
             while (hasMore) {
-                const res = await fetch(`${supabaseUrl}/rest/v1/shipments?mawb_reference=eq.${searchMawb}&select=bag_number&limit=${limit}&offset=${offset}`, { headers });
+                const res = await fetch(`${supabaseUrl}/rest/v1/shipments?mawb_reference=ilike.${cleanSearchMawb}&select=bag_number,reference_number&limit=${limit}&offset=${offset}`, { headers });
                 if (!res.ok) {
-                    const errText = await res.text();
-                    return NextResponse.json({ success: false, error: errText }, { status: 500 });
+                    break;
                 }
                 const shipments = await res.json();
-                allShipments = allShipments.concat(shipments);
-                if (shipments.length < limit) {
+                if (!Array.isArray(shipments) || shipments.length === 0) {
                     hasMore = false;
                 } else {
-                    offset += limit;
+                    allShipments = allShipments.concat(shipments);
+                    if (shipments.length < limit) hasMore = false;
+                    else offset += limit;
                 }
             }
-            
+
+            // 2. Fallback query on shipments_duplicate if primary returned 0 shipments
+            if (allShipments.length === 0) {
+                offset = 0;
+                hasMore = true;
+                while (hasMore) {
+                    const res = await fetch(`${supabaseUrl}/rest/v1/shipments_duplicate?mawb_reference=ilike.${cleanSearchMawb}&select=bag_number,reference_number&limit=${limit}&offset=${offset}`, { headers });
+                    if (!res.ok) break;
+                    const shipments = await res.json();
+                    if (!Array.isArray(shipments) || shipments.length === 0) {
+                        hasMore = false;
+                    } else {
+                        allShipments = allShipments.concat(shipments);
+                        if (shipments.length < limit) hasMore = false;
+                        else offset += limit;
+                    }
+                }
+            }
+
+            // 3. Fallback query by bag_number matching searchMawb substring
+            if (allShipments.length === 0) {
+                offset = 0;
+                hasMore = true;
+                while (hasMore) {
+                    const res = await fetch(`${supabaseUrl}/rest/v1/shipments?bag_number=ilike.*${cleanSearchMawb}*&select=bag_number,reference_number&limit=${limit}&offset=${offset}`, { headers });
+                    if (!res.ok) break;
+                    const shipments = await res.json();
+                    if (!Array.isArray(shipments) || shipments.length === 0) {
+                        hasMore = false;
+                    } else {
+                        allShipments = allShipments.concat(shipments);
+                        if (shipments.length < limit) hasMore = false;
+                        else offset += limit;
+                    }
+                }
+            }
+
             const bagCountsMap: Record<string, number> = {};
+            let unassignedCount = 0;
+
             allShipments.forEach((s: any) => {
-                if (s.bag_number) {
-                    bagCountsMap[s.bag_number] = (bagCountsMap[s.bag_number] || 0) + 1;
+                if (s.bag_number && String(s.bag_number).trim() !== '') {
+                    const bNum = String(s.bag_number).trim();
+                    bagCountsMap[bNum] = (bagCountsMap[bNum] || 0) + 1;
+                } else {
+                    unassignedCount++;
                 }
             });
-            
+
+            // Also include bags registered in bag_unsealing table for this MAWB
+            const unsealRes = await fetch(`${supabaseUrl}/rest/v1/bag_unsealing?mawb_ref=ilike.${cleanSearchMawb}&select=bag_number,expected_count`, { headers });
+            if (unsealRes.ok) {
+                const unsealed = await unsealRes.json();
+                if (Array.isArray(unsealed)) {
+                    unsealed.forEach((u: any) => {
+                        if (u.bag_number && !bagCountsMap[u.bag_number]) {
+                            bagCountsMap[u.bag_number] = u.expected_count || 0;
+                        }
+                    });
+                }
+            }
+
+            // If shipments exist for MAWB but none have a explicit bag_number assigned, create a default bag entry
+            if (Object.keys(bagCountsMap).length === 0 && (allShipments.length > 0 || unassignedCount > 0)) {
+                bagCountsMap[`${searchMawb}-BAG-01`] = allShipments.length || unassignedCount;
+            }
+
             const bagsList = Object.entries(bagCountsMap).map(([bagNumber, expectedCount]) => ({
                 bagNumber,
                 expectedCount
             }));
-            
+
             return NextResponse.json({ success: true, bags: bagsList });
+        }
+
+        if (getBagParcels && bagNumberParam) {
+            const rawBagNum = bagNumberParam.trim();
+            const cleanBagNum = encodeURIComponent(rawBagNum);
+
+            let shipments: any[] = [];
+
+            // 1. Try direct exact/ilike match on bag_number in shipments
+            let res = await fetch(`${supabaseUrl}/rest/v1/shipments?bag_number=ilike.${cleanBagNum}&select=*`, { headers });
+            if (res.ok) {
+                shipments = await res.json();
+            }
+
+            // 2. If 0 found, try substring match on bag_number
+            if (!Array.isArray(shipments) || shipments.length === 0) {
+                res = await fetch(`${supabaseUrl}/rest/v1/shipments?bag_number=ilike.*${cleanBagNum}*&select=*`, { headers });
+                if (res.ok) {
+                    const found = await res.json();
+                    if (Array.isArray(found) && found.length > 0) shipments = found;
+                }
+            }
+
+            // 3. Extract MAWB and search mawb_reference if bag_number in DB was null/unassigned
+            if (!Array.isArray(shipments) || shipments.length === 0) {
+                const mawbMatch = rawBagNum.match(/^([0-9]{3}-[0-9]{8})/);
+                const mawbRefToSearch = mawbMatch ? mawbMatch[1] : (mawbRefParam || '');
+
+                if (mawbRefToSearch) {
+                    res = await fetch(`${supabaseUrl}/rest/v1/shipments?mawb_reference=ilike.${encodeURIComponent(mawbRefToSearch.trim())}&select=*`, { headers });
+                    if (res.ok) {
+                        const found = await res.json();
+                        if (Array.isArray(found) && found.length > 0) shipments = found;
+                    }
+                }
+            }
+
+            // 4. Fallback search on shipments_duplicate table
+            if (!Array.isArray(shipments) || shipments.length === 0) {
+                res = await fetch(`${supabaseUrl}/rest/v1/shipments_duplicate?bag_number=ilike.${cleanBagNum}&select=*`, { headers });
+                if (res.ok) {
+                    const found = await res.json();
+                    if (Array.isArray(found) && found.length > 0) shipments = found;
+                }
+            }
+
+            // 5. Fallback search shipments_duplicate by mawb_reference
+            if (!Array.isArray(shipments) || shipments.length === 0) {
+                const mawbMatch = rawBagNum.match(/^([0-9]{3}-[0-9]{8})/);
+                const mawbRefToSearch = mawbMatch ? mawbMatch[1] : (mawbRefParam || '');
+                if (mawbRefToSearch) {
+                    res = await fetch(`${supabaseUrl}/rest/v1/shipments_duplicate?mawb_reference=ilike.${encodeURIComponent(mawbRefToSearch.trim())}&select=*`, { headers });
+                    if (res.ok) {
+                        const found = await res.json();
+                        if (Array.isArray(found) && found.length > 0) shipments = found;
+                    }
+                }
+            }
+
+            const parcels = (Array.isArray(shipments) ? shipments : []).map((s: any) => ({
+                trackingNumber: s.reference_number,
+                skynetTrackingNumber: s.reference_number,
+                senderReference: s.sender_reference || s.alternate_reference || '',
+                recipientName: s.consignee_name || 'Unknown Recipient',
+                city: s.consignee_location_name || s.consignee_address_3 || 'Unknown City',
+                assignedPartner: s.delivery_agent_code || 'PickMe',
+                assignedZone: s.delivery_route_code || 'Default-Zone',
+                weight: s.weight || s.dead_weight || 0.1
+            }));
+
+            return NextResponse.json({ success: true, count: parcels.length, parcels });
         }
 
         if (getUnsealedBags) {
