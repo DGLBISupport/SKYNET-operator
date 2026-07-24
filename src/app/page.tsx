@@ -3285,7 +3285,7 @@ export default function WorkstationDashboard() {
                                                 const isSealed = bag.status === 'SEALED';
                                                 const partner = bag.targetPartner || 'ALL';
 
-                                                 const partnerBgColor =
+                                                const partnerBgColor =
                                                     partner === 'PickMe' ? '#facc15' :
                                                         partner === 'Domex' ? '#800020' :
                                                             partner === 'Pronto' ? '#d97706' : '#4b5563';
@@ -3498,7 +3498,7 @@ export default function WorkstationDashboard() {
                                         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
                                             <div style={label}>Parcel Barcode Input</div>
                                             {activeOutboundBag && (
-                                                <span style={{ fontSize: '11px', fontWeight: '800', color: activeOutboundBag.status === 'SEALED' ? '#dc2626' : '#151817ff' }}>
+                                                <span style={{ fontSize: '11px', fontWeight: '700', color: activeOutboundBag.status === 'SEALED' ? '#dc2626' : '#151817ff' }}>
                                                     Allocating to: <strong>{activeOutboundBag.bagNumber}</strong> ({activeOutboundBag.targetPartner || 'ALL'})
                                                 </span>
                                             )}
@@ -3678,7 +3678,7 @@ export default function WorkstationDashboard() {
                                         Allocated Parcels in Active Bag ({activeOutboundBag?.parcels?.length || 0} Parcels)
                                     </div>
                                     {activeOutboundBag && (
-                                        <span style={{ fontSize: '12px', fontWeight: '700', color: '#047857' }}>
+                                        <span style={{ fontSize: '12px', fontWeight: '700', color: '#090a0aff' }}>
                                             Bag: {activeOutboundBag.bagNumber}
                                         </span>
                                     )}
@@ -4612,6 +4612,7 @@ export default function WorkstationDashboard() {
                 const isPartnerMismatch = duplicateModal.message?.toLowerCase().includes('partner mismatch');
                 const isManifestMismatch = duplicateModal.message?.toLowerCase().includes('manifest mismatch');
                 const isAlreadyUnsealed = duplicateModal.message?.toLowerCase().includes('already unsealed');
+                const isAlreadyAssigned = duplicateModal.message?.toLowerCase().includes('already assigned') || duplicateModal.message?.toLowerCase().includes('already sealed');
 
                 const titleText = isPartnerMismatch
                     ? 'Courier Partner Mismatch'
@@ -4619,7 +4620,9 @@ export default function WorkstationDashboard() {
                         ? 'Manifest Mismatch'
                         : isAlreadyUnsealed
                             ? 'Parcel Already Unsealed'
-                            : 'Duplicate Scan Detected';
+                            : isAlreadyAssigned
+                                ? 'Parcel Already Assigned'
+                                : 'Duplicate Scan Detected';
 
                 const warningText = isPartnerMismatch
                     ? 'Courier Partner Mismatch'
@@ -4627,7 +4630,9 @@ export default function WorkstationDashboard() {
                         ? 'Manifest Mismatch'
                         : isAlreadyUnsealed
                             ? 'Already Unsealed Warning'
-                            : 'Duplicate Scan Warning';
+                            : isAlreadyAssigned
+                                ? '⚠ Already Assigned Warning'
+                                : 'Duplicate Scan Warning';
 
                 return (
                     <div style={{
