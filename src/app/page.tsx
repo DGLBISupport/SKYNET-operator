@@ -610,13 +610,51 @@ export default function WorkstationDashboard() {
         }
     };
 
-    // Keyboard wedge support for confirmFinishModal, successModal, invalidBagParcelModal, customConfirmModal, overageCheckModal, and extraParcelModal
+    // Keyboard wedge support for all modal dialogs
     useEffect(() => {
-        if (!confirmFinishModal && !successModal && !invalidBagParcelModal && !customConfirmModal && !overageCheckModal && !extraParcelModal) return;
+        if (!confirmFinishModal && !successModal && !invalidBagParcelModal && !customConfirmModal && !overageCheckModal && !extraParcelModal && !duplicateModal && !invalidBarcodeModal && !manifestClosedModal && !printLabelModal) return;
         const handleModalKey = (e: KeyboardEvent) => {
-            if (successModal) {
+            if (duplicateModal) {
                 if (e.key === 'Enter' || e.key === 'Escape' || e.key === ' ') {
                     e.preventDefault();
+                    e.stopPropagation();
+                    setDuplicateModal(null);
+                    setBarcodeInput('');
+                    setLastScanned('');
+                    if (scanInputRef.current) scanInputRef.current.value = '';
+                    setTimeout(() => {
+                        if (activeTab === 'first-scan') firstScanInputRef.current?.focus();
+                        else if (activeTab === 'second-scan') scanInputRef.current?.focus();
+                        else if (activeTab === 'verify') verifyInputRef.current?.focus();
+                    }, 50);
+                }
+            } else if (invalidBarcodeModal) {
+                if (e.key === 'Enter' || e.key === 'Escape' || e.key === ' ') {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    setInvalidBarcodeModal(null);
+                    setBarcodeInput('');
+                    setLastScanned('');
+                    if (scanInputRef.current) scanInputRef.current.value = '';
+                    setTimeout(() => {
+                        if (activeTab === 'first-scan') firstScanInputRef.current?.focus();
+                        else if (activeTab === 'second-scan') scanInputRef.current?.focus();
+                        else if (activeTab === 'verify') verifyInputRef.current?.focus();
+                    }, 50);
+                }
+            } else if (manifestClosedModal) {
+                if (e.key === 'Enter' || e.key === 'Escape' || e.key === ' ') {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    setManifestClosedModal(null);
+                    setTimeout(() => {
+                        if (activeTab === 'second-scan') scanInputRef.current?.focus();
+                    }, 50);
+                }
+            } else if (successModal) {
+                if (e.key === 'Enter' || e.key === 'Escape' || e.key === ' ') {
+                    e.preventDefault();
+                    e.stopPropagation();
                     setSuccessModal(null);
                     setFirstScanInput('');
                     setBarcodeInput('');
@@ -634,9 +672,11 @@ export default function WorkstationDashboard() {
             } else if (confirmFinishModal) {
                 if (e.key === 'Enter') {
                     e.preventDefault();
+                    e.stopPropagation();
                     handleConfirmFinish();
                 } else if (e.key === 'Escape') {
                     e.preventDefault();
+                    e.stopPropagation();
                     setConfirmFinishModal(false);
                     setDiscrepancyReason('');
                     setCustomDiscrepancyNote('');
@@ -649,6 +689,7 @@ export default function WorkstationDashboard() {
             } else if (invalidBagParcelModal) {
                 if (e.key === 'Enter' || e.key === 'Escape' || e.key === ' ') {
                     e.preventDefault();
+                    e.stopPropagation();
                     setInvalidBagParcelModal(null);
                     setFirstScanInput('');
                     setBagBarcodeInput('');
@@ -671,10 +712,12 @@ export default function WorkstationDashboard() {
             } else if (customConfirmModal) {
                 if (e.key === 'Enter' || e.key === ' ') {
                     e.preventDefault();
+                    e.stopPropagation();
                     customConfirmModal.onConfirm();
                     setCustomConfirmModal(null);
                 } else if (e.key === 'Escape') {
                     e.preventDefault();
+                    e.stopPropagation();
                     setCustomConfirmModal(null);
                     setFirstScanInput('');
                     setBarcodeInput('');
@@ -689,12 +732,14 @@ export default function WorkstationDashboard() {
             } else if (overageCheckModal) {
                 if (e.key === 'Enter') {
                     e.preventDefault();
+                    e.stopPropagation();
                     // Enter = "No extra parcels, close bag"
                     const { bagNumber, expected, history } = overageCheckModal;
                     setOverageCheckModal(null);
                     autoFinishBag(bagNumber, expected, history);
                 } else if (e.key === ' ') {
                     e.preventDefault();
+                    e.stopPropagation();
                     // Space = "Yes, there are more parcels — continue scanning"
                     setOverageCheckModal(null);
                     setTimeout(() => firstScanInputRef.current?.focus(), 50);
@@ -702,6 +747,7 @@ export default function WorkstationDashboard() {
             } else if (extraParcelModal) {
                 if (e.key === 'Enter') {
                     e.preventDefault();
+                    e.stopPropagation();
                     const isNotFound = extraParcelModal.reason === 'NOT_FOUND';
                     const canSubmit = !isNotFound || extraParcelNote.trim() !== '';
                     if (canSubmit) {
@@ -713,6 +759,7 @@ export default function WorkstationDashboard() {
                     }
                 } else if (e.key === 'Escape') {
                     e.preventDefault();
+                    e.stopPropagation();
                     setExtraParcelModal(null);
                     setExtraParcelNote('');
                     setTimeout(() => {
@@ -726,6 +773,7 @@ export default function WorkstationDashboard() {
             } else if (printLabelModal) {
                 if (e.key === 'Escape') {
                     e.preventDefault();
+                    e.stopPropagation();
                     setPrintLabelModal(null);
                     setTimeout(() => {
                         if (activeTab === 'first-scan') firstScanInputRef.current?.focus();
@@ -733,9 +781,9 @@ export default function WorkstationDashboard() {
                 }
             }
         };
-        window.addEventListener('keydown', handleModalKey);
-        return () => window.removeEventListener('keydown', handleModalKey);
-    }, [confirmFinishModal, successModal, invalidBagParcelModal, customConfirmModal, overageCheckModal, extraParcelModal, extraParcelNote, printLabelModal, activeTab, firstScanMawb, firstScanExpected, firstScanHistory]);
+        window.addEventListener('keydown', handleModalKey, true);
+        return () => window.removeEventListener('keydown', handleModalKey, true);
+    }, [confirmFinishModal, successModal, invalidBagParcelModal, customConfirmModal, overageCheckModal, extraParcelModal, extraParcelNote, printLabelModal, duplicateModal, invalidBarcodeModal, manifestClosedModal, activeTab, firstScanMawb, firstScanExpected, firstScanHistory]);
 
     const handleTestScannerKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
         const now = Date.now();
@@ -4647,6 +4695,7 @@ export default function WorkstationDashboard() {
 
                             {/* Dismiss Action Button */}
                             <button
+                                autoFocus
                                 onClick={() => {
                                     setDuplicateModal(null);
                                     setTimeout(() => {
@@ -4755,6 +4804,7 @@ export default function WorkstationDashboard() {
 
                             {/* Dismiss Action Button */}
                             <button
+                                autoFocus
                                 onClick={() => {
                                     setInvalidBarcodeModal(null);
                                     setBarcodeInput('');
