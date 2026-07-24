@@ -208,6 +208,13 @@ export async function POST(request: Request) {
             }
         }
 
+        const isTemuScan = Boolean(
+            resolvedShipment &&
+            resolvedShipment.sender_reference &&
+            cleanBar.toUpperCase() === resolvedShipment.sender_reference.trim().toUpperCase() &&
+            cleanBar.toUpperCase() !== resolvedShipment.reference_number?.toString().trim().toUpperCase()
+        );
+
         // ═══════════════════════════════════════════════════════
         // STAGE 1 — BOX UNSEALING (FIRST SCAN)
         // ═══════════════════════════════════════════════════════
@@ -369,7 +376,10 @@ export async function POST(request: Request) {
                 district: shipment.consignee_address_3 || "Unknown District",
                 weight: shipment.weight || 0,
                 mawbRef: finalMawb,
-                senderReference: shipment.sender_reference || undefined
+                senderReference: shipment.sender_reference || undefined,
+                _scannedVia: isTemuScan ? 'TEMU' : 'SKYNET',
+                isTemuScan: isTemuScan,
+                scannedMethod: isTemuScan ? 'TEMU' : 'SKYNET'
             };
 
             return NextResponse.json({
@@ -587,7 +597,10 @@ export async function POST(request: Request) {
             mawbBags: mawbDetails ? mawbDetails.declared_bags : undefined,
             serviceType: shipment.service_type || undefined,
             businessType: shipment.business_type || undefined,
-            senderReference: shipment.sender_reference || undefined
+            senderReference: shipment.sender_reference || undefined,
+            _scannedVia: isTemuScan ? 'TEMU' : 'SKYNET',
+            isTemuScan: isTemuScan,
+            scannedMethod: isTemuScan ? 'TEMU' : 'SKYNET'
         };
 
         // Perform Validation Checks:

@@ -209,7 +209,7 @@ export async function POST(request: Request) {
                 bagNumber: newBagNumber,
                 mawbRef,
                 targetPartner: partner || 'ALL',
-                destinationHub: destinationHub || (partner && partner !== 'ALL' ? `${partner} Central Hub` : 'Main Sort Hub'),
+                destinationHub: destinationHub || (partner && partner !== 'ALL' ? `${partner}` : 'Main Sort Hub'),
                 status: 'OPEN',
                 parcelCount: 0,
                 totalWeight: 0,

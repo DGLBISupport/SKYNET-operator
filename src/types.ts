@@ -20,6 +20,9 @@ export interface SkyNetParcelData {
     serviceType?: string;
     businessType?: string;
     senderReference?: string;
+    _scannedVia?: string;
+    isTemuScan?: boolean;
+    scannedMethod?: string;
 }
 
 export interface ZoneRule {

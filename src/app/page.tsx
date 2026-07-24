@@ -1326,7 +1326,7 @@ export default function WorkstationDashboard() {
                     mawbRef: selectedSecondScanMawb,
                     partner: newBagPartner,
                     customBagNumber: finalBagNumber,
-                    destinationHub: newBagHub || (newBagPartner !== 'ALL' ? `${newBagPartner} Central Hub` : 'Main Sorting Hub'),
+                    destinationHub: newBagHub || (newBagPartner !== 'ALL' ? `${newBagPartner}` : 'Main Sorting Hub'),
                     operator: currentUser ? `${currentUser.firstName} ${currentUser.lastName}` : 'Staff'
                 })
             });
@@ -1387,7 +1387,7 @@ export default function WorkstationDashboard() {
                     mawbRef: selectedSecondScanMawb,
                     bagNumber: bagNumber,
                     targetPartner: activeOutboundBag.targetPartner || 'ALL',
-                    destinationHub: activeOutboundBag.destinationHub || (activeOutboundBag.targetPartner && activeOutboundBag.targetPartner !== 'ALL' ? `${activeOutboundBag.targetPartner} Central Hub` : 'Main Sort Hub'),
+                    destinationHub: activeOutboundBag.destinationHub || (activeOutboundBag.targetPartner && activeOutboundBag.targetPartner !== 'ALL' ? `${activeOutboundBag.targetPartner}` : 'Main Sort Hub'),
                     operator: activeOperator,
                     parcelCount: activeOutboundBag.parcelCount,
                     totalWeight: activeOutboundBag.totalWeight,
@@ -1473,12 +1473,12 @@ export default function WorkstationDashboard() {
             const temuCode = preExistingLMD.senderReference;
             const isDifferentBag = foundBag.bagNumber !== activeOutboundBag.bagNumber;
             const isSealed = foundBag.status === 'SEALED';
-            const isTemuSameBag = !isDifferentBag && !isSealed && Boolean(
+            const wasScannedViaTemu = Boolean(
                 preExistingLMD._scannedVia === 'TEMU' ||
-                preExistingLMD.isTemuScan ||
-                preExistingLMD.scannedMethod === 'TEMU' ||
-                (temuCode && (cleanBarcodeLMD === skynetCode.trim().toLowerCase() || cleanBarcodeLMD === temuCode.trim().toLowerCase()))
+                preExistingLMD.isTemuScan === true ||
+                preExistingLMD.scannedMethod === 'TEMU'
             );
+            const isTemuSameBag = !isDifferentBag && !isSealed && wasScannedViaTemu;
 
             const dupMsg = isSealed
                 ? `Already scanned!! Parcel (${skynetCode}) is ALREADY sealed in Bag "${foundBag.bagNumber}". Cannot assign to another bag.`
