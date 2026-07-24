@@ -2890,13 +2890,13 @@ export default function WorkstationDashboard() {
                                                         statusColor = '#15803d';
                                                         statusBg = '#dcfce7';
                                                     } else if (status === 'ONGOING') {
-                                                        bgColor = '#eff6ff';
-                                                        borderColor = '#bfdbfe';
-                                                        textColor = '#1e40af';
-                                                        descColor = '#2563eb';
+                                                        bgColor = '#ffffff';
+                                                        borderColor = '#111827';
+                                                        textColor = '#111827';
+                                                        descColor = '#374151';
                                                         statusText = 'Scanning';
-                                                        statusColor = '#2563eb';
-                                                        statusBg = '#dbeafe';
+                                                        statusColor = '#111827';
+                                                        statusBg = '#e5e7eb';
                                                     }
 
                                                     return (
@@ -2918,13 +2918,13 @@ export default function WorkstationDashboard() {
                                                             }}
                                                             style={{
                                                                 backgroundColor: bgColor,
-                                                                border: `1px solid ${borderColor}`,
+                                                                border: status === 'ONGOING' ? '2.5px solid #111827' : `1px solid ${borderColor}`,
                                                                 borderRadius: '8px',
                                                                 padding: '12px 14px',
                                                                 display: 'flex',
                                                                 justifyContent: 'space-between',
                                                                 alignItems: 'center',
-                                                                boxShadow: status === 'ONGOING' ? '0 4px 6px -1px rgba(37, 99, 235, 0.1)' : 'none',
+                                                                boxShadow: status === 'ONGOING' ? '0 4px 12px rgba(0, 0, 0, 0.08)' : 'none',
                                                                 cursor: status === 'COMPLETED' ? 'default' : 'pointer',
                                                                 transition: 'all 0.15s ease'
                                                             }}
