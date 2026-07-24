@@ -1545,13 +1545,11 @@ export default function WorkstationDashboard() {
             );
             const isTemuSameBag = !isDifferentBag && !isSealed && wasScannedViaTemu;
 
-            const dupMsg = isSealed
-                ? `Already scanned!! Parcel (${skynetCode}) is ALREADY sealed in Bag "${foundBag.bagNumber}". Cannot assign to another bag.`
-                : isDifferentBag
-                    ? `Already scanned!! Parcel (${skynetCode}) is ALREADY assigned to Bag "${foundBag.bagNumber}".`
-                    : isTemuSameBag
-                        ? `Already scanned via Temu Barcode (${temuCode}) in Bag "${foundBag.bagNumber}".`
-                        : `Already scanned!! This barcode is already assigned to Bag "${activeOutboundBag.bagNumber}".`;
+            const dupMsg = (isDifferentBag || isSealed)
+                ? `Already scanned!! Parcel (${skynetCode}) is ALREADY assigned to Bag "${foundBag.bagNumber}".`
+                : isTemuSameBag
+                    ? `Already scanned via Temu Barcode (${temuCode}) in Bag "${foundBag.bagNumber}".`
+                    : `Already scanned!! This barcode is already assigned to Bag "${activeOutboundBag.bagNumber}".`;
 
             setStatus('ERROR');
             setErrorMessage(dupMsg);
