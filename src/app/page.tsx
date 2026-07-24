@@ -3239,9 +3239,9 @@ export default function WorkstationDashboard() {
                                                 const isSealed = bag.status === 'SEALED';
                                                 const partner = bag.targetPartner || 'ALL';
 
-                                                const partnerBgColor =
+                                                 const partnerBgColor =
                                                     partner === 'PickMe' ? '#facc15' :
-                                                        partner === 'Domex' ? '#e53935' :
+                                                        partner === 'Domex' ? '#800020' :
                                                             partner === 'Pronto' ? '#d97706' : '#4b5563';
 
                                                 const partnerTextColor =
@@ -3249,7 +3249,7 @@ export default function WorkstationDashboard() {
 
                                                 const partnerBorderColor =
                                                     partner === 'PickMe' ? '#eab308' :
-                                                        partner === 'Domex' ? '#e53935' :
+                                                        partner === 'Domex' ? '#800020' :
                                                             partner === 'Pronto' ? '#d97706' : '#e21b22';
 
                                                 return (
@@ -3330,7 +3330,7 @@ export default function WorkstationDashboard() {
                                                         <div style={{ fontSize: '15px', fontWeight: '800', color: '#111827', display: 'flex', alignItems: 'center', gap: '8px' }}>
                                                             <span>{activeOutboundBag.bagNumber}</span>
                                                             <span style={{
-                                                                backgroundColor: activeOutboundBag.targetPartner === 'PickMe' ? '#facc15' : activeOutboundBag.targetpartner === 'Domex' ? '#e53935' : activeOutboundBag.targetPartner === 'Pronto' ? '#d97706' : '#4b5563',
+                                                                backgroundColor: activeOutboundBag.targetPartner === 'PickMe' ? '#facc15' : activeOutboundBag.targetPartner === 'Domex' ? '#800020' : activeOutboundBag.targetPartner === 'Pronto' ? '#d97706' : '#4b5563',
                                                                 color: activeOutboundBag.targetPartner === 'PickMe' ? '#111827' : '#ffffff',
                                                                 fontSize: '10px',
                                                                 fontWeight: '800',
@@ -4876,12 +4876,12 @@ export default function WorkstationDashboard() {
                             </div>
 
                             {/* Domex Card */}
-                            <div style={{ backgroundColor: '#fef2f2', border: '1px solid #fca5a5', borderRadius: '8px', padding: '10px 12px', textAlign: 'left' }}>
-                                <div style={{ fontSize: '10px', fontWeight: '800', color: '#991b1b', textTransform: 'uppercase' }}>🔴 Domex Express</div>
-                                <div style={{ fontSize: '14px', fontWeight: '900', color: '#991b1b', marginTop: '2px' }}>
+                            <div style={{ backgroundColor: '#fff1f2', border: '1px solid #fecdd3', borderRadius: '8px', padding: '10px 12px', textAlign: 'left' }}>
+                                <div style={{ fontSize: '10px', fontWeight: '800', color: '#881337', textTransform: 'uppercase' }}>🍷 Domex Express</div>
+                                <div style={{ fontSize: '14px', fontWeight: '900', color: '#881337', marginTop: '2px' }}>
                                     {manifestClosedModal.domexBags} <span style={{ fontSize: '11px', fontWeight: '700' }}>Bags</span>
                                 </div>
-                                <div style={{ fontSize: '11px', fontWeight: '700', color: '#b91c1c' }}>
+                                <div style={{ fontSize: '11px', fontWeight: '700', color: '#9f1239' }}>
                                     {manifestClosedModal.domexParcels} Parcels
                                 </div>
                             </div>
