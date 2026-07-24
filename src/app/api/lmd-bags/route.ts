@@ -56,14 +56,22 @@ export async function GET(request: Request) {
                 const bagsData = await bagRes.json();
                 if (Array.isArray(bagsData) && bagsData.length > 0) {
                     const row = bagsData[0];
-                    // Fetch items
-                    const itemsRes = await fetch(`${sb.url}/rest/v1/outbound_lmd_bag_items?bag_number=eq.${encodeURIComponent(bagNumber)}`, { headers: sb.headers });
-                    const itemsData = await itemsRes.json();
-                    const parcels = Array.isArray(itemsData) ? itemsData.map((it: any) => ({
-                        trackingNumber: it.shipment_ref,
-                        weight: it.weight || 0.1,
-                        scannedBy: it.scanned_by
-                    })) : [];
+                    let parcels: any[] = [];
+                    if (Array.isArray(row.parcels)) {
+                        parcels = row.parcels;
+                    } else if (typeof row.parcels === 'string') {
+                        try { parcels = JSON.parse(row.parcels); } catch (e) { parcels = []; }
+                    } else {
+                        try {
+                            const itemsRes = await fetch(`${sb.url}/rest/v1/outbound_lmd_bag_items?bag_number=eq.${encodeURIComponent(bagNumber)}`, { headers: sb.headers });
+                            const itemsData = await itemsRes.json();
+                            parcels = Array.isArray(itemsData) ? itemsData.map((it: any) => ({
+                                trackingNumber: it.shipment_ref,
+                                weight: it.weight || 0.1,
+                                scannedBy: it.scanned_by
+                            })) : [];
+                        } catch (e) { parcels = []; }
+                    }
 
                     const bag: OutboundBag = {
                         bagNumber: row.bag_number,
@@ -107,26 +115,13 @@ export async function GET(request: Request) {
                 const manifestStatus = Array.isArray(manifestData) && manifestData.length > 0 ? manifestData[0].status : 'OPEN';
 
                 if (Array.isArray(bagsData) && bagsData.length > 0) {
-                    const bagNumbers = bagsData.map((b: any) => b.bag_number);
-                    // Fetch items for all these bags
-                    const inQuery = bagNumbers.map((bn: string) => `"${bn}"`).join(',');
-                    const itemsRes = await fetch(`${sb.url}/rest/v1/outbound_lmd_bag_items?bag_number=in.(${inQuery})`, { headers: sb.headers });
-                    const itemsData = await itemsRes.json();
-
-                    const itemsMap = new Map<string, any[]>();
-                    if (Array.isArray(itemsData)) {
-                        for (const it of itemsData) {
-                            if (!itemsMap.has(it.bag_number)) itemsMap.set(it.bag_number, []);
-                            itemsMap.get(it.bag_number)?.push({
-                                trackingNumber: it.shipment_ref,
-                                weight: it.weight || 0.1,
-                                scannedBy: it.scanned_by
-                            });
-                        }
-                    }
-
                     const dbBags: OutboundBag[] = bagsData.map((row: any) => {
-                        const parcels = itemsMap.get(row.bag_number) || [];
+                        let parcels: any[] = [];
+                        if (Array.isArray(row.parcels)) {
+                            parcels = row.parcels;
+                        } else if (typeof row.parcels === 'string') {
+                            try { parcels = JSON.parse(row.parcels); } catch (e) { parcels = []; }
+                        }
                         const b: OutboundBag = {
                             bagNumber: row.bag_number,
                             mawbRef: row.mawb_ref,
@@ -144,7 +139,7 @@ export async function GET(request: Request) {
                         outboundBagsMap.set(b.bagNumber, b);
                         return b;
                     });
-
+                    
                     manifestsMap.set(mawbRef, { mawbRef, status: manifestStatus });
 
                     return NextResponse.json({
@@ -307,7 +302,8 @@ export async function POST(request: Request) {
                         headers: sb.headers,
                         body: JSON.stringify({
                             parcel_count: bag.parcelCount,
-                            total_weight: bag.totalWeight
+                            total_weight: bag.totalWeight,
+                            parcels: bag.parcels || []
                         })
                     });
 
@@ -323,7 +319,7 @@ export async function POST(request: Request) {
                                     weight: Number(newParcel.weight) || 0.1,
                                     scanned_by: operator || 'Staff'
                                 })
-                            });
+                            }).catch(e => console.error("Optional bag items table update ignored:", e));
                         }
                     }
                 } catch (err) {
@@ -380,7 +376,8 @@ export async function POST(request: Request) {
                             sealed_at: sealedTimestamp,
                             sealed_by: sealingOperator,
                             parcel_count: bag.parcelCount,
-                            total_weight: bag.totalWeight
+                            total_weight: bag.totalWeight,
+                            parcels: bag.parcels || []
                         })
                     });
 

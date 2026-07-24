@@ -413,6 +413,7 @@ CREATE TABLE public.outbound_lmd_bags (
   created_by text,
   sealed_at timestamp with time zone,
   sealed_by text,
+  parcels jsonb NOT NULL DEFAULT '[]'::jsonb,
   CONSTRAINT outbound_lmd_bags_pkey PRIMARY KEY (id),
   CONSTRAINT outbound_lmd_bags_mawb_ref_fkey FOREIGN KEY (mawb_ref) REFERENCES public.mawb(mawb_reference)
 );
