@@ -24,7 +24,7 @@ export default function RootLayout({
             * {
               font-family: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif !important;
             }
-            button, input, select, textarea {
+            html, body, button, input, select, textarea, div, span, label, table, td, th, p, h1, h2, h3, h4, h5, h6, a, code, pre {
               font-family: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif !important;
             }
           `

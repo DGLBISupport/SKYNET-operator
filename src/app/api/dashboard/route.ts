@@ -14,6 +14,40 @@ const getSupabaseConfig = () => {
     };
 };
 
+async function fetchAllSupabaseRows(table: string, selectFields: string, sb: { url: string; headers: Record<string, string> }) {
+    let allRows: any[] = [];
+    let offset = 0;
+    const limit = 1000;
+    let hasMore = true;
+    let attempts = 0;
+
+    while (hasMore && attempts < 10) {
+        attempts++;
+        try {
+            const res = await fetch(`${sb.url}/rest/v1/${table}?select=${selectFields}&limit=${limit}&offset=${offset}`, { headers: sb.headers });
+            if (res.ok) {
+                const data = await res.json();
+                if (Array.isArray(data) && data.length > 0) {
+                    allRows.push(...data);
+                    if (data.length < limit) {
+                        hasMore = false;
+                    } else {
+                        offset += limit;
+                    }
+                } else {
+                    hasMore = false;
+                }
+            } else {
+                hasMore = false;
+            }
+        } catch (e) {
+            console.error(`Error fetching table ${table}:`, e);
+            hasMore = false;
+        }
+    }
+    return allRows;
+}
+
 export async function GET(request: Request) {
     try {
         const sb = getSupabaseConfig();
@@ -21,132 +55,217 @@ export async function GET(request: Request) {
             return NextResponse.json({ success: false, error: 'Database connection missing' }, { status: 500 });
         }
 
-        // 1. Fetch Total Shipments (Parcels Received & Sorted)
-        let totalReceived = 0;
+        // Fetch all tables concurrently using Promise.allSettled
+        const [shipResult, bagResult, manResult, damResult, unsealResult, spaResult, spResult, spAllocResult] = await Promise.allSettled([
+            fetchAllSupabaseRows('shipments', 'reference_number,sender_reference,mawb_reference,delivery_agent_code,bag_number,consignee_location_name,created_at,weight', sb),
+            fetchAllSupabaseRows('outbound_lmd_bags', 'id,bag_number,mawb_ref,target_partner,destination_hub,status,parcel_count,total_weight,created_by,sealed_by,created_at,sealed_at', sb),
+            fetchAllSupabaseRows('manifest_sessions', 'id,manifest_id,mawb_ref,status,total_bags,total_parcels,closed_by,created_at,closed_at', sb),
+            fetchAllSupabaseRows('damaged_barcodes', 'id,barcode,reason,reported_by,created_at', sb),
+            fetchAllSupabaseRows('bag_unsealing', 'id,bag_number,mawb_ref,status,unsealed_by,scanned_count,expected_count,created_at', sb),
+            fetchAllSupabaseRows('service_provider_allocation', 'id', sb),
+            fetchAllSupabaseRows('service_providers', 'id,name,code', sb),
+            fetchAllSupabaseRows('service_provider_allocation', 'shipment_ref,service_provider', sb)
+        ]);
+
+        const shipData = shipResult.status === 'fulfilled' ? shipResult.value : [];
+        const bagData = bagResult.status === 'fulfilled' ? bagResult.value : [];
+        const manData = manResult.status === 'fulfilled' ? manResult.value : [];
+        const damData = damResult.status === 'fulfilled' ? damResult.value : [];
+        const unsealData = unsealResult.status === 'fulfilled' ? unsealResult.value : [];
+        const spaData = spaResult.status === 'fulfilled' ? spaResult.value : [];
+        const spData = spResult.status === 'fulfilled' ? spResult.value : [];
+        const spAllocData = spAllocResult.status === 'fulfilled' ? spAllocResult.value : [];
+
+        // Build Service Provider Map (id -> Normalized Name)
+        const providerMap: Record<number, string> = {};
+        spData.forEach((sp: any) => {
+            const rawName = (sp.name || sp.code || '').trim();
+            let normName = rawName || 'Other';
+            if (rawName.toLowerCase().includes('pickme')) normName = 'PickMe';
+            else if (rawName.toLowerCase().includes('domex')) normName = 'Domex';
+            else if (rawName.toLowerCase().includes('pronto')) normName = 'Pronto';
+            providerMap[sp.id] = normName;
+        });
+
+        // Build Shipment Ref -> Partner Name Map from service_provider_allocation
+        const shipmentToPartnerMap: Record<string, string> = {};
+        spAllocData.forEach((alloc: any) => {
+            if (alloc.shipment_ref && alloc.service_provider) {
+                const partnerName = providerMap[alloc.service_provider] || 'Other';
+                shipmentToPartnerMap[alloc.shipment_ref] = partnerName;
+            }
+        });
+
+        // 1. Shipments Metrics & Structured List
+        let totalReceived = shipData.length;
         let totalSorted = 0;
-        let pendingParcels = 0;
         let partnerDistribution: Record<string, number> = { PickMe: 0, Domex: 0, Pronto: 0, Other: 0 };
 
-        try {
-            const shipRes = await fetch(`${sb.url}/rest/v1/shipments?select=bag_number,delivery_agent_code`, { headers: sb.headers });
-            if (shipRes.ok) {
-                const shipData = await shipRes.json();
-                if (Array.isArray(shipData)) {
-                    totalReceived = shipData.length;
-                    shipData.forEach(s => {
-                        if (s.bag_number && String(s.bag_number).trim() !== '') {
-                            totalSorted++;
-                        }
-                        const pName = s.delivery_agent_code || 'Other';
-                        if (partnerDistribution[pName] !== undefined) {
-                            partnerDistribution[pName]++;
-                        } else {
-                            partnerDistribution['Other']++;
-                        }
-                    });
-                    pendingParcels = totalReceived - totalSorted;
-                }
-            }
-        } catch (e) {
-            console.error("Dashboard shipments stats error:", e);
-        }
+        // Detailed per-partner metrics map
+        const partnerDetailsMap: Record<string, { partnerName: string; totalParcels: number; allocatedParcels: number; pendingParcels: number; totalBags: number }> = {
+            PickMe: { partnerName: 'PickMe', totalParcels: 0, allocatedParcels: 0, pendingParcels: 0, totalBags: 0 },
+            Domex: { partnerName: 'Domex', totalParcels: 0, allocatedParcels: 0, pendingParcels: 0, totalBags: 0 },
+            Pronto: { partnerName: 'Pronto', totalParcels: 0, allocatedParcels: 0, pendingParcels: 0, totalBags: 0 },
+            Other: { partnerName: 'Other', totalParcels: 0, allocatedParcels: 0, pendingParcels: 0, totalBags: 0 }
+        };
 
-        // 2. Fetch Outbound LMD Bags Metrics
-        let totalBagsCreated = 0;
+        const receivedParcels = shipData.map(s => {
+            const isSorted = Boolean(s.bag_number && String(s.bag_number).trim() !== '');
+            if (isSorted) totalSorted++;
+            
+            // Resolve LMD Courier Partner via service_provider_allocation table, fallback to delivery_agent_code
+            let rawPartner = shipmentToPartnerMap[s.reference_number] || s.delivery_agent_code || '';
+            let pName = 'Other';
+            if (rawPartner.toLowerCase().includes('pickme')) pName = 'PickMe';
+            else if (rawPartner.toLowerCase().includes('domex')) pName = 'Domex';
+            else if (rawPartner.toLowerCase().includes('pronto')) pName = 'Pronto';
+            else if (partnerDetailsMap[rawPartner]) pName = rawPartner;
+
+            if (partnerDistribution[pName] !== undefined) {
+                partnerDistribution[pName]++;
+            } else {
+                partnerDistribution['Other']++;
+            }
+
+            partnerDetailsMap[pName].totalParcels++;
+            if (isSorted) {
+                partnerDetailsMap[pName].allocatedParcels++;
+            } else {
+                partnerDetailsMap[pName].pendingParcels++;
+            }
+
+            return {
+                referenceNumber: s.reference_number || 'N/A',
+                senderReference: s.sender_reference || '-',
+                mawbReference: s.mawb_reference || '-',
+                deliveryAgentCode: pName,
+                bagNumber: s.bag_number || '',
+                consigneeLocation: s.consignee_location_name || 'N/A',
+                weight: s.weight ? `${s.weight} kg` : '-',
+                createdAt: s.created_at || new Date().toISOString(),
+                isSorted
+            };
+        });
+
+        const pendingParcels = totalReceived - totalSorted;
+
+        // 2. Bags Metrics & Structured List
+        let totalBagsCreated = bagData.length;
         let openBags = 0;
         let sealedBags = 0;
         let bagPartnerCounts: Record<string, number> = { PickMe: 0, Domex: 0, Pronto: 0, General: 0 };
 
-        try {
-            const bagRes = await fetch(`${sb.url}/rest/v1/outbound_lmd_bags?select=status,target_partner`, { headers: sb.headers });
-            if (bagRes.ok) {
-                const bagData = await bagRes.json();
-                if (Array.isArray(bagData)) {
-                    totalBagsCreated = bagData.length;
-                    bagData.forEach(b => {
-                        if (b.status === 'SEALED') sealedBags++;
-                        else openBags++;
+        const bagsList = bagData.map(b => {
+            const isSealed = b.status === 'SEALED';
+            if (isSealed) sealedBags++;
+            else openBags++;
 
-                        const p = b.target_partner || 'General';
-                        if (bagPartnerCounts[p] !== undefined) bagPartnerCounts[p]++;
-                        else bagPartnerCounts['General']++;
-                    });
-                }
-            }
-        } catch (e) {
-            console.error("Dashboard bags stats error:", e);
-        }
+            let p = b.target_partner || 'General';
+            if (p.toLowerCase().includes('pickme')) p = 'PickMe';
+            else if (p.toLowerCase().includes('domex')) p = 'Domex';
+            else if (p.toLowerCase().includes('pronto')) p = 'Pronto';
 
-        // 3. Fetch Manifest Sessions
-        let totalManifests = 0;
+            if (bagPartnerCounts[p] !== undefined) bagPartnerCounts[p]++;
+            else bagPartnerCounts['General']++;
+
+            let detailsPartner = p;
+            if (detailsPartner === 'General' || !partnerDetailsMap[detailsPartner]) detailsPartner = 'Other';
+            partnerDetailsMap[detailsPartner].totalBags++;
+
+            return {
+                id: b.id,
+                bagNumber: b.bag_number || `BAG-${b.id}`,
+                mawbRef: b.mawb_ref || '',
+                targetPartner: p,
+                destinationHub: b.destination_hub || p,
+                status: b.status || 'OPEN',
+                parcelCount: b.parcel_count || 0,
+                totalWeight: b.total_weight || 0,
+                createdBy: b.created_by || 'System',
+                sealedBy: b.sealed_by || '-',
+                createdAt: b.created_at || '',
+                sealedAt: b.sealed_at || '-'
+            };
+        });
+
+        const partnerDetails = Object.values(partnerDetailsMap);
+
+        // 3. Manifest Metrics & Structured List
+        let totalManifests = manData.length;
         let openManifests = 0;
         let closedManifests = 0;
 
-        try {
-            const manRes = await fetch(`${sb.url}/rest/v1/manifest_sessions?select=status`, { headers: sb.headers });
-            if (manRes.ok) {
-                const manData = await manRes.json();
-                if (Array.isArray(manData)) {
-                    totalManifests = manData.length;
-                    manData.forEach(m => {
-                        if (m.status === 'CLOSED') closedManifests++;
-                        else openManifests++;
-                    });
-                }
-            }
-        } catch (e) {
-            console.error("Dashboard manifest stats error:", e);
-        }
+        const manifestsList = manData.map(m => {
+            const isClosed = m.status === 'CLOSED';
+            if (isClosed) closedManifests++;
+            else openManifests++;
 
-        // 4. Fetch Exception Counts (Damaged Barcodes & Discrepancies)
-        let damagedLabelsCount = 0;
-        let unsealedBoxesCount = 0;
+            return {
+                id: m.id,
+                manifestId: m.manifest_id || `MNF-${m.id}`,
+                mawbRef: m.mawb_ref || m.manifest_id || '',
+                status: m.status || 'OPEN',
+                totalBags: m.total_bags || 0,
+                totalParcels: m.total_parcels || 0,
+                closedBy: m.closed_by || '-',
+                createdAt: m.created_at || '',
+                closedAt: m.closed_at || '-'
+            };
+        });
+
+        // Box Unsealings List
+        const unsealedBoxesList = unsealData.map(u => ({
+            id: u.id,
+            mawbRef: u.mawb_ref || '',
+            bagNumber: u.bag_number || 'Box',
+            scannedCount: u.scanned_count || 0,
+            expectedCount: u.expected_count || 0,
+            unsealedBy: u.unsealed_by || 'Staff',
+            status: u.status || 'Unsealed',
+            createdAt: u.created_at || ''
+        }));
+
+        // 4. Exception Counts & Structured List
+        let damagedLabelsCount = damData.length;
+        let unsealedBoxesCount = unsealData.length;
         let discrepancyCount = 0;
 
-        try {
-            const damRes = await fetch(`${sb.url}/rest/v1/damaged_barcodes?select=id`, { headers: sb.headers });
-            if (damRes.ok) {
-                const damData = await damRes.json();
-                if (Array.isArray(damData)) damagedLabelsCount = damData.length;
+        unsealData.forEach(u => {
+            const st = (u.status || '').toLowerCase();
+            if (st.includes('shortage') || st.includes('overage') || st.includes('discrepancy')) {
+                discrepancyCount++;
             }
-        } catch (e) {
-            console.error("Dashboard damaged barcodes stats error:", e);
-        }
+        });
 
-        try {
-            const unsealRes = await fetch(`${sb.url}/rest/v1/bag_unsealing?select=status`, { headers: sb.headers });
-            if (unsealRes.ok) {
-                const unsealData = await unsealRes.json();
-                if (Array.isArray(unsealData)) {
-                    unsealedBoxesCount = unsealData.length;
-                    unsealData.forEach(u => {
-                        const st = (u.status || '').toLowerCase();
-                        if (st.includes('shortage') || st.includes('overage') || st.includes('discrepancy')) {
-                            discrepancyCount++;
-                        }
-                    });
-                }
-            }
-        } catch (e) {
-            console.error("Dashboard unsealing stats error:", e);
-        }
+        const exceptionsList = [
+            ...damData.map(d => ({
+                id: `dam-${d.id}`,
+                type: 'Damaged Barcode',
+                refNumber: d.barcode || 'N/A',
+                details: d.reason || 'Label damaged / unreadable',
+                reportedBy: d.reported_by || 'Operator',
+                status: 'Damaged Label',
+                scannedVsExpected: '-',
+                createdAt: d.created_at || ''
+            })),
+            ...unsealData.map(u => ({
+                id: `unseal-${u.id}`,
+                type: `Unsealing ${u.status || 'Discrepancy'}`,
+                refNumber: u.bag_number || 'Box',
+                details: `MAWB: ${u.mawb_ref || 'N/A'}`,
+                reportedBy: u.unsealed_by || 'Operator',
+                status: u.status || 'Unsealed Box',
+                scannedVsExpected: `${u.scanned_count || 0} / ${u.expected_count || 0}`,
+                createdAt: u.created_at || ''
+            }))
+        ];
 
-        // 5. Fetch Dispatch Allocations
-        let totalDispatched = 0;
-        try {
-            const spaRes = await fetch(`${sb.url}/rest/v1/service_provider_allocation?select=id`, { headers: sb.headers });
-            if (spaRes.ok) {
-                const spaData = await spaRes.json();
-                if (Array.isArray(spaData)) totalDispatched = spaData.length;
-            }
-        } catch (e) {
-            console.error("Dashboard SPA stats error:", e);
-        }
+        // 5. Dispatch Allocations
+        let totalDispatched = spaData.length;
 
         // 6. Aggregate Operator Productivity Breakdown
         const userProductivityMap: Record<string, { operator: string; scanned: number; bagsSealed: number; manifestsClosed: number }> = {};
 
-        // Helper to record user activity
         const addActivity = (opName: string, type: 'scan' | 'seal' | 'close') => {
             const cleanOp = (opName || '').trim();
             if (!cleanOp || cleanOp === 'System') return;
@@ -158,51 +277,24 @@ export async function GET(request: Request) {
             if (type === 'close') userProductivityMap[cleanOp].manifestsClosed++;
         };
 
-        // Fetch sealed bags operator activity
-        try {
-            const sealedOpsRes = await fetch(`${sb.url}/rest/v1/outbound_lmd_bags?select=sealed_by,created_by`, { headers: sb.headers });
-            if (sealedOpsRes.ok) {
-                const data = await sealedOpsRes.json();
-                if (Array.isArray(data)) {
-                    data.forEach(b => {
-                        if (b.sealed_by) addActivity(b.sealed_by, 'seal');
-                        if (b.created_by) addActivity(b.created_by, 'scan');
-                    });
-                }
-            }
-        } catch (e) { }
+        bagData.forEach(b => {
+            if (b.sealed_by) addActivity(b.sealed_by, 'seal');
+            if (b.created_by) addActivity(b.created_by, 'scan');
+        });
 
-        // Fetch closed manifest operator activity
-        try {
-            const closedOpsRes = await fetch(`${sb.url}/rest/v1/manifest_sessions?select=closed_by`, { headers: sb.headers });
-            if (closedOpsRes.ok) {
-                const data = await closedOpsRes.json();
-                if (Array.isArray(data)) {
-                    data.forEach(m => {
-                        if (m.closed_by) addActivity(m.closed_by, 'close');
-                    });
-                }
-            }
-        } catch (e) { }
+        manData.forEach(m => {
+            if (m.closed_by) addActivity(m.closed_by, 'close');
+        });
 
-        // Fetch unsealing operator activity
-        try {
-            const unsealOpsRes = await fetch(`${sb.url}/rest/v1/bag_unsealing?select=unsealed_by,scanned_count`, { headers: sb.headers });
-            if (unsealOpsRes.ok) {
-                const data = await unsealOpsRes.json();
-                if (Array.isArray(data)) {
-                    data.forEach(u => {
-                        if (u.unsealed_by) {
-                            const cleanOp = u.unsealed_by.trim();
-                            if (!userProductivityMap[cleanOp]) {
-                                userProductivityMap[cleanOp] = { operator: cleanOp, scanned: 0, bagsSealed: 0, manifestsClosed: 0 };
-                            }
-                            userProductivityMap[cleanOp].scanned += (u.scanned_count || 1);
-                        }
-                    });
+        unsealData.forEach(u => {
+            if (u.unsealed_by) {
+                const cleanOp = u.unsealed_by.trim();
+                if (!userProductivityMap[cleanOp]) {
+                    userProductivityMap[cleanOp] = { operator: cleanOp, scanned: 0, bagsSealed: 0, manifestsClosed: 0 };
                 }
+                userProductivityMap[cleanOp].scanned += (u.scanned_count || 1);
             }
-        } catch (e) { }
+        });
 
         const userProductivity = Object.values(userProductivityMap).sort((a, b) => b.scanned - a.scanned);
 
@@ -226,7 +318,13 @@ export async function GET(request: Request) {
                 },
                 partnerDistribution,
                 bagPartnerCounts,
-                userProductivity
+                partnerDetails,
+                userProductivity,
+                receivedParcels,
+                bagsList,
+                manifestsList,
+                unsealedBoxesList,
+                exceptionsList
             }
         });
 
