@@ -278,6 +278,22 @@ export default function WorkstationDashboard() {
         message: string;
         isCombined?: boolean;
     } | null>(null);
+    const [manifestClosedModal, setManifestClosedModal] = useState<{
+        mawbRef: string;
+        closedBy: string;
+        closedAt: string;
+        totalBags: number;
+        pickmeBags: number;
+        pickmeParcels: number;
+        domexBags: number;
+        domexParcels: number;
+        prontoBags: number;
+        prontoParcels: number;
+        generalBags: number;
+        generalParcels: number;
+        totalParcels: number;
+        totalWeight: number;
+    } | null>(null);
     const [confirmFinishModal, setConfirmFinishModal] = useState(false);
     const [successModal, setSuccessModal] = useState<{ title: string; message: string } | null>(null);
     const [invalidBagParcelModal, setInvalidBagParcelModal] = useState<{ barcode: string; expectedBag: string; actualBag: string | null; reason: 'WRONG_BAG' | 'NOT_FOUND' | 'BAG_ALREADY_COMPLETED' | 'INVALID_BAG' | 'NO_BAG_SELECTED' } | null>(null);
@@ -1351,22 +1367,71 @@ export default function WorkstationDashboard() {
     };
 
     const handleCloseManifest = async () => {
+        const activeOperator = currentUser
+            ? `${currentUser.firstName || ''} ${currentUser.lastName || ''}`.trim() || currentUser.username || currentUser.email
+            : 'Staff';
+
+        let pickmeBags = 0, pickmeParcels = 0;
+        let domexBags = 0, domexParcels = 0;
+        let prontoBags = 0, prontoParcels = 0;
+        let generalBags = 0, generalParcels = 0;
+        let totalParcels = 0, totalWeight = 0;
+
+        (outboundBags || []).forEach((b) => {
+            const bn = (b.bagNumber || '').toUpperCase();
+            const p = b.targetPartner || (bn.includes('PICKME') ? 'PickMe' : bn.includes('DOMEX') ? 'Domex' : bn.includes('PRONTO') ? 'Pronto' : 'ALL');
+            const count = b.parcelCount || (b.parcels ? b.parcels.length : 0);
+            const w = b.totalWeight || 0;
+
+            totalParcels += count;
+            totalWeight += w;
+
+            if (p === 'PickMe' || bn.includes('PICKME')) {
+                pickmeBags += 1;
+                pickmeParcels += count;
+            } else if (p === 'Domex' || bn.includes('DOMEX')) {
+                domexBags += 1;
+                domexParcels += count;
+            } else if (p === 'Pronto' || bn.includes('PRONTO')) {
+                prontoBags += 1;
+                prontoParcels += count;
+            } else {
+                generalBags += 1;
+                generalParcels += count;
+            }
+        });
+
         try {
             const res = await fetch('/api/lmd-bags', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     action: 'close-manifest',
-                    mawbRef: selectedSecondScanMawb
+                    mawbRef: selectedSecondScanMawb,
+                    operator: activeOperator
                 })
             });
             const data = await res.json();
             if (data.success) {
                 setSecondScanManifestStatus('CLOSED');
-                setSuccessModal({
-                    title: "Manifest Closed",
-                    message: `Manifest "${selectedSecondScanMawb}" has been closed. No further bags can be created under this manifest.`
+                setManifestClosedModal({
+                    mawbRef: selectedSecondScanMawb,
+                    closedBy: activeOperator,
+                    closedAt: new Date().toLocaleString(),
+                    totalBags: (outboundBags || []).length,
+                    pickmeBags,
+                    pickmeParcels,
+                    domexBags,
+                    domexParcels,
+                    prontoBags,
+                    prontoParcels,
+                    generalBags,
+                    generalParcels,
+                    totalParcels,
+                    totalWeight: Number(totalWeight.toFixed(2))
                 });
+            } else {
+                setErrorMessage(data.error || 'Failed to close manifest.');
             }
         } catch (err: any) {
             setErrorMessage(err.message || 'Failed to close manifest.');
@@ -4720,6 +4785,159 @@ export default function WorkstationDashboard() {
                     </div>
                 );
             })()}
+
+            {/* ── MANIFEST CLOSED SUMMARY MODAL ── */}
+            {manifestClosedModal && (
+                <div style={{
+                    position: 'fixed',
+                    top: 0, left: 0, right: 0, bottom: 0,
+                    backgroundColor: 'rgba(0, 0, 0, 0.65)',
+                    backdropFilter: 'blur(3px)',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    zIndex: 3500,
+                    animation: 'fadeIn 0.2s ease-out'
+                }}>
+                    <div style={{
+                        backgroundColor: '#ffffff',
+                        border: '2px solid #111827',
+                        borderRadius: '14px',
+                        padding: '28px 24px',
+                        width: '480px',
+                        maxWidth: '92%',
+                        boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.25)',
+                        textAlign: 'center'
+                    }}>
+                        {/* Lock / Summary Icon */}
+                        <div style={{
+                            backgroundColor: '#111827',
+                            color: '#ffffff',
+                            width: '56px', height: '56px',
+                            borderRadius: '50%',
+                            display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                            marginBottom: '16px',
+                            boxShadow: '0 4px 6px -1px rgba(0,0,0,0.1)'
+                        }}>
+                            <span style={{ fontSize: '26px' }}>🔒</span>
+                        </div>
+
+                        {/* Title */}
+                        <h3 style={{ fontSize: '19px', fontWeight: '800', color: '#111827', margin: '0 0 4px 0' }}>
+                            Manifest Session Closed
+                        </h3>
+                        <div style={{ fontSize: '13px', fontWeight: '700', color: '#e21b22', marginBottom: '18px' }}>
+                            MAWB: {manifestClosedModal.mawbRef}
+                        </div>
+
+                        {/* Operator & Closure Details Card */}
+                        <div style={{
+                            backgroundColor: '#f9fafb',
+                            border: '1px solid #e5e7eb',
+                            borderRadius: '10px',
+                            padding: '14px 16px',
+                            textAlign: 'left',
+                            fontSize: '12px',
+                            marginBottom: '16px',
+                            display: 'flex',
+                            flexDirection: 'column',
+                            gap: '8px'
+                        }}>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', borderBottom: '1px solid #f3f4f6', paddingBottom: '6px' }}>
+                                <span style={{ color: '#6b7280', fontWeight: '600' }}>Closed By Operator:</span>
+                                <strong style={{ color: '#111827' }}>{manifestClosedModal.closedBy}</strong>
+                            </div>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', borderBottom: '1px solid #f3f4f6', paddingBottom: '6px' }}>
+                                <span style={{ color: '#6b7280', fontWeight: '600' }}>Closed Timestamp:</span>
+                                <strong style={{ color: '#374151' }}>{manifestClosedModal.closedAt}</strong>
+                            </div>
+                            <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                                <span style={{ color: '#6b7280', fontWeight: '600' }}>Total Manifest Volume:</span>
+                                <strong style={{ color: '#047857' }}>
+                                    {manifestClosedModal.totalBags} Bags | {manifestClosedModal.totalParcels} Parcels ({manifestClosedModal.totalWeight} kg)
+                                </strong>
+                            </div>
+                        </div>
+
+                        {/* Courier Partner Bag Breakdown Header */}
+                        <div style={{ fontSize: '11px', fontWeight: '800', color: '#4b5563', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '8px', textAlign: 'left' }}>
+                            Outbound LMD Bags Summary Breakdown:
+                        </div>
+
+                        {/* Partner Grid Cards */}
+                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px', marginBottom: '20px' }}>
+                            {/* PickMe Card */}
+                            <div style={{ backgroundColor: '#fefce8', border: '1px solid #fef08a', borderRadius: '8px', padding: '10px 12px', textAlign: 'left' }}>
+                                <div style={{ fontSize: '10px', fontWeight: '800', color: '#854d0e', textTransform: 'uppercase' }}>🟡 PickMe Courier</div>
+                                <div style={{ fontSize: '14px', fontWeight: '900', color: '#713f12', marginTop: '2px' }}>
+                                    {manifestClosedModal.pickmeBags} <span style={{ fontSize: '11px', fontWeight: '700' }}>Bags</span>
+                                </div>
+                                <div style={{ fontSize: '11px', fontWeight: '700', color: '#a16207' }}>
+                                    {manifestClosedModal.pickmeParcels} Parcels
+                                </div>
+                            </div>
+
+                            {/* Domex Card */}
+                            <div style={{ backgroundColor: '#fef2f2', border: '1px solid #fca5a5', borderRadius: '8px', padding: '10px 12px', textAlign: 'left' }}>
+                                <div style={{ fontSize: '10px', fontWeight: '800', color: '#991b1b', textTransform: 'uppercase' }}>🔴 Domex Express</div>
+                                <div style={{ fontSize: '14px', fontWeight: '900', color: '#991b1b', marginTop: '2px' }}>
+                                    {manifestClosedModal.domexBags} <span style={{ fontSize: '11px', fontWeight: '700' }}>Bags</span>
+                                </div>
+                                <div style={{ fontSize: '11px', fontWeight: '700', color: '#b91c1c' }}>
+                                    {manifestClosedModal.domexParcels} Parcels
+                                </div>
+                            </div>
+
+                            {/* Pronto Card */}
+                            <div style={{ backgroundColor: '#fff7ed', border: '1px solid #fed7aa', borderRadius: '8px', padding: '10px 12px', textAlign: 'left' }}>
+                                <div style={{ fontSize: '10px', fontWeight: '800', color: '#9a3412', textTransform: 'uppercase' }}>🟠 Pronto Lanka</div>
+                                <div style={{ fontSize: '14px', fontWeight: '900', color: '#9a3412', marginTop: '2px' }}>
+                                    {manifestClosedModal.prontoBags} <span style={{ fontSize: '11px', fontWeight: '700' }}>Bags</span>
+                                </div>
+                                <div style={{ fontSize: '11px', fontWeight: '700', color: '#c2410c' }}>
+                                    {manifestClosedModal.prontoParcels} Parcels
+                                </div>
+                            </div>
+
+                            {/* General / ALL Card */}
+                            <div style={{ backgroundColor: '#f3f4f6', border: '1px solid #e5e7eb', borderRadius: '8px', padding: '10px 12px', textAlign: 'left' }}>
+                                <div style={{ fontSize: '10px', fontWeight: '800', color: '#374151', textTransform: 'uppercase' }}>⚫ General (ALL)</div>
+                                <div style={{ fontSize: '14px', fontWeight: '900', color: '#111827', marginTop: '2px' }}>
+                                    {manifestClosedModal.generalBags} <span style={{ fontSize: '11px', fontWeight: '700' }}>Bags</span>
+                                </div>
+                                <div style={{ fontSize: '11px', fontWeight: '700', color: '#4b5563' }}>
+                                    {manifestClosedModal.generalParcels} Parcels
+                                </div>
+                            </div>
+                        </div>
+
+                        {/* Notice */}
+                        <div style={{ fontSize: '11px', color: '#6b7280', marginBottom: '18px', backgroundColor: '#f9fafb', padding: '8px 12px', borderRadius: '6px', border: '1px solid #f3f4f6' }}>
+                            ℹ️ Manifest has been officially closed and persisted to Postgres database table <code style={{ color: '#e21b22', fontWeight: '700' }}>manifest_sessions</code>.
+                        </div>
+
+                        {/* Dismiss Action Button */}
+                        <button
+                            onClick={() => setManifestClosedModal(null)}
+                            style={{
+                                backgroundColor: '#e21b22',
+                                color: '#ffffff',
+                                border: 'none',
+                                borderRadius: '8px',
+                                padding: '12px 24px',
+                                fontSize: '14px',
+                                fontWeight: '700',
+                                width: '100%',
+                                cursor: 'pointer',
+                                transition: 'all 0.15s ease',
+                                boxShadow: '0 2px 4px rgba(0, 0, 0, 0.1)'
+                            }}
+                            onMouseOver={(e) => { e.currentTarget.style.backgroundColor = '#b91c1c'; }}
+                            onMouseOut={(e) => { e.currentTarget.style.backgroundColor = '#e21b22'; }}
+                        >
+                            Acknowledge &amp; Finish Session (Press Enter)
+                        </button>
+                    </div>
+                </div>
+            )}
 
             {/* ── CONFIRM FINISH MODAL ── */}
             {confirmFinishModal && (() => {
