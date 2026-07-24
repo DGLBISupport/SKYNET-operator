@@ -457,19 +457,10 @@ export default function WorkstationDashboard() {
 
         const fetchBags = async () => {
             try {
-                const res = await fetch(`/api/allocate?getBags=true&mawbRef=${encodeURIComponent(firstScanMawb)}`);
+                const res = await fetch(`/api/allocate?getBags=true&mawbRef=${firstScanMawb}`);
                 const data = await res.json();
                 if (data.success) {
                     setFirstScanBags(data.bags || []);
-                    if (Array.isArray(data.unsealedBoxes) && data.unsealedBoxes.length > 0) {
-                        setUnsealedBoxes(prev => {
-                            const existingMap = new Map(prev.map(ub => [`${ub.mawb?.toLowerCase()}_${ub.bagNumber?.toLowerCase()}`, ub]));
-                            data.unsealedBoxes.forEach((ub: any) => {
-                                existingMap.set(`${ub.mawb?.toLowerCase()}_${ub.bagNumber?.toLowerCase()}`, ub);
-                            });
-                            return Array.from(existingMap.values());
-                        });
-                    }
                 } else {
                     console.error("Failed to load bags:", data.error);
                 }
@@ -824,13 +815,10 @@ export default function WorkstationDashboard() {
     };
 
     const getBagScannedCount = (bagNumber: string) => {
-        if (firstScanSelectedBag?.trim().toLowerCase() === bagNumber?.trim().toLowerCase()) {
+        if (firstScanSelectedBag === bagNumber) {
             return firstScanHistory.length;
         }
-        const unsealed = unsealedBoxes.find(ub =>
-            ub.mawb?.trim().toLowerCase() === firstScanMawb?.trim().toLowerCase() &&
-            ub.bagNumber?.trim().toLowerCase() === bagNumber?.trim().toLowerCase()
-        );
+        const unsealed = unsealedBoxes.find(ub => ub.mawb === firstScanMawb && ub.bagNumber === bagNumber);
         if (unsealed) {
             return unsealed.scanned;
         }
@@ -838,14 +826,11 @@ export default function WorkstationDashboard() {
     };
 
     const getBagStatus = (bagNumber: string, expected: number) => {
-        const unsealed = unsealedBoxes.find(ub =>
-            ub.mawb?.trim().toLowerCase() === firstScanMawb?.trim().toLowerCase() &&
-            ub.bagNumber?.trim().toLowerCase() === bagNumber?.trim().toLowerCase()
-        );
+        const unsealed = unsealedBoxes.find(ub => ub.mawb === firstScanMawb && ub.bagNumber === bagNumber);
         if (unsealed) {
             return 'COMPLETED';
         }
-        if (firstScanSelectedBag?.trim().toLowerCase() === bagNumber?.trim().toLowerCase()) {
+        if (firstScanSelectedBag === bagNumber) {
             if (expected > 0 && firstScanHistory.length >= expected) {
                 return 'COMPLETED';
             }
@@ -856,13 +841,13 @@ export default function WorkstationDashboard() {
 
     const getSortedBags = () => {
         return [...firstScanBags].sort((a, b) => {
-            const aIsActive = a.bagNumber?.trim().toLowerCase() === firstScanSelectedBag?.trim().toLowerCase();
-            const bIsActive = b.bagNumber?.trim().toLowerCase() === firstScanSelectedBag?.trim().toLowerCase();
+            const aIsActive = a.bagNumber === firstScanSelectedBag;
+            const bIsActive = b.bagNumber === firstScanSelectedBag;
             if (aIsActive && !bIsActive) return -1;
             if (!aIsActive && bIsActive) return 1;
 
-            const aUnsealedIndex = unsealedBoxes.findIndex(ub => ub.mawb?.trim().toLowerCase() === firstScanMawb?.trim().toLowerCase() && ub.bagNumber?.trim().toLowerCase() === a.bagNumber?.trim().toLowerCase());
-            const bUnsealedIndex = unsealedBoxes.findIndex(ub => ub.mawb?.trim().toLowerCase() === firstScanMawb?.trim().toLowerCase() && ub.bagNumber?.trim().toLowerCase() === b.bagNumber?.trim().toLowerCase());
+            const aUnsealedIndex = unsealedBoxes.findIndex(ub => ub.mawb === firstScanMawb && ub.bagNumber === a.bagNumber);
+            const bUnsealedIndex = unsealedBoxes.findIndex(ub => ub.mawb === firstScanMawb && ub.bagNumber === b.bagNumber);
 
             const aIsCompleted = aUnsealedIndex !== -1;
             const bIsCompleted = bUnsealedIndex !== -1;
@@ -2898,44 +2883,34 @@ export default function WorkstationDashboard() {
                                             </div>
 
                                             {/* Mawb summary metrics */}
-                                            {(() => {
-                                                const currentMawbInfo = mawbsList.find(m => m.mawb_reference?.trim().toLowerCase() === firstScanMawb?.trim().toLowerCase());
-                                                const declaredBagsCount = (currentMawbInfo && Number(currentMawbInfo.declared_bags) > 0)
-                                                    ? Number(currentMawbInfo.declared_bags)
-                                                    : Math.max(firstScanBags.length, unsealedBoxes.filter(ub => ub.mawb?.trim().toLowerCase() === firstScanMawb?.trim().toLowerCase()).length);
+                                            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '10px', marginBottom: '16px' }}>
+                                                <div style={{ backgroundColor: '#f9fafb', border: '1px solid #e5e7eb', borderRadius: '8px', padding: '10px 6px', textAlign: 'center' }}>
+                                                    <div style={{ fontSize: '10px', color: '#6b7280', textTransform: 'uppercase', fontWeight: '700' }}>Total Bags</div>
+                                                    <div style={{ fontSize: '18px', fontWeight: '800', color: '#111827', marginTop: '2px' }}>{firstScanBags.length}</div>
+                                                </div>
+                                                <div style={{ backgroundColor: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: '8px', padding: '10px 6px', textAlign: 'center' }}>
+                                                    <div style={{ fontSize: '10px', color: '#166534', textTransform: 'uppercase', fontWeight: '700' }}>Completed</div>
+                                                    <div style={{ fontSize: '18px', fontWeight: '800', color: '#166534', marginTop: '2px' }}>
+                                                        {firstScanBags.filter(b => getBagStatus(b.bagNumber, b.expectedCount) === 'COMPLETED').length}
+                                                    </div>
+                                                </div>
+                                                <div style={{ backgroundColor: '#f3f4f6', border: '1px solid #d1d5db', borderRadius: '8px', padding: '10px 6px', textAlign: 'center' }}>
+                                                    <div style={{ fontSize: '10px', color: '#374151', textTransform: 'uppercase', fontWeight: '700' }}>Remaining</div>
+                                                    <div style={{ fontSize: '18px', fontWeight: '800', color: '#374151', marginTop: '2px' }}>
+                                                        {firstScanBags.filter(b => getBagStatus(b.bagNumber, b.expectedCount) !== 'COMPLETED').length}
+                                                    </div>
+                                                </div>
+                                            </div>
 
-                                                const completedBagsCount = firstScanBags.filter(b => getBagStatus(b.bagNumber, b.expectedCount) === 'COMPLETED').length;
-                                                const remainingBagsCount = Math.max(0, declaredBagsCount - completedBagsCount);
-
-                                                return (
-                                                    <>
-                                                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '10px', marginBottom: '16px' }}>
-                                                            <div style={{ backgroundColor: '#f9fafb', border: '1px solid #e5e7eb', borderRadius: '8px', padding: '10px 6px', textAlign: 'center' }}>
-                                                                <div style={{ fontSize: '10px', color: '#6b7280', textTransform: 'uppercase', fontWeight: '700' }}>Total Bags</div>
-                                                                <div style={{ fontSize: '18px', fontWeight: '800', color: '#111827', marginTop: '2px' }}>{declaredBagsCount}</div>
-                                                            </div>
-                                                            <div style={{ backgroundColor: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: '8px', padding: '10px 6px', textAlign: 'center' }}>
-                                                                <div style={{ fontSize: '10px', color: '#166534', textTransform: 'uppercase', fontWeight: '700' }}>Completed</div>
-                                                                <div style={{ fontSize: '18px', fontWeight: '800', color: '#166534', marginTop: '2px' }}>{completedBagsCount}</div>
-                                                            </div>
-                                                            <div style={{ backgroundColor: '#f3f4f6', border: '1px solid #d1d5db', borderRadius: '8px', padding: '10px 6px', textAlign: 'center' }}>
-                                                                <div style={{ fontSize: '10px', color: '#374151', textTransform: 'uppercase', fontWeight: '700' }}>Remaining</div>
-                                                                <div style={{ fontSize: '18px', fontWeight: '800', color: '#374151', marginTop: '2px' }}>{remainingBagsCount}</div>
-                                                            </div>
-                                                        </div>
-
-                                                        {/* Completed Alert when all bags are finished */}
-                                                        {declaredBagsCount > 0 && remainingBagsCount === 0 && (
-                                                            <div style={{ backgroundColor: '#f0fdf4', border: '1px solid #bbf7d0', color: '#166534', padding: '12px 16px', borderRadius: '8px', marginBottom: '16px', fontSize: '13px', fontWeight: '600', display: 'flex', alignItems: 'center', gap: '8px' }}>
-                                                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ color: '#16a34a' }}>
-                                                                    <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14" /><polyline points="22 4 12 14.01 9 11.01" />
-                                                                </svg>
-                                                                <span>All {declaredBagsCount} bags for this MAWB have been unsealed successfully!</span>
-                                                            </div>
-                                                        )}
-                                                    </>
-                                                );
-                                            })()}
+                                            {/* Completed Alert when all bags are finished */}
+                                            {firstScanBags.length > 0 && firstScanBags.filter(b => getBagStatus(b.bagNumber, b.expectedCount) !== 'COMPLETED').length === 0 && (
+                                                <div style={{ backgroundColor: '#f0fdf4', border: '1px solid #bbf7d0', color: '#166534', padding: '12px 16px', borderRadius: '8px', marginBottom: '16px', fontSize: '13px', fontWeight: '600', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ color: '#16a34a' }}>
+                                                        <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14" /><polyline points="22 4 12 14.01 9 11.01" />
+                                                    </svg>
+                                                    <span>All bags for this MAWB have been unsealed successfully!</span>
+                                                </div>
+                                            )}
 
                                             {/* Bags list */}
                                             <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', maxHeight: '350px', overflowY: 'auto', paddingRight: '4px' }}>

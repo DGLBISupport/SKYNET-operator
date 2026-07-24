@@ -742,21 +742,10 @@ export async function GET(request: Request) {
             });
 
             // Also include bags registered in bag_unsealing table for this MAWB
-            let unsealedRecords: any[] = [];
-            const unsealRes = await fetch(`${supabaseUrl}/rest/v1/bag_unsealing?mawb_ref=ilike.${cleanSearchMawb}&select=mawb_ref,bag_number,expected_count,scanned_count,unsealed_at,status,discrepancy,unsealed_by`, { headers });
+            const unsealRes = await fetch(`${supabaseUrl}/rest/v1/bag_unsealing?mawb_ref=ilike.${cleanSearchMawb}&select=bag_number,expected_count`, { headers });
             if (unsealRes.ok) {
                 const unsealed = await unsealRes.json();
                 if (Array.isArray(unsealed)) {
-                    unsealedRecords = unsealed.map((u: any) => ({
-                        mawb: u.mawb_ref,
-                        bagNumber: u.bag_number,
-                        expected: u.expected_count || 0,
-                        scanned: u.scanned_count || 0,
-                        timestamp: u.unsealed_at ? new Date(u.unsealed_at).toLocaleTimeString() : '',
-                        status: u.status || 'COUNTED',
-                        discrepancy: u.discrepancy || 0,
-                        unsealedBy: u.unsealed_by || 'System'
-                    }));
                     unsealed.forEach((u: any) => {
                         if (u.bag_number && !bagCountsMap[u.bag_number]) {
                             bagCountsMap[u.bag_number] = u.expected_count || 0;
@@ -775,7 +764,7 @@ export async function GET(request: Request) {
                 expectedCount
             }));
 
-            return NextResponse.json({ success: true, bags: bagsList, unsealedBoxes: unsealedRecords });
+            return NextResponse.json({ success: true, bags: bagsList });
         }
 
         if (getBagParcels && bagNumberParam) {
@@ -784,36 +773,32 @@ export async function GET(request: Request) {
 
             let shipments: any[] = [];
 
-            // 1. Try direct exact/ilike match on bag_number in shipments
-            let res = await fetch(`${supabaseUrl}/rest/v1/shipments?bag_number=ilike.${cleanBagNum}&select=*`, { headers });
+            // 1. Try direct exact match on bag_number in shipments table
+            let res = await fetch(`${supabaseUrl}/rest/v1/shipments?bag_number=eq.${cleanBagNum}&select=*`, { headers });
             if (res.ok) {
-                shipments = await res.json();
+                const found = await res.json();
+                if (Array.isArray(found) && found.length > 0) shipments = found;
             }
 
-            // 2. If 0 found, try substring match on bag_number
+            // 2. Try case-insensitive ilike match on bag_number
             if (!Array.isArray(shipments) || shipments.length === 0) {
-                res = await fetch(`${supabaseUrl}/rest/v1/shipments?bag_number=ilike.*${cleanBagNum}*&select=*`, { headers });
+                res = await fetch(`${supabaseUrl}/rest/v1/shipments?bag_number=ilike.${cleanBagNum}&select=*`, { headers });
                 if (res.ok) {
                     const found = await res.json();
                     if (Array.isArray(found) && found.length > 0) shipments = found;
                 }
             }
 
-            // 3. Extract MAWB and search mawb_reference if bag_number in DB was null/unassigned
+            // 3. Fallback search on shipments_duplicate table by exact bag_number
             if (!Array.isArray(shipments) || shipments.length === 0) {
-                const mawbMatch = rawBagNum.match(/^([0-9]{3}-[0-9]{8})/);
-                const mawbRefToSearch = mawbMatch ? mawbMatch[1] : (mawbRefParam || '');
-
-                if (mawbRefToSearch) {
-                    res = await fetch(`${supabaseUrl}/rest/v1/shipments?mawb_reference=ilike.${encodeURIComponent(mawbRefToSearch.trim())}&select=*`, { headers });
-                    if (res.ok) {
-                        const found = await res.json();
-                        if (Array.isArray(found) && found.length > 0) shipments = found;
-                    }
+                res = await fetch(`${supabaseUrl}/rest/v1/shipments_duplicate?bag_number=eq.${cleanBagNum}&select=*`, { headers });
+                if (res.ok) {
+                    const found = await res.json();
+                    if (Array.isArray(found) && found.length > 0) shipments = found;
                 }
             }
 
-            // 4. Fallback search on shipments_duplicate table
+            // 4. Fallback search on shipments_duplicate table by ilike bag_number
             if (!Array.isArray(shipments) || shipments.length === 0) {
                 res = await fetch(`${supabaseUrl}/rest/v1/shipments_duplicate?bag_number=ilike.${cleanBagNum}&select=*`, { headers });
                 if (res.ok) {
@@ -822,12 +807,13 @@ export async function GET(request: Request) {
                 }
             }
 
-            // 5. Fallback search shipments_duplicate by mawb_reference
-            if (!Array.isArray(shipments) || shipments.length === 0) {
+            // 5. ONLY if no shipments with specific bag_number exist AND bag_number is unassigned/synthetic (e.g. ends with BAG-01), query unassigned shipments for MAWB
+            if ((!Array.isArray(shipments) || shipments.length === 0) && (rawBagNum.includes('-BAG-') || rawBagNum.toLowerCase().includes('bag'))) {
                 const mawbMatch = rawBagNum.match(/^([0-9]{3}-[0-9]{8})/);
                 const mawbRefToSearch = mawbMatch ? mawbMatch[1] : (mawbRefParam || '');
+
                 if (mawbRefToSearch) {
-                    res = await fetch(`${supabaseUrl}/rest/v1/shipments_duplicate?mawb_reference=ilike.${encodeURIComponent(mawbRefToSearch.trim())}&select=*`, { headers });
+                    res = await fetch(`${supabaseUrl}/rest/v1/shipments?mawb_reference=ilike.${encodeURIComponent(mawbRefToSearch.trim())}&or=(bag_number.is.null,bag_number.eq."")&select=*`, { headers });
                     if (res.ok) {
                         const found = await res.json();
                         if (Array.isArray(found) && found.length > 0) shipments = found;
