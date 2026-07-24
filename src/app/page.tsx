@@ -964,8 +964,8 @@ export default function WorkstationDashboard() {
             const skynetCode = existingItemPre.skynetTrackingNumber || existingItemPre.trackingNumber;
 
             const dupMsg = isTemu
-                ? `Duplicate scan: Barcode "${barcode}" belongs to parcel (${skynetCode}) which was ALREADY scanned in this bag using its Temu Barcode "${temuCode}".`
-                : `Duplicate scan: Barcode "${barcode}" belongs to parcel (${skynetCode}) which was ALREADY scanned in this bag using its Skynet Barcode.`;
+                ? `Already Unsealed!! Parcel (${skynetCode}) was ALREADY unsealed via Temu Barcode (${temuCode}).`
+                : `Already Unsealed!! Parcel (${skynetCode}) has ALREADY been unsealed in this box session.`;
 
             setFirstScanError(dupMsg);
             setFirstScanStatus('ERROR');
@@ -1016,8 +1016,8 @@ export default function WorkstationDashboard() {
                     const skynetCode = existingParcelItem.skynetTrackingNumber || returnedSkynetNo;
 
                     const dupMsg = isTemu
-                        ? `Duplicate scan: Parcel (${returnedSkynetNo}) was ALREADY scanned in this bag using its Temu Barcode "${temuCode}".`
-                        : `Duplicate scan: Parcel (${returnedSkynetNo}) was ALREADY scanned in this bag using its Skynet Barcode.`;
+                        ? `Already Unsealed!! Parcel (${returnedSkynetNo}) was ALREADY unsealed via Temu Barcode (${temuCode}).`
+                        : `Already Unsealed!! Parcel (${returnedSkynetNo}) has ALREADY been unsealed in this box session.`;
 
                     setFirstScanError(dupMsg);
                     setFirstScanStatus('ERROR');
@@ -1183,8 +1183,8 @@ export default function WorkstationDashboard() {
                     const skynetCode = existingParcelItem.skynetTrackingNumber || returnedSkynetNo;
 
                     const dupMsg = isTemu
-                        ? `Duplicate scan: Parcel (${returnedSkynetNo}) was ALREADY scanned in this bag using its Temu Barcode "${temuCode}".`
-                        : `Duplicate scan: Parcel (${returnedSkynetNo}) was ALREADY scanned in this bag using its Skynet Barcode.`;
+                        ? `Already Unsealed!! Parcel (${returnedSkynetNo}) was ALREADY unsealed via Temu Barcode (${temuCode}).`
+                        : `Already Unsealed!! Parcel (${returnedSkynetNo}) has ALREADY been unsealed in this box session.`;
 
                     setFirstScanError(dupMsg);
                     setFirstScanStatus('ERROR');
@@ -4563,18 +4563,23 @@ export default function WorkstationDashboard() {
             {duplicateModal && (() => {
                 const isPartnerMismatch = duplicateModal.message?.toLowerCase().includes('partner mismatch');
                 const isManifestMismatch = duplicateModal.message?.toLowerCase().includes('manifest mismatch');
+                const isAlreadyUnsealed = duplicateModal.message?.toLowerCase().includes('already unsealed');
 
                 const titleText = isPartnerMismatch
                     ? 'Courier Partner Mismatch'
                     : isManifestMismatch
                         ? 'Manifest Mismatch'
-                        : 'Duplicate Scan Detected';
+                        : isAlreadyUnsealed
+                            ? 'Parcel Already Unsealed'
+                            : 'Duplicate Scan Detected';
 
                 const warningText = isPartnerMismatch
                     ? 'Courier Partner Mismatch'
                     : isManifestMismatch
                         ? 'Manifest Mismatch'
-                        : 'Duplicate Scan Warning';
+                        : isAlreadyUnsealed
+                            ? 'Already Unsealed Warning'
+                            : 'Duplicate Scan Warning';
 
                 return (
                     <div style={{
