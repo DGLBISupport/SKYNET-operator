@@ -2220,7 +2220,7 @@ export default function WorkstationDashboard() {
                     </button>
                 </div>
 
-                {/* Sidebar Menu Items */}
+                {/* Sidebar Menu Items Category 1: Parcel Logistics */}
                 {isSidebarExpanded ? (
                     <div style={{
                         fontSize: '11px',
@@ -2230,7 +2230,7 @@ export default function WorkstationDashboard() {
                         padding: '20px 16px 8px 16px',
                         textTransform: 'uppercase'
                     }}>
-                        Parcel Allocation
+                        Parcel Logistics
                     </div>
                 ) : (
                     <div style={{ height: '16px' }} />
@@ -2262,7 +2262,7 @@ export default function WorkstationDashboard() {
                         },
                         {
                             id: 'damaged-barcode',
-                            label: 'Damaged Lables',
+                            label: 'Damaged Labels',
                             icon: (
                                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
                                     <path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z" />
@@ -2273,7 +2273,7 @@ export default function WorkstationDashboard() {
                         },
                         {
                             id: 'verify',
-                            label: 'Dispatch verify',
+                            label: 'Dispatch Verify',
                             icon: (
                                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                                     <rect x="1" y="3" width="15" height="13" rx="2" ry="2" />
@@ -2298,61 +2298,82 @@ export default function WorkstationDashboard() {
                     ))}
                 </div>
 
-                {isSidebarExpanded ? (
-                    <div style={{
-                        fontSize: '11px',
-                        fontWeight: '700',
-                        color: '#8c98a5',
-                        letterSpacing: '0.8px',
-                        padding: '24px 16px 8px 16px',
-                        textTransform: 'uppercase'
-                    }}>
-                        Reports
-                    </div>
-                ) : (
-                    <div style={{ borderTop: '1px solid #e5e7eb', margin: '16px 12px 0 12px', paddingTop: '16px' }} />
-                )}
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
+                    {/* Parent label: Operational Real-Time Dashboard */}
+                    {isSidebarExpanded && (
+                        <div style={{
+                            fontSize: '11px',
+                            fontWeight: '700',
+                            color: '#8c98a5',
+                            letterSpacing: '0.8px',
+                            padding: '24px 16px 6px 16px',
+                            textTransform: 'uppercase'
+                        }}>
+                            Operational Dashboard
+                        </div>
+                    )}
+                    {!isSidebarExpanded && (
+                        <div style={{ borderTop: '1px solid #e5e7eb', margin: '16px 12px 0 12px', paddingTop: '16px' }} />
+                    )}
 
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                    {([
-                        {
-                            id: 'dashboard',
-                            label: 'Operational Dashboard',
-                            icon: (
-                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                                    <rect x="3" y="3" width="7" height="9" />
-                                    <rect x="14" y="3" width="7" height="5" />
-                                    <rect x="14" y="12" width="7" height="9" />
-                                    <rect x="3" y="16" width="7" height="5" />
-                                </svg>
-                            )
-                        },
-                        {
-                            id: 'reports',
-                            label: 'Reports',
-                            icon: (
-                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                                    <path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z" />
-                                    <polyline points="14 2 14 8 20 8" />
-                                    <line x1="16" y1="13" x2="8" y2="13" />
-                                    <line x1="16" y1="17" x2="8" y2="17" />
-                                    <line x1="10" y1="9" x2="8" y2="9" />
-                                </svg>
-                            )
-                        }
-                    ] as const).map((item) => (
-                        <button
-                            key={item.id}
-                            onClick={() => setActiveTab(item.id)}
-                            className={`sidebar-item ${activeTab === item.id ? 'active' : ''} ${!isSidebarExpanded ? 'sidebar-item-collapsed' : ''}`}
-                            title={!isSidebarExpanded ? item.label : ''}
-                        >
-                            {item.icon}
-                            {isSidebarExpanded && (
-                                <span style={{ whiteSpace: 'nowrap' }}>{item.label}</span>
-                            )}
-                        </button>
-                    ))}
+                    {/* Sub-item: Parcel Operations */}
+                    <button
+                        onClick={() => {
+                            setActiveTab('dashboard');
+                            setDashboardSubTab('total_received');
+                        }}
+                        className={`sidebar-item ${activeTab === 'dashboard' && dashboardSubTab !== 'productivity' ? 'active' : ''} ${!isSidebarExpanded ? 'sidebar-item-collapsed' : ''}`}
+                        title={!isSidebarExpanded ? 'Parcel Operations' : ''}
+                        style={{ marginLeft: isSidebarExpanded ? '8px' : '0' }}
+                    >
+                        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                            <path d="M21 8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16Z" />
+                            <path d="M12 22V12" />
+                            <path d="m12 12 8.73-5M12 12 3.27 7" />
+                        </svg>
+                        {isSidebarExpanded && (
+                            <span style={{ whiteSpace: 'nowrap', fontSize: '13px' }}>Parcel Operations</span>
+                        )}
+                    </button>
+
+                    {/* Sub-item: User Productivity */}
+                    <button
+                        onClick={() => {
+                            setActiveTab('dashboard');
+                            setDashboardSubTab('productivity');
+                        }}
+                        className={`sidebar-item ${activeTab === 'dashboard' && dashboardSubTab === 'productivity' ? 'active' : ''} ${!isSidebarExpanded ? 'sidebar-item-collapsed' : ''}`}
+                        title={!isSidebarExpanded ? 'User Productivity' : ''}
+                        style={{ marginLeft: isSidebarExpanded ? '8px' : '0' }}
+                    >
+                        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                            <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
+                            <circle cx="9" cy="7" r="4" />
+                            <path d="M23 21v-2a4 4 0 0 0-3-3.87" />
+                            <path d="M16 3.13a4 4 0 0 1 0 7.75" />
+                        </svg>
+                        {isSidebarExpanded && (
+                            <span style={{ whiteSpace: 'nowrap', fontSize: '13px' }}>User Productivity</span>
+                        )}
+                    </button>
+
+                    {/* Reports */}
+                    <button
+                        onClick={() => setActiveTab('reports' as any)}
+                        className={`sidebar-item ${activeTab === 'reports' ? 'active' : ''} ${!isSidebarExpanded ? 'sidebar-item-collapsed' : ''}`}
+                        title={!isSidebarExpanded ? 'Reports' : ''}
+                    >
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                            <path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z" />
+                            <polyline points="14 2 14 8 20 8" />
+                            <line x1="16" y1="13" x2="8" y2="13" />
+                            <line x1="16" y1="17" x2="8" y2="17" />
+                            <line x1="10" y1="9" x2="8" y2="9" />
+                        </svg>
+                        {isSidebarExpanded && (
+                            <span style={{ whiteSpace: 'nowrap' }}>Reports</span>
+                        )}
+                    </button>
                 </div>
             </aside>
 
@@ -2379,7 +2400,7 @@ export default function WorkstationDashboard() {
                 }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
                         <span style={{ fontWeight: '700', fontSize: '18px', color: '#111827' }}>
-                            {activeTab === 'verify' ? 'Dispatch Verification' : 'Parcel Allocation System'}
+                            {activeTab === 'verify' ? 'Dispatch Verification' : 'Operational Real-Time Dashboard'}
                         </span>
                     </div>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '16px', fontSize: '13px', color: '#6b7280' }}>
@@ -4573,7 +4594,7 @@ export default function WorkstationDashboard() {
                                 </button>
                             </div>
 
-                            {/* 6 Top KPI Metrics Cards Grid — Fully Interactive */}
+                            {/* 6 Top KPI Metrics Cards Grid — shown only for Parcel Operations */}
                             {isLoadingDashboard && !dashboardData ? (
                                 <div style={{ textAlign: 'center', padding: '60px 20px', color: '#6b7280', fontSize: '14px', fontWeight: '500' }}>
                                     <div style={{ display: 'inline-block', width: '24px', height: '24px', border: '3px solid #e5e7eb', borderTopColor: '#111827', borderRadius: '50%', animation: 'spin 0.8s linear infinite', marginBottom: '12px' }} />
@@ -4581,189 +4602,205 @@ export default function WorkstationDashboard() {
                                 </div>
                             ) : dashboardData ? (
                                 <>
-                                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(6, 1fr)', gap: '12px' }}>
-                                        {/* Card 1: Total Received */}
-                                        <div
-                                            onClick={() => setDashboardSubTab('total_received')}
-                                            style={{
-                                                backgroundColor: '#ffffff',
-                                                border: dashboardSubTab === 'total_received' ? '2px solid #e21b22' : '1px solid #e5e7eb',
-                                                borderRadius: '10px',
-                                                padding: '14px 10px',
-                                                textAlign: 'center',
-                                                boxShadow: dashboardSubTab === 'total_received' ? '0 4px 12px rgba(226, 27, 34, 0.15)' : '0 1px 3px rgba(0,0,0,0.05)',
-                                                cursor: 'pointer',
-                                                transition: 'all 0.15s ease-in-out',
-                                                transform: dashboardSubTab === 'total_received' ? 'translateY(-2px)' : 'none'
-                                            }}
-                                        >
-                                            <div style={{ fontSize: '10px', fontWeight: '700', color: dashboardSubTab === 'total_received' ? '#e21b22' : '#6b7280', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Total Received</div>
-                                            <div style={{ fontSize: '26px', fontWeight: '800', color: '#111827', marginTop: '4px' }}>{dashboardData.totalReceived}</div>
-                                            <div style={{ fontSize: '11px', color: '#6b7280', marginTop: '4px' }}>Parcels Inbound</div>
-                                        </div>
-
-                                        {/* Card 2: Parcels Sorted */}
-                                        <div
-                                            onClick={() => setDashboardSubTab('parcels_sorted')}
-                                            style={{
-                                                backgroundColor: '#ffffff',
-                                                border: dashboardSubTab === 'parcels_sorted' ? '2px solid #166534' : '1px solid #e5e7eb',
-                                                borderRadius: '10px',
-                                                padding: '14px 10px',
-                                                textAlign: 'center',
-                                                boxShadow: dashboardSubTab === 'parcels_sorted' ? '0 4px 12px rgba(22, 101, 52, 0.15)' : '0 1px 3px rgba(0,0,0,0.05)',
-                                                cursor: 'pointer',
-                                                transition: 'all 0.15s ease-in-out',
-                                                transform: dashboardSubTab === 'parcels_sorted' ? 'translateY(-2px)' : 'none'
-                                            }}
-                                        >
-                                            <div style={{ fontSize: '10px', fontWeight: '700', color: dashboardSubTab === 'parcels_sorted' ? '#166534' : '#6b7280', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Parcels Sorted</div>
-                                            <div style={{ fontSize: '26px', fontWeight: '800', color: '#111827', marginTop: '4px' }}>{dashboardData.totalSorted}</div>
-                                            <div style={{ fontSize: '11px', color: '#6b7280', marginTop: '4px' }}>Allocated in Bags</div>
-                                        </div>
-
-                                        {/* Card 3: Pending Parcels */}
-                                        <div
-                                            onClick={() => setDashboardSubTab('pending_parcels')}
-                                            style={{
-                                                backgroundColor: '#ffffff',
-                                                border: dashboardSubTab === 'pending_parcels' ? '2px solid #b45309' : '1px solid #e5e7eb',
-                                                borderRadius: '10px',
-                                                padding: '14px 10px',
-                                                textAlign: 'center',
-                                                boxShadow: dashboardSubTab === 'pending_parcels' ? '0 4px 12px rgba(180, 83, 9, 0.15)' : '0 1px 3px rgba(0,0,0,0.05)',
-                                                cursor: 'pointer',
-                                                transition: 'all 0.15s ease-in-out',
-                                                transform: dashboardSubTab === 'pending_parcels' ? 'translateY(-2px)' : 'none'
-                                            }}
-                                        >
-                                            <div style={{ fontSize: '10px', fontWeight: '700', color: dashboardSubTab === 'pending_parcels' ? '#b45309' : '#6b7280', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Pending Parcels</div>
-                                            <div style={{ fontSize: '26px', fontWeight: '800', color: '#111827', marginTop: '4px' }}>{dashboardData.pendingParcels}</div>
-                                            <div style={{ fontSize: '11px', color: '#6b7280', marginTop: '4px' }}>Awaiting Sorting</div>
-                                        </div>
-
-                                        {/* Card 4: Total Bags */}
-                                        <div
-                                            onClick={() => setDashboardSubTab('total_bags')}
-                                            style={{
-                                                backgroundColor: '#ffffff',
-                                                border: dashboardSubTab === 'total_bags' ? '2px solid #2563eb' : '1px solid #e5e7eb',
-                                                borderRadius: '10px',
-                                                padding: '14px 10px',
-                                                textAlign: 'center',
-                                                boxShadow: dashboardSubTab === 'total_bags' ? '0 4px 12px rgba(37, 99, 235, 0.15)' : '0 1px 3px rgba(0,0,0,0.05)',
-                                                cursor: 'pointer',
-                                                transition: 'all 0.15s ease-in-out',
-                                                transform: dashboardSubTab === 'total_bags' ? 'translateY(-2px)' : 'none'
-                                            }}
-                                        >
-                                            <div style={{ fontSize: '10px', fontWeight: '700', color: dashboardSubTab === 'total_bags' ? '#2563eb' : '#6b7280', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Total Bags</div>
-                                            <div style={{ fontSize: '26px', fontWeight: '800', color: '#111827', marginTop: '4px' }}>{dashboardData.totalBagsCreated}</div>
-                                            <div style={{ fontSize: '10px', color: '#4b5563', marginTop: '4px', display: 'flex', justifyContent: 'center', gap: '4px' }}>
-                                                <span style={{ color: '#166534', fontWeight: '700' }}>{dashboardData.openBags} Open</span> •
-                                                <span style={{ color: '#dc2626', fontWeight: '700' }}>{dashboardData.sealedBags} Sealed</span>
-                                            </div>
-                                        </div>
-
-                                        {/* Card 5: Manifests */}
-                                        <div
-                                            onClick={() => setDashboardSubTab('manifests')}
-                                            style={{
-                                                backgroundColor: '#ffffff',
-                                                border: dashboardSubTab === 'manifests' ? '2px solid #7c3aed' : '1px solid #e5e7eb',
-                                                borderRadius: '10px',
-                                                padding: '14px 10px',
-                                                textAlign: 'center',
-                                                boxShadow: dashboardSubTab === 'manifests' ? '0 4px 12px rgba(124, 58, 237, 0.15)' : '0 1px 3px rgba(0,0,0,0.05)',
-                                                cursor: 'pointer',
-                                                transition: 'all 0.15s ease-in-out',
-                                                transform: dashboardSubTab === 'manifests' ? 'translateY(-2px)' : 'none'
-                                            }}
-                                        >
-                                            <div style={{ fontSize: '10px', fontWeight: '700', color: dashboardSubTab === 'manifests' ? '#7c3aed' : '#6b7280', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Manifests</div>
-                                            <div style={{ fontSize: '26px', fontWeight: '800', color: '#111827', marginTop: '4px' }}>{dashboardData.totalManifests}</div>
-                                            <div style={{ fontSize: '10px', color: '#4b5563', marginTop: '4px', display: 'flex', justifyContent: 'center', gap: '4px' }}>
-                                                <span style={{ color: '#166534', fontWeight: '700' }}>{dashboardData.openManifests} Open</span> •
-                                                <span style={{ color: '#dc2626', fontWeight: '700' }}>{dashboardData.closedManifests} Closed</span>
-                                            </div>
-                                        </div>
-
-                                        {/* Card 6: Exceptions */}
-                                        <div
-                                            onClick={() => setDashboardSubTab('exceptions')}
-                                            style={{
-                                                backgroundColor: '#ffffff',
-                                                border: dashboardSubTab === 'exceptions' ? '2px solid #dc2626' : '1px solid #e5e7eb',
-                                                borderRadius: '10px',
-                                                padding: '14px 10px',
-                                                textAlign: 'center',
-                                                boxShadow: dashboardSubTab === 'exceptions' ? '0 4px 12px rgba(220, 38, 38, 0.15)' : '0 1px 3px rgba(0,0,0,0.05)',
-                                                cursor: 'pointer',
-                                                transition: 'all 0.15s ease-in-out',
-                                                transform: dashboardSubTab === 'exceptions' ? 'translateY(-2px)' : 'none'
-                                            }}
-                                        >
-                                            <div style={{ fontSize: '10px', fontWeight: '700', color: dashboardSubTab === 'exceptions' ? '#dc2626' : '#6b7280', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Exceptions</div>
-                                            <div style={{ fontSize: '26px', fontWeight: '800', color: '#111827', marginTop: '4px' }}>
-                                                {dashboardData.exceptions ? (dashboardData.exceptions.damagedLabelsCount + dashboardData.exceptions.discrepancyCount) : 0}
-                                            </div>
-                                            <div style={{ fontSize: '10px', color: '#6b7280', marginTop: '4px' }}>
-                                                {dashboardData.exceptions?.damagedLabelsCount || 0} Damaged / {dashboardData.exceptions?.discrepancyCount || 0} Shortage
-                                            </div>
-                                        </div>
-                                    </div>
-
-                                    {/* Operational Analytics 8 Sub-Tabs Navigation Bar */}
-                                    <div style={{ display: 'flex', borderBottom: '2px solid #e5e7eb', gap: '12px', marginTop: '8px', overflowX: 'auto', paddingBottom: '2px' }}>
-                                        {[
-                                            { id: 'total_received', label: 'Total Received' },
-                                            { id: 'parcels_sorted', label: 'Parcels Sorted' },
-                                            { id: 'pending_parcels', label: 'Pending Parcels' },
-                                            { id: 'total_bags', label: 'Bags & Sealed' },
-                                            { id: 'manifests', label: 'Manifests' },
-                                            { id: 'exceptions', label: 'Exceptions' },
-                                            { id: 'productivity', label: 'User Productivity' },
-                                            { id: 'partner', label: 'Courier Distribution' }
-                                        ].map(tab => (
-                                            <button
-                                                key={tab.id}
-                                                onClick={() => setDashboardSubTab(tab.id as any)}
+                                    {/* KPI Cards — only for Parcel Operations view */}
+                                    {dashboardSubTab !== 'productivity' && (
+                                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(6, 1fr)', gap: '12px' }}>
+                                            {/* Card 1: Total Received */}
+                                            <div
+                                                onClick={() => setDashboardSubTab('total_received')}
+                                                onMouseOver={(e) => { e.currentTarget.style.outline = '2px solid #e21b22'; e.currentTarget.style.outlineOffset = '-2px'; }}
+                                                onMouseOut={(e) => { e.currentTarget.style.outline = 'none'; }}
                                                 style={{
-                                                    padding: '10px 12px',
-                                                    fontSize: '12px',
-                                                    fontWeight: '700',
-                                                    border: 'none',
-                                                    borderBottom: dashboardSubTab === tab.id ? '3px solid #e21b22' : '3px solid transparent',
-                                                    marginBottom: '-2px',
+                                                    backgroundColor: '#ffffff',
+                                                    border: dashboardSubTab === 'total_received' ? '2px solid #e21b22' : '1px solid #e5e7eb',
+                                                    borderRadius: '10px',
+                                                    padding: '14px 10px',
+                                                    textAlign: 'center',
+                                                    boxShadow: dashboardSubTab === 'total_received' ? '0 4px 12px rgba(226, 27, 34, 0.15)' : '0 1px 3px rgba(0,0,0,0.05)',
                                                     cursor: 'pointer',
-                                                    backgroundColor: 'transparent',
-                                                    color: dashboardSubTab === tab.id ? '#e21b22' : '#4b5563',
-                                                    whiteSpace: 'nowrap',
-                                                    transition: 'all 0.15s ease'
+                                                    transition: 'all 0.15s ease-in-out',
+                                                    transform: dashboardSubTab === 'total_received' ? 'translateY(-2px)' : 'none'
                                                 }}
                                             >
-                                                {tab.label}
-                                            </button>
-                                        ))}
-                                    </div>
+                                                <div style={{ fontSize: '10px', fontWeight: '700', color: dashboardSubTab === 'total_received' ? '#e21b22' : '#6b7280', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Total Received</div>
+                                                <div style={{ fontSize: '26px', fontWeight: '800', color: '#111827', marginTop: '4px' }}>{dashboardData.totalReceived}</div>
+                                                <div style={{ fontSize: '11px', color: '#6b7280', marginTop: '4px' }}>Parcels Inbound</div>
+                                            </div>
+
+                                            {/* Card 2: Parcels Sorted */}
+                                            <div
+                                                onClick={() => setDashboardSubTab('parcels_sorted')}
+                                                onMouseOver={(e) => { e.currentTarget.style.outline = '2px solid #e21b22'; e.currentTarget.style.outlineOffset = '-2px'; }}
+                                                onMouseOut={(e) => { e.currentTarget.style.outline = 'none'; }}
+                                                style={{
+                                                    backgroundColor: '#ffffff',
+                                                    border: dashboardSubTab === 'parcels_sorted' ? '2px solid #e21b22' : '1px solid #e5e7eb',
+                                                    borderRadius: '10px',
+                                                    padding: '14px 10px',
+                                                    textAlign: 'center',
+                                                    boxShadow: dashboardSubTab === 'parcels_sorted' ? '0 4px 12px rgba(226, 27, 34, 0.15)' : '0 1px 3px rgba(0,0,0,0.05)',
+                                                    cursor: 'pointer',
+                                                    transition: 'all 0.15s ease-in-out',
+                                                    transform: dashboardSubTab === 'parcels_sorted' ? 'translateY(-2px)' : 'none'
+                                                }}
+                                            >
+                                                <div style={{ fontSize: '10px', fontWeight: '700', color: dashboardSubTab === 'parcels_sorted' ? '#e21b22' : '#6b7280', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Parcels Sorted</div>
+                                                <div style={{ fontSize: '26px', fontWeight: '800', color: '#111827', marginTop: '4px' }}>{dashboardData.totalSorted}</div>
+                                                <div style={{ fontSize: '11px', color: '#6b7280', marginTop: '4px' }}>Allocated in Bags</div>
+                                            </div>
+
+                                            {/* Card 3: Pending Parcels */}
+                                            <div
+                                                onClick={() => setDashboardSubTab('pending_parcels')}
+                                                onMouseOver={(e) => { e.currentTarget.style.outline = '2px solid #e21b22'; e.currentTarget.style.outlineOffset = '-2px'; }}
+                                                onMouseOut={(e) => { e.currentTarget.style.outline = 'none'; }}
+                                                style={{
+                                                    backgroundColor: '#ffffff',
+                                                    border: dashboardSubTab === 'pending_parcels' ? '2px solid #e21b22' : '1px solid #e5e7eb',
+                                                    borderRadius: '10px',
+                                                    padding: '14px 10px',
+                                                    textAlign: 'center',
+                                                    boxShadow: dashboardSubTab === 'pending_parcels' ? '0 4px 12px rgba(226, 27, 34, 0.15)' : '0 1px 3px rgba(0,0,0,0.05)',
+                                                    cursor: 'pointer',
+                                                    transition: 'all 0.15s ease-in-out',
+                                                    transform: dashboardSubTab === 'pending_parcels' ? 'translateY(-2px)' : 'none'
+                                                }}
+                                            >
+                                                <div style={{ fontSize: '10px', fontWeight: '700', color: dashboardSubTab === 'pending_parcels' ? '#e21b22' : '#6b7280', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Pending Parcels</div>
+                                                <div style={{ fontSize: '26px', fontWeight: '800', color: '#111827', marginTop: '4px' }}>{dashboardData.pendingParcels}</div>
+                                                <div style={{ fontSize: '11px', color: '#6b7280', marginTop: '4px' }}>Awaiting Sorting</div>
+                                            </div>
+
+                                            {/* Card 4: Total Bags */}
+                                            <div
+                                                onClick={() => setDashboardSubTab('total_bags')}
+                                                onMouseOver={(e) => { e.currentTarget.style.outline = '2px solid #e21b22'; e.currentTarget.style.outlineOffset = '-2px'; }}
+                                                onMouseOut={(e) => { e.currentTarget.style.outline = 'none'; }}
+                                                style={{
+                                                    backgroundColor: '#ffffff',
+                                                    border: dashboardSubTab === 'total_bags' ? '2px solid #e21b22' : '1px solid #e5e7eb',
+                                                    borderRadius: '10px',
+                                                    padding: '14px 10px',
+                                                    textAlign: 'center',
+                                                    boxShadow: dashboardSubTab === 'total_bags' ? '0 4px 12px rgba(226, 27, 34, 0.15)' : '0 1px 3px rgba(0,0,0,0.05)',
+                                                    cursor: 'pointer',
+                                                    transition: 'all 0.15s ease-in-out',
+                                                    transform: dashboardSubTab === 'total_bags' ? 'translateY(-2px)' : 'none'
+                                                }}
+                                            >
+                                                <div style={{ fontSize: '10px', fontWeight: '700', color: dashboardSubTab === 'total_bags' ? '#e21b22' : '#6b7280', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Total Bags</div>
+                                                <div style={{ fontSize: '26px', fontWeight: '800', color: '#111827', marginTop: '4px' }}>{dashboardData.totalBagsCreated}</div>
+                                                <div style={{ fontSize: '10px', color: '#4b5563', marginTop: '4px', display: 'flex', justifyContent: 'center', gap: '4px' }}>
+                                                    <span style={{ color: '#166534', fontWeight: '700' }}>{dashboardData.openBags} Open</span> •
+                                                    <span style={{ color: '#dc2626', fontWeight: '700' }}>{dashboardData.sealedBags} Sealed</span>
+                                                </div>
+                                            </div>
+
+                                            {/* Card 5: Manifests */}
+                                            <div
+                                                onClick={() => setDashboardSubTab('manifests')}
+                                                onMouseOver={(e) => { e.currentTarget.style.outline = '2px solid #e21b22'; e.currentTarget.style.outlineOffset = '-2px'; }}
+                                                onMouseOut={(e) => { e.currentTarget.style.outline = 'none'; }}
+                                                style={{
+                                                    backgroundColor: '#ffffff',
+                                                    border: dashboardSubTab === 'manifests' ? '2px solid #e21b22' : '1px solid #e5e7eb',
+                                                    borderRadius: '10px',
+                                                    padding: '14px 10px',
+                                                    textAlign: 'center',
+                                                    boxShadow: dashboardSubTab === 'manifests' ? '0 4px 12px rgba(226, 27, 34, 0.15)' : '0 1px 3px rgba(0,0,0,0.05)',
+                                                    cursor: 'pointer',
+                                                    transition: 'all 0.15s ease-in-out',
+                                                    transform: dashboardSubTab === 'manifests' ? 'translateY(-2px)' : 'none'
+                                                }}
+                                            >
+                                                <div style={{ fontSize: '10px', fontWeight: '700', color: dashboardSubTab === 'manifests' ? '#e21b22' : '#6b7280', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Manifests</div>
+                                                <div style={{ fontSize: '26px', fontWeight: '800', color: '#111827', marginTop: '4px' }}>{dashboardData.totalManifests}</div>
+                                                <div style={{ fontSize: '10px', color: '#4b5563', marginTop: '4px', display: 'flex', justifyContent: 'center', gap: '4px' }}>
+                                                    <span style={{ color: '#166534', fontWeight: '700' }}>{dashboardData.openManifests} Open</span> •
+                                                    <span style={{ color: '#dc2626', fontWeight: '700' }}>{dashboardData.closedManifests} Closed</span>
+                                                </div>
+                                            </div>
+
+                                            {/* Card 6: Exceptions */}
+                                            <div
+                                                onClick={() => setDashboardSubTab('exceptions')}
+                                                onMouseOver={(e) => { e.currentTarget.style.outline = '2px solid #e21b22'; e.currentTarget.style.outlineOffset = '-2px'; }}
+                                                onMouseOut={(e) => { e.currentTarget.style.outline = 'none'; }}
+                                                style={{
+                                                    backgroundColor: '#ffffff',
+                                                    border: dashboardSubTab === 'exceptions' ? '2px solid #e21b22' : '1px solid #e5e7eb',
+                                                    borderRadius: '10px',
+                                                    padding: '14px 10px',
+                                                    textAlign: 'center',
+                                                    boxShadow: dashboardSubTab === 'exceptions' ? '0 4px 12px rgba(226, 27, 34, 0.15)' : '0 1px 3px rgba(0,0,0,0.05)',
+                                                    cursor: 'pointer',
+                                                    transition: 'all 0.15s ease-in-out',
+                                                    transform: dashboardSubTab === 'exceptions' ? 'translateY(-2px)' : 'none'
+                                                }}
+                                            >
+                                                <div style={{ fontSize: '10px', fontWeight: '700', color: dashboardSubTab === 'exceptions' ? '#e21b22' : '#6b7280', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Exceptions</div>
+                                                <div style={{ fontSize: '26px', fontWeight: '800', color: '#111827', marginTop: '4px' }}>
+                                                    {dashboardData.exceptions ? (dashboardData.exceptions.damagedLabelsCount + dashboardData.exceptions.discrepancyCount) : 0}
+                                                </div>
+                                                <div style={{ fontSize: '10px', color: '#6b7280', marginTop: '4px' }}>
+                                                    {dashboardData.exceptions?.damagedLabelsCount || 0} Damaged / {dashboardData.exceptions?.discrepancyCount || 0} Shortage
+                                                </div>
+                                            </div>
+                                        </div>
+                                    )}
+
+                                    {/* Parcel Operations Sub-Tabs Navigation Bar — hidden on User Productivity */}
+                                    {dashboardSubTab !== 'productivity' && (
+                                        <div style={{ display: 'flex', borderBottom: '2px solid #e5e7eb', gap: '12px', marginTop: '8px', overflowX: 'auto', paddingBottom: '2px' }}>
+                                            {[
+                                                { id: 'total_received', label: 'Total Received' },
+                                                { id: 'parcels_sorted', label: 'Parcels Sorted' },
+                                                { id: 'pending_parcels', label: 'Pending Parcels' },
+                                                { id: 'total_bags', label: 'Bags & Sealed' },
+                                                { id: 'manifests', label: 'Manifests' },
+                                                { id: 'exceptions', label: 'Exceptions' },
+                                                { id: 'partner', label: 'Courier Distribution' }
+                                            ].map(tab => (
+                                                <button
+                                                    key={tab.id}
+                                                    onClick={() => setDashboardSubTab(tab.id as any)}
+                                                    style={{
+                                                        padding: '10px 12px',
+                                                        fontSize: '12px',
+                                                        fontWeight: '700',
+                                                        border: 'none',
+                                                        borderBottom: dashboardSubTab === tab.id ? '3px solid #e21b22' : '3px solid transparent',
+                                                        marginBottom: '-2px',
+                                                        cursor: 'pointer',
+                                                        backgroundColor: 'transparent',
+                                                        color: dashboardSubTab === tab.id ? '#e21b22' : '#4b5563',
+                                                        whiteSpace: 'nowrap',
+                                                        transition: 'all 0.15s ease'
+                                                    }}
+                                                >
+                                                    {tab.label}
+                                                </button>
+                                            ))}
+                                        </div>
+                                    )}
 
                                     {/* Universal Search & Filter Control Bar for Detail Views */}
-                                    {['total_received', 'parcels_sorted', 'pending_parcels', 'total_bags', 'manifests', 'exceptions'].includes(dashboardSubTab) && (
-                                        <div style={{ display: 'flex', gap: '12px', alignItems: 'center', backgroundColor: '#f9fafb', padding: '12px', borderRadius: '8px', border: '1px solid #e5e7eb' }}>
-                                            <div style={{ flex: 1, position: 'relative' }}>
+                                    {['total_received', 'parcels_sorted', 'pending_parcels', 'total_bags', 'exceptions'].includes(dashboardSubTab) && (
+                                        <div style={{ display: 'flex', gap: '16px', alignItems: 'center', backgroundColor: '#f9fafb', padding: '12px 16px', borderRadius: '8px', border: '1px solid #e5e7eb' }}>
+                                            <div style={{ flex: 1, minWidth: 0, position: 'relative' }}>
                                                 <input
                                                     type="text"
                                                     placeholder="Search by tracking number, barcode, bag #, MAWB, or location..."
                                                     value={dashSearchQuery}
                                                     onChange={e => setDashSearchQuery(e.target.value)}
-                                                    style={{ width: '100%', padding: '8px 12px', fontSize: '13px', borderRadius: '6px', border: '1px solid #d1d5db', outline: 'none' }}
+                                                    style={{ width: '100%', boxSizing: 'border-box', padding: '8px 12px', fontSize: '13px', borderRadius: '6px', border: '1px solid #d1d5db', outline: 'none' }}
                                                 />
                                             </div>
                                             {['total_received', 'parcels_sorted', 'pending_parcels', 'total_bags'].includes(dashboardSubTab) && (
                                                 <select
                                                     value={dashPartnerFilter}
                                                     onChange={e => setDashPartnerFilter(e.target.value)}
-                                                    style={{ padding: '8px 12px', fontSize: '13px', borderRadius: '6px', border: '1px solid #d1d5db', backgroundColor: '#ffffff' }}
+                                                    style={{ flexShrink: 0, boxSizing: 'border-box', padding: '8px 12px', fontSize: '13px', borderRadius: '6px', border: '1px solid #d1d5db', backgroundColor: '#ffffff', minWidth: '150px' }}
                                                 >
                                                     <option value="ALL">All Partners</option>
                                                     <option value="PickMe">PickMe</option>
@@ -4775,7 +4812,7 @@ export default function WorkstationDashboard() {
                                             {dashSearchQuery || dashPartnerFilter !== 'ALL' ? (
                                                 <button
                                                     onClick={() => { setDashSearchQuery(''); setDashPartnerFilter('ALL'); }}
-                                                    style={{ fontSize: '12px', color: '#dc2626', background: 'none', border: 'none', cursor: 'pointer', fontWeight: '700' }}
+                                                    style={{ flexShrink: 0, fontSize: '12px', color: '#dc2626', background: 'none', border: 'none', cursor: 'pointer', fontWeight: '700', whiteSpace: 'nowrap' }}
                                                 >
                                                     Clear Filters
                                                 </button>
@@ -4805,7 +4842,7 @@ export default function WorkstationDashboard() {
                                                     <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px', textAlign: 'left' }}>
                                                         <thead>
                                                             <tr style={{ borderBottom: '2px solid #e5e7eb', backgroundColor: '#f9fafb' }}>
-                                                                {['#', 'Waybill / Reference', 'Temu Barcode', 'MAWB Ref', 'Courier Partner', 'Destination City', 'Weight', 'Allocation Status', 'Received Date'].map(h => (
+                                                                {['#', 'Parcel Reference', 'Temu Barcode', 'Courier Partner', 'Destination City', 'Weight', 'Allocation Status', 'Received Date'].map(h => (
                                                                     <th key={h} style={{ padding: '10px 8px', color: '#6b7280', fontWeight: '700', fontSize: '11px', textTransform: 'uppercase' }}>{h}</th>
                                                                 ))}
                                                             </tr>
@@ -4821,7 +4858,6 @@ export default function WorkstationDashboard() {
                                                                     <td style={{ padding: '10px 8px', color: '#9ca3af', fontSize: '11px' }}>{idx + 1}</td>
                                                                     <td style={{ padding: '10px 8px', fontWeight: '700', color: '#111827' }}>{p.referenceNumber}</td>
                                                                     <td style={{ padding: '10px 8px', color: '#4b5563', fontFamily: 'monospace', fontSize: '12px' }}>{p.senderReference}</td>
-                                                                    <td style={{ padding: '10px 8px', color: '#374151', fontSize: '12px' }}>{p.mawbReference}</td>
                                                                     <td style={{ padding: '10px 8px' }}>
                                                                         <span style={{ padding: '2px 8px', borderRadius: '4px', fontSize: '11px', fontWeight: '700', backgroundColor: p.deliveryAgentCode === 'PickMe' ? '#fef3c7' : p.deliveryAgentCode === 'Domex' ? '#dbeafe' : p.deliveryAgentCode === 'Pronto' ? '#e0e7ff' : '#f3f4f6', color: p.deliveryAgentCode === 'PickMe' ? '#b45309' : p.deliveryAgentCode === 'Domex' ? '#1d4ed8' : p.deliveryAgentCode === 'Pronto' ? '#4338ca' : '#374151' }}>
                                                                             {p.deliveryAgentCode}
@@ -4863,7 +4899,7 @@ export default function WorkstationDashboard() {
                                                     <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px', textAlign: 'left' }}>
                                                         <thead>
                                                             <tr style={{ borderBottom: '2px solid #e5e7eb', backgroundColor: '#f9fafb' }}>
-                                                                {['#', 'Waybill / Reference', 'Assigned Bag #', 'Courier Partner', 'Destination City', 'Weight', 'Status'].map(h => (
+                                                                {['#', 'Parcel Reference', 'Assigned Bag #', 'Courier Partner', 'Destination City', 'Weight', 'Status'].map(h => (
                                                                     <th key={h} style={{ padding: '10px 8px', color: '#6b7280', fontWeight: '700', fontSize: '11px', textTransform: 'uppercase' }}>{h}</th>
                                                                 ))}
                                                             </tr>
@@ -4915,7 +4951,7 @@ export default function WorkstationDashboard() {
                                                     <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px', textAlign: 'left' }}>
                                                         <thead>
                                                             <tr style={{ borderBottom: '2px solid #e5e7eb', backgroundColor: '#f9fafb' }}>
-                                                                {['#', 'Waybill / Reference', 'Temu Barcode', 'MAWB Ref', 'Target Partner', 'Destination City', 'Status', 'Received Date'].map(h => (
+                                                                {['#', 'Parcel Reference', 'Temu Barcode', 'Target Partner', 'Destination City', 'Status', 'Received Date'].map(h => (
                                                                     <th key={h} style={{ padding: '10px 8px', color: '#6b7280', fontWeight: '700', fontSize: '11px', textTransform: 'uppercase' }}>{h}</th>
                                                                 ))}
                                                             </tr>
@@ -4931,7 +4967,6 @@ export default function WorkstationDashboard() {
                                                                     <td style={{ padding: '10px 8px', color: '#9ca3af', fontSize: '11px' }}>{idx + 1}</td>
                                                                     <td style={{ padding: '10px 8px', fontWeight: '700', color: '#111827' }}>{p.referenceNumber}</td>
                                                                     <td style={{ padding: '10px 8px', color: '#4b5563', fontFamily: 'monospace', fontSize: '12px' }}>{p.senderReference}</td>
-                                                                    <td style={{ padding: '10px 8px', color: '#374151', fontSize: '12px' }}>{p.mawbReference}</td>
                                                                     <td style={{ padding: '10px 8px', fontWeight: '600' }}>{p.deliveryAgentCode}</td>
                                                                     <td style={{ padding: '10px 8px', color: '#374151' }}>{p.consigneeLocation || 'N/A'}</td>
                                                                     <td style={{ padding: '10px 8px' }}>
@@ -4985,8 +5020,8 @@ export default function WorkstationDashboard() {
                                                                     <td style={{ padding: '10px 8px', fontWeight: '800', color: '#111827', fontFamily: 'monospace' }}>{b.bagNumber}</td>
                                                                     <td style={{ padding: '10px 8px', fontWeight: '600' }}>{b.targetPartner}</td>
                                                                     <td style={{ padding: '10px 8px' }}>
-                                                                        <span style={{ padding: '2px 8px', borderRadius: '4px', fontSize: '11px', fontWeight: '700', backgroundColor: b.status === 'SEALED' ? '#fee2e2' : '#dcfce7', color: b.status === 'SEALED' ? '#dc2626' : '#15803d' }}>
-                                                                            {b.status === 'SEALED' ? '🔒 SEALED' : '📂 OPEN'}
+                                                                        <span style={{ padding: '2px 8px', borderRadius: '4px', fontSize: '11px', fontWeight: '700', color: b.status === 'SEALED' ? '#dc2626' : '#15803d' }}>
+                                                                            {b.status === 'SEALED' ? 'SEALED' : 'OPEN'}
                                                                         </span>
                                                                     </td>
                                                                     <td style={{ padding: '10px 8px', fontWeight: '700', color: '#111827' }}>{b.parcelCount} parcels</td>
@@ -5022,14 +5057,14 @@ export default function WorkstationDashboard() {
                                                 </div>
 
                                                 {/* MAWB Selector & Search Input */}
-                                                <div style={{ display: 'flex', gap: '12px', alignItems: 'center', marginTop: '12px' }}>
-                                                    <div style={{ flex: 1, position: 'relative' }}>
+                                                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: '12px', gap: '16px' }}>
+                                                    <div style={{ flex: '1 1 360px', maxWidth: '480px', minWidth: 0, position: 'relative' }}>
                                                         <input
                                                             type="text"
-                                                            placeholder="Type MAWB Reference or Manifest ID (e.g. 603-70659761)..."
+                                                            placeholder="Type MAWB Ref (e.g. 603-70659761)..."
                                                             value={dashSearchQuery}
                                                             onChange={(e) => setDashSearchQuery(e.target.value)}
-                                                            style={{ width: '100%', padding: '10px 14px', fontSize: '13px', borderRadius: '8px', border: '1px solid #d1d5db', outline: 'none' }}
+                                                            style={{ width: '100%', boxSizing: 'border-box', padding: '9px 14px', fontSize: '13px', borderRadius: '8px', border: '1px solid #d1d5db', outline: 'none' }}
                                                         />
                                                         {dashSearchQuery && (
                                                             <button
@@ -5044,7 +5079,7 @@ export default function WorkstationDashboard() {
                                                         <select
                                                             value={dashSearchQuery}
                                                             onChange={(e) => setDashSearchQuery(e.target.value)}
-                                                            style={{ padding: '10px 14px', fontSize: '13px', borderRadius: '8px', border: '1px solid #d1d5db', backgroundColor: '#ffffff', minWidth: '180px' }}
+                                                            style={{ padding: '9px 14px', fontSize: '13px', borderRadius: '8px', border: '1px solid #d1d5db', backgroundColor: '#ffffff', width: '220px', flexShrink: 0, boxSizing: 'border-box' }}
                                                         >
                                                             <option value="">Select MAWB Ref...</option>
                                                             {mawbsList.map((m: any) => (
@@ -5096,12 +5131,12 @@ export default function WorkstationDashboard() {
                                                                 const q = dashSearchQuery.trim().toLowerCase();
                                                                 return !q || (m.mawbRef && m.mawbRef.toLowerCase().includes(q)) || (m.manifestId && m.manifestId.toLowerCase().includes(q));
                                                             }).length === 0 && (
-                                                                <tr>
-                                                                    <td colSpan={6} style={{ padding: '20px', textAlign: 'center', color: '#9ca3af', fontSize: '13px' }}>
-                                                                        No manifest sessions matched query "{dashSearchQuery}"
-                                                                    </td>
-                                                                </tr>
-                                                            )}
+                                                                    <tr>
+                                                                        <td colSpan={6} style={{ padding: '20px', textAlign: 'center', color: '#9ca3af', fontSize: '13px' }}>
+                                                                            No manifest sessions matched query "{dashSearchQuery}"
+                                                                        </td>
+                                                                    </tr>
+                                                                )}
                                                         </tbody>
                                                     </table>
                                                 </div>
@@ -5157,12 +5192,12 @@ export default function WorkstationDashboard() {
                                                                 const q = dashSearchQuery.trim().toLowerCase();
                                                                 return !q || (b.mawbRef && b.mawbRef.toLowerCase().includes(q)) || (b.bagNumber && b.bagNumber.toLowerCase().includes(q));
                                                             }).length === 0 && (
-                                                                <tr>
-                                                                    <td colSpan={8} style={{ padding: '20px', textAlign: 'center', color: '#9ca3af', fontSize: '13px' }}>
-                                                                        No LMD bags matched query "{dashSearchQuery}"
-                                                                    </td>
-                                                                </tr>
-                                                            )}
+                                                                    <tr>
+                                                                        <td colSpan={8} style={{ padding: '20px', textAlign: 'center', color: '#9ca3af', fontSize: '13px' }}>
+                                                                            No LMD bags matched query "{dashSearchQuery}"
+                                                                        </td>
+                                                                    </tr>
+                                                                )}
                                                         </tbody>
                                                     </table>
                                                 </div>
@@ -5206,12 +5241,12 @@ export default function WorkstationDashboard() {
                                                                 const q = dashSearchQuery.trim().toLowerCase();
                                                                 return !q || (u.mawbRef && u.mawbRef.toLowerCase().includes(q)) || (u.bagNumber && u.bagNumber.toLowerCase().includes(q));
                                                             }).length === 0 && (
-                                                                <tr>
-                                                                    <td colSpan={5} style={{ padding: '20px', textAlign: 'center', color: '#9ca3af', fontSize: '13px' }}>
-                                                                        No box unsealings matched query "{dashSearchQuery}"
-                                                                    </td>
-                                                                </tr>
-                                                            )}
+                                                                    <tr>
+                                                                        <td colSpan={5} style={{ padding: '20px', textAlign: 'center', color: '#9ca3af', fontSize: '13px' }}>
+                                                                            No box unsealings matched query "{dashSearchQuery}"
+                                                                        </td>
+                                                                    </tr>
+                                                                )}
                                                         </tbody>
                                                     </table>
                                                 </div>
@@ -5267,12 +5302,12 @@ export default function WorkstationDashboard() {
                                                                 const q = dashSearchQuery.trim().toLowerCase();
                                                                 return !q || (p.mawbReference && p.mawbReference.toLowerCase().includes(q)) || (p.referenceNumber && p.referenceNumber.toLowerCase().includes(q)) || (p.bagNumber && p.bagNumber.toLowerCase().includes(q));
                                                             }).length === 0 && (
-                                                                <tr>
-                                                                    <td colSpan={7} style={{ padding: '20px', textAlign: 'center', color: '#9ca3af', fontSize: '13px' }}>
-                                                                        No parcels matched query "{dashSearchQuery}"
-                                                                    </td>
-                                                                </tr>
-                                                            )}
+                                                                    <tr>
+                                                                        <td colSpan={7} style={{ padding: '20px', textAlign: 'center', color: '#9ca3af', fontSize: '13px' }}>
+                                                                            No parcels matched query "{dashSearchQuery}"
+                                                                        </td>
+                                                                    </tr>
+                                                                )}
                                                         </tbody>
                                                     </table>
                                                 </div>
@@ -5335,32 +5370,71 @@ export default function WorkstationDashboard() {
                                     ═══════════════════════════════════════════════════════ */}
                                     {dashboardSubTab === 'productivity' && (
                                         <div style={card}>
-                                            <div style={label}>User Productivity Performance</div>
-                                            {dashboardData.userProductivity && dashboardData.userProductivity.length > 0 ? (
+                                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+                                                <div>
+                                                    <div style={label}>User Productivity Performance Overview</div>
+                                                    <p style={{ fontSize: '12px', color: '#6b7280', margin: '4px 0 0 0' }}>Real-time parcel sorting, bag sealing, and operational activity across all system operators.</p>
+                                                </div>
+                                                <div style={{ fontSize: '12px', color: '#6b7280' }}>
+                                                    Total System Operators: <strong>{(usersList || []).length || (dashboardData.userProductivity || []).length}</strong>
+                                                </div>
+                                            </div>
+
+                                            <div style={{ overflowX: 'auto' }}>
                                                 <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px', textAlign: 'left' }}>
                                                     <thead>
                                                         <tr style={{ borderBottom: '2px solid #e5e7eb', backgroundColor: '#f9fafb' }}>
-                                                            {['Operator Name', 'Parcels Processed', 'Bags Sealed', 'Manifests Closed'].map(h => (
-                                                                <th key={h} style={{ padding: '10px 8px', color: '#6b7280', fontWeight: '700', fontSize: '11px', textTransform: 'uppercase' }}>{h}</th>
+                                                            {['#', 'Operator / User Name', 'Email Address', 'Role', 'Inbound Parcels Scanned', 'Outbound Bags Sealed', 'Manifest Sessions Closed', 'System Duty Status'].map(h => (
+                                                                <th key={h} style={{ padding: '10px 12px', color: '#6b7280', fontWeight: '700', fontSize: '11px', textTransform: 'uppercase' }}>{h}</th>
                                                             ))}
                                                         </tr>
                                                     </thead>
                                                     <tbody>
-                                                        {dashboardData.userProductivity.map((u: any, idx: number) => (
-                                                            <tr key={`u-prod-${idx}`} style={{ borderBottom: '1px solid #f3f4f6' }}>
-                                                                <td style={{ padding: '10px 8px', fontWeight: '700', color: '#111827', display: 'flex', alignItems: 'center', gap: '8px' }}>
-                                                                    {u.operator}
-                                                                </td>
-                                                                <td style={{ padding: '10px 8px', fontWeight: '800', color: '#166534' }}>{u.scanned} parcels</td>
-                                                                <td style={{ padding: '10px 8px', fontWeight: '700', color: '#111827' }}>{u.bagsSealed} bags</td>
-                                                                <td style={{ padding: '10px 8px', fontWeight: '700', color: '#374151' }}>{u.manifestsClosed} manifests</td>
-                                                            </tr>
-                                                        ))}
+                                                        {(usersList && usersList.length > 0
+                                                            ? usersList
+                                                            : (dashboardData.userProductivity || []).map((p: any) => ({ first_name: p.operator, last_name: '', email: `${p.operator.toLowerCase().replace(/\s+/g, '.')}@skynet.lk`, role: 'Operator', is_active: true }))
+                                                        ).map((user: any, idx: number) => {
+                                                            const fullName = `${user.first_name || ''} ${user.last_name || ''}`.trim() || user.name || user.email || 'Operator';
+                                                            const prod = (dashboardData.userProductivity || []).find((p: any) =>
+                                                                p.operator?.toLowerCase().includes(fullName.toLowerCase()) ||
+                                                                p.operator?.toLowerCase().includes((user.first_name || '').toLowerCase())
+                                                            );
+
+                                                            const scanned = prod ? prod.scanned : 0;
+                                                            const bagsSealed = prod ? prod.bagsSealed : 0;
+                                                            const manifestsClosed = prod ? prod.manifestsClosed : 0;
+
+                                                            return (
+                                                                <tr key={`u-prod-${user.id || idx}`} style={{ borderBottom: '1px solid #f3f4f6' }}>
+                                                                    <td style={{ padding: '10px 12px', color: '#9ca3af', fontSize: '11px' }}>{idx + 1}</td>
+                                                                    <td style={{ padding: '10px 12px', fontWeight: '700', color: '#111827' }}>
+                                                                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                                                            <div style={{ width: '28px', height: '28px', borderRadius: '50%', backgroundColor: '#f3f4f6', border: '1px solid #d1d5db', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: '700', fontSize: '11px', color: '#374151' }}>
+                                                                                {(user.first_name || user.name || user.email || 'O')[0].toUpperCase()}
+                                                                            </div>
+                                                                            <span>{fullName}</span>
+                                                                        </div>
+                                                                    </td>
+                                                                    <td style={{ padding: '10px 12px', color: '#4b5563', fontSize: '12px', fontFamily: 'monospace' }}>{user.email || '—'}</td>
+                                                                    <td style={{ padding: '10px 12px' }}>
+                                                                        <span style={{ padding: '2px 8px', borderRadius: '4px', fontSize: '11px', fontWeight: '700', backgroundColor: '#eff6ff', color: '#1d4ed8' }}>
+                                                                            {user.role || 'Operator'}
+                                                                        </span>
+                                                                    </td>
+                                                                    <td style={{ padding: '10px 12px', fontWeight: '800', color: '#166534' }}>{scanned} parcels</td>
+                                                                    <td style={{ padding: '10px 12px', fontWeight: '700', color: '#111827' }}>{bagsSealed} bags</td>
+                                                                    <td style={{ padding: '10px 12px', fontWeight: '700', color: '#374151' }}>{manifestsClosed} manifests</td>
+                                                                    <td style={{ padding: '10px 12px' }}>
+                                                                        <span style={{ padding: '2px 8px', borderRadius: '4px', fontSize: '11px', fontWeight: '700', backgroundColor: '#dcfce7', color: '#15803d' }}>
+                                                                            ● Active On-Duty
+                                                                        </span>
+                                                                    </td>
+                                                                </tr>
+                                                            );
+                                                        })}
                                                     </tbody>
                                                 </table>
-                                            ) : (
-                                                <div style={{ textAlign: 'center', padding: '24px', color: '#9ca3af', fontSize: '13px' }}>No operator productivity data recorded yet today.</div>
-                                            )}
+                                            </div>
                                         </div>
                                     )}
 
