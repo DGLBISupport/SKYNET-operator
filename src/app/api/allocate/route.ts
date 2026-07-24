@@ -742,10 +742,21 @@ export async function GET(request: Request) {
             });
 
             // Also include bags registered in bag_unsealing table for this MAWB
-            const unsealRes = await fetch(`${supabaseUrl}/rest/v1/bag_unsealing?mawb_ref=ilike.${cleanSearchMawb}&select=bag_number,expected_count`, { headers });
+            let unsealedRecords: any[] = [];
+            const unsealRes = await fetch(`${supabaseUrl}/rest/v1/bag_unsealing?mawb_ref=ilike.${cleanSearchMawb}&select=mawb_ref,bag_number,expected_count,scanned_count,unsealed_at,status,discrepancy,unsealed_by`, { headers });
             if (unsealRes.ok) {
                 const unsealed = await unsealRes.json();
                 if (Array.isArray(unsealed)) {
+                    unsealedRecords = unsealed.map((u: any) => ({
+                        mawb: u.mawb_ref,
+                        bagNumber: u.bag_number,
+                        expected: u.expected_count || 0,
+                        scanned: u.scanned_count || 0,
+                        timestamp: u.unsealed_at ? new Date(u.unsealed_at).toLocaleTimeString() : '',
+                        status: u.status || 'COUNTED',
+                        discrepancy: u.discrepancy || 0,
+                        unsealedBy: u.unsealed_by || 'System'
+                    }));
                     unsealed.forEach((u: any) => {
                         if (u.bag_number && !bagCountsMap[u.bag_number]) {
                             bagCountsMap[u.bag_number] = u.expected_count || 0;
@@ -764,7 +775,7 @@ export async function GET(request: Request) {
                 expectedCount
             }));
 
-            return NextResponse.json({ success: true, bags: bagsList });
+            return NextResponse.json({ success: true, bags: bagsList, unsealedBoxes: unsealedRecords });
         }
 
         if (getBagParcels && bagNumberParam) {
