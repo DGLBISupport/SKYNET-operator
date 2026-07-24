@@ -175,7 +175,7 @@ export default function WorkstationDashboard() {
         }
     };
 
-    const [activeTab, setActiveTab] = useState<'first-scan' | 'second-scan' | 'damaged-barcode' | 'verify' | 'config' | 'reports'>('first-scan');
+    const [activeTab, setActiveTab] = useState<'first-scan' | 'second-scan' | 'damaged-barcode' | 'verify' | 'config' | 'reports' | 'search' | 'dashboard'>('first-scan');
     const [isSidebarExpanded, setIsSidebarExpanded] = useState<boolean>(true);
     const [scannedToday, setScannedToday] = useState<number>(0);
     const [timeString, setTimeString] = useState<string>('');
@@ -361,6 +361,60 @@ export default function WorkstationDashboard() {
         zoneMappings: [] as { province: string; district: string; city: string; zoneName: string }[],
         allocationRules: {} as Record<string, { partnerCode: string; weightPercentage: number }[]>
     });
+
+    // Search Center States
+    const [searchQuery, setSearchQuery] = useState('');
+    const [searchFilter, setSearchFilter] = useState<'ALL' | 'tracking' | 'bag' | 'manifest' | 'box'>('ALL');
+    const [isSearching, setIsSearching] = useState(false);
+    const [searchResults, setSearchResults] = useState<{
+        query?: string;
+        parcels: any[];
+        bags: any[];
+        manifests: any[];
+        unsealedBoxes: any[];
+    } | null>(null);
+
+    // Operational Dashboard States
+    const [dashboardData, setDashboardData] = useState<any | null>(null);
+    const [isLoadingDashboard, setIsLoadingDashboard] = useState(false);
+
+    const fetchDashboard = async () => {
+        setIsLoadingDashboard(true);
+        try {
+            const res = await fetch('/api/dashboard');
+            const data = await res.json();
+            if (data.success && data.dashboard) {
+                setDashboardData(data.dashboard);
+            }
+        } catch (e) {
+            console.error("Failed to load dashboard data:", e);
+        } finally {
+            setIsLoadingDashboard(false);
+        }
+    };
+
+    useEffect(() => {
+        if (activeTab === 'dashboard') {
+            fetchDashboard();
+        }
+    }, [activeTab]);
+
+    const handleSearchSubmit = async (e?: React.FormEvent) => {
+        if (e) e.preventDefault();
+        if (!searchQuery.trim()) return;
+        setIsSearching(true);
+        try {
+            const res = await fetch(`/api/search?q=${encodeURIComponent(searchQuery.trim())}&type=${searchFilter}`);
+            const data = await res.json();
+            if (data.success && data.results) {
+                setSearchResults({ ...data.results, query: searchQuery.trim() });
+            }
+        } catch (e) {
+            console.error("Search failed:", e);
+        } finally {
+            setIsSearching(false);
+        }
+    };
     const [newProvince, setNewProvince] = useState('');
     const [newCity, setNewCity] = useState('');
     const [newZone, setNewZone] = useState('');
@@ -2259,6 +2313,28 @@ export default function WorkstationDashboard() {
 
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
                     {([
+                        {
+                            id: 'search',
+                            label: 'Search Function',
+                            icon: (
+                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                    <circle cx="11" cy="11" r="8" />
+                                    <line x1="21" y1="21" x2="16.65" y2="16.65" />
+                                </svg>
+                            )
+                        },
+                        {
+                            id: 'dashboard',
+                            label: 'Operational Dashboard',
+                            icon: (
+                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                    <rect x="3" y="3" width="7" height="9" />
+                                    <rect x="14" y="3" width="7" height="5" />
+                                    <rect x="14" y="12" width="7" height="9" />
+                                    <rect x="3" y="16" width="7" height="5" />
+                                </svg>
+                            )
+                        },
                         {
                             id: 'reports',
                             label: 'Reports',
@@ -4475,6 +4551,414 @@ export default function WorkstationDashboard() {
                                     </tbody>
                                 </table>
                             </div>
+                        </div>
+                    )}
+
+                    {/* ═══════════════════════════════════════════════════════
+                    TAB 5 — SEARCH FUNCTION
+                ═══════════════════════════════════════════════════════ */}
+                    {activeTab === 'search' && (
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+                            {/* Search Header & Input Card */}
+                            <div style={card}>
+                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+                                    <div>
+                                        <h2 style={{ fontSize: '18px', fontWeight: '800', color: '#111827', margin: 0 }}>Parcel & Bag Search Center</h2>
+                                        <p style={{ fontSize: '12px', color: '#6b7280', margin: '4px 0 0 0' }}>Search instantly across Tracking Numbers, Bag Numbers, Manifest References, and Box Numbers.</p>
+                                    </div>
+                                    <span style={{ backgroundColor: '#eff6ff', color: '#1d4ed8', border: '1px solid #bfdbfe', fontSize: '11px', fontWeight: '700', padding: '4px 10px', borderRadius: '20px' }}>
+                                        Real-Time Database Search
+                                    </span>
+                                </div>
+
+                                {/* Filter Pills */}
+                                <div style={{ display: 'flex', gap: '8px', marginBottom: '14px', flexWrap: 'wrap' }}>
+                                    {[
+                                        { id: 'ALL', label: '🔍 All Fields' },
+                                        { id: 'tracking', label: '📦 Tracking Number' },
+                                        { id: 'bag', label: '🎒 Bag Number' },
+                                        { id: 'manifest', label: '📄 Manifest Number' },
+                                        { id: 'box', label: '📦 Box Number' }
+                                    ].map(f => (
+                                        <button
+                                            key={f.id}
+                                            type="button"
+                                            onClick={() => setSearchFilter(f.id as any)}
+                                            style={{
+                                                backgroundColor: searchFilter === f.id ? '#111827' : '#f3f4f6',
+                                                color: searchFilter === f.id ? '#ffffff' : '#374151',
+                                                border: 'none',
+                                                borderRadius: '20px',
+                                                padding: '6px 14px',
+                                                fontSize: '12px',
+                                                fontWeight: '600',
+                                                cursor: 'pointer',
+                                                transition: 'all 0.15s ease'
+                                            }}
+                                        >
+                                            {f.label}
+                                        </button>
+                                    ))}
+                                </div>
+
+                                {/* Search Input Form */}
+                                <form onSubmit={handleSearchSubmit} style={{ display: 'flex', gap: '10px' }}>
+                                    <div style={{ position: 'relative', flex: 1 }}>
+                                        <input
+                                            type="text"
+                                            placeholder="Type Tracking No, Bag No (e.g. SKYT...), MAWB Ref (e.g. 603-70659761)..."
+                                            value={searchQuery}
+                                            onChange={(e) => setSearchQuery(e.target.value)}
+                                            style={{ ...inputStyle, width: '100%', fontSize: '14px', paddingLeft: '40px' }}
+                                        />
+                                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#9ca3af" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)' }}>
+                                            <circle cx="11" cy="11" r="8" /><line x1="21" y1="21" x2="16.65" y2="16.65" />
+                                        </svg>
+                                        {searchQuery && (
+                                            <button
+                                                type="button"
+                                                onClick={() => { setSearchQuery(''); setSearchResults(null); }}
+                                                style={{ position: 'absolute', right: '12px', top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', color: '#9ca3af', cursor: 'pointer', fontWeight: 'bold' }}
+                                            >
+                                                ✕
+                                            </button>
+                                        )}
+                                    </div>
+                                    <button
+                                        type="submit"
+                                        disabled={isSearching}
+                                        style={{ ...btnPrimary, backgroundColor: '#e21b22', color: '#ffffff', padding: '0 24px', display: 'flex', alignItems: 'center', gap: '6px' }}
+                                    >
+                                        {isSearching ? 'Searching...' : 'Search'}
+                                    </button>
+                                </form>
+                            </div>
+
+                            {/* Results Container */}
+                            {searchResults && (
+                                <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+                                    {/* 1. PARCELS / SHIPMENTS MATCHES */}
+                                    <div style={card}>
+                                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
+                                            <div style={label}>Matched Parcels ({searchResults.parcels.length})</div>
+                                        </div>
+                                        {searchResults.parcels.length > 0 ? (
+                                            <div style={{ overflowX: 'auto' }}>
+                                                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px', textAlign: 'left' }}>
+                                                    <thead>
+                                                        <tr style={{ borderBottom: '2px solid #e5e7eb', backgroundColor: '#f9fafb' }}>
+                                                            {['Tracking No / Ref', 'MAWB Ref', 'Bag Number', 'Consignee', 'Location', 'Partner', 'Zone', 'Status'].map(h => (
+                                                                <th key={h} style={{ padding: '10px 8px', color: '#6b7280', fontWeight: '700', fontSize: '11px', textTransform: 'uppercase' }}>{h}</th>
+                                                            ))}
+                                                        </tr>
+                                                    </thead>
+                                                    <tbody>
+                                                        {searchResults.parcels.map((p, idx) => {
+                                                            const pPartner = p.assignedPartner || 'PickMe';
+                                                            const partnerBg = pPartner === 'Domex' ? '#881337' : pPartner === 'PickMe' ? '#ffcc00' : '#1d4ed8';
+                                                            const partnerColor = pPartner === 'PickMe' ? '#000000' : '#ffffff';
+
+                                                            return (
+                                                                <tr key={`p-${idx}`} style={{ borderBottom: '1px solid #f3f4f6' }}>
+                                                                    <td style={{ padding: '10px 8px', fontWeight: '700', color: '#111827' }}>
+                                                                        <div>{p.trackingNumber}</div>
+                                                                        {p.senderReference && p.senderReference !== p.trackingNumber && (
+                                                                            <div style={{ fontSize: '11px', color: '#6b7280', fontWeight: '500' }}>Ref: {p.senderReference}</div>
+                                                                        )}
+                                                                    </td>
+                                                                    <td style={{ padding: '10px 8px', color: '#374151', fontWeight: '600' }}>{p.mawbRef || '—'}</td>
+                                                                    <td style={{ padding: '10px 8px' }}>
+                                                                        {p.bagNumber ? (
+                                                                            <span style={{ backgroundColor: '#f3f4f6', border: '1px solid #d1d5db', color: '#111827', padding: '2px 8px', borderRadius: '4px', fontWeight: '700', fontSize: '11px' }}>
+                                                                                {p.bagNumber}
+                                                                            </span>
+                                                                        ) : (
+                                                                            <span style={{ color: '#9ca3af', fontSize: '12px' }}>Unassigned</span>
+                                                                        )}
+                                                                    </td>
+                                                                    <td style={{ padding: '10px 8px', color: '#111827', fontWeight: '500' }}>{p.consigneeName}</td>
+                                                                    <td style={{ padding: '10px 8px', color: '#4b5563' }}>{p.city}</td>
+                                                                    <td style={{ padding: '10px 8px' }}>
+                                                                        <span style={{ backgroundColor: partnerBg, color: partnerColor, padding: '3px 10px', borderRadius: '6px', fontWeight: '700', fontSize: '11px', textTransform: 'uppercase' }}>
+                                                                            {pPartner}
+                                                                        </span>
+                                                                    </td>
+                                                                    <td style={{ padding: '10px 8px', color: '#374151', fontWeight: '600' }}>{p.assignedZone}</td>
+                                                                    <td style={{ padding: '10px 8px' }}>
+                                                                        <span style={{ backgroundColor: '#f0fdf4', color: '#166534', border: '1px solid #bbf7d0', padding: '2px 8px', borderRadius: '4px', fontWeight: '700', fontSize: '11px' }}>
+                                                                            {p.bagNumber ? 'LMD ALLOCATED' : 'RECEIVED'}
+                                                                        </span>
+                                                                    </td>
+                                                                </tr>
+                                                            );
+                                                        })}
+                                                    </tbody>
+                                                </table>
+                                            </div>
+                                        ) : (
+                                            <div style={{ textAlign: 'center', padding: '20px', color: '#9ca3af', fontSize: '13px' }}>No parcels matched query "{searchResults.query}"</div>
+                                        )}
+                                    </div>
+
+                                    {/* 2. OUTBOUND LMD BAGS MATCHES */}
+                                    <div style={card}>
+                                        <div style={label}>Matched LMD Bags ({searchResults.bags.length})</div>
+                                        {searchResults.bags.length > 0 ? (
+                                            <div style={{ overflowX: 'auto' }}>
+                                                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px', textAlign: 'left' }}>
+                                                    <thead>
+                                                        <tr style={{ borderBottom: '2px solid #e5e7eb', backgroundColor: '#f9fafb' }}>
+                                                            {['Bag Number', 'MAWB Ref', 'Target Partner', 'Destination Hub', 'Parcels', 'Total Weight', 'Status', 'Created / Sealed By'].map(h => (
+                                                                <th key={h} style={{ padding: '10px 8px', color: '#6b7280', fontWeight: '700', fontSize: '11px', textTransform: 'uppercase' }}>{h}</th>
+                                                            ))}
+                                                        </tr>
+                                                    </thead>
+                                                    <tbody>
+                                                        {searchResults.bags.map((b, idx) => (
+                                                            <tr key={`b-${idx}`} style={{ borderBottom: '1px solid #f3f4f6' }}>
+                                                                <td style={{ padding: '10px 8px', fontWeight: '800', color: '#111827' }}>{b.bagNumber}</td>
+                                                                <td style={{ padding: '10px 8px', color: '#374151', fontWeight: '600' }}>{b.mawbRef}</td>
+                                                                <td style={{ padding: '10px 8px' }}>
+                                                                    <span style={{
+                                                                        backgroundColor: b.targetPartner === 'Domex' ? '#881337' : b.targetPartner === 'PickMe' ? '#ffcc00' : '#374151',
+                                                                        color: b.targetPartner === 'PickMe' ? '#000000' : '#ffffff',
+                                                                        padding: '2px 8px', borderRadius: '4px', fontWeight: '700', fontSize: '11px'
+                                                                    }}>
+                                                                        {b.targetPartner || 'ALL'}
+                                                                    </span>
+                                                                </td>
+                                                                <td style={{ padding: '10px 8px', color: '#4b5563', fontWeight: '600' }}>{b.destinationHub || '—'}</td>
+                                                                <td style={{ padding: '10px 8px', fontWeight: '700', color: '#111827' }}>{b.parcelCount} items</td>
+                                                                <td style={{ padding: '10px 8px', color: '#374151' }}>{b.totalWeight ? `${b.totalWeight.toFixed(1)} kg` : '—'}</td>
+                                                                <td style={{ padding: '10px 8px' }}>
+                                                                    <span style={{
+                                                                        backgroundColor: b.status === 'SEALED' ? '#fef2f2' : '#ecfdf5',
+                                                                        color: b.status === 'SEALED' ? '#dc2626' : '#047857',
+                                                                        border: b.status === 'SEALED' ? '1px solid #fca5a5' : '1px solid #a7f3d0',
+                                                                        padding: '2px 8px', borderRadius: '4px', fontWeight: '700', fontSize: '11px'
+                                                                    }}>
+                                                                        {b.status}
+                                                                    </span>
+                                                                </td>
+                                                                <td style={{ padding: '10px 8px', color: '#4b5563', fontSize: '12px' }}>
+                                                                    <div>{b.sealedBy || b.createdBy || 'Staff'}</div>
+                                                                    <div style={{ fontSize: '10px', color: '#9ca3af' }}>{b.sealedAt || b.createdAt}</div>
+                                                                </td>
+                                                            </tr>
+                                                        ))}
+                                                    </tbody>
+                                                </table>
+                                            </div>
+                                        ) : (
+                                            <div style={{ textAlign: 'center', padding: '20px', color: '#9ca3af', fontSize: '13px' }}>No bags matched query "{searchResults.query}"</div>
+                                        )}
+                                    </div>
+
+                                    {/* 3. MANIFEST SESSIONS & BOX UNSEALINGS */}
+                                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
+                                        <div style={card}>
+                                            <div style={label}>Matched Manifest Sessions ({searchResults.manifests.length})</div>
+                                            {searchResults.manifests.length > 0 ? (
+                                                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px', textAlign: 'left' }}>
+                                                    <thead>
+                                                        <tr style={{ borderBottom: '2px solid #e5e7eb' }}>
+                                                            <th style={{ padding: '8px', color: '#6b7280', fontSize: '11px', textTransform: 'uppercase' }}>MAWB Ref</th>
+                                                            <th style={{ padding: '8px', color: '#6b7280', fontSize: '11px', textTransform: 'uppercase' }}>Status</th>
+                                                            <th style={{ padding: '8px', color: '#6b7280', fontSize: '11px', textTransform: 'uppercase' }}>Closed By</th>
+                                                        </tr>
+                                                    </thead>
+                                                    <tbody>
+                                                        {searchResults.manifests.map((m, idx) => (
+                                                            <tr key={`m-${idx}`} style={{ borderBottom: '1px solid #f3f4f6' }}>
+                                                                <td style={{ padding: '8px', fontWeight: '700', color: '#111827' }}>{m.mawbRef}</td>
+                                                                <td style={{ padding: '8px' }}>
+                                                                    <span style={{ backgroundColor: m.status === 'CLOSED' ? '#fee2e2' : '#f0fdf4', color: m.status === 'CLOSED' ? '#dc2626' : '#166534', padding: '2px 8px', borderRadius: '4px', fontWeight: '700', fontSize: '11px' }}>
+                                                                        {m.status}
+                                                                    </span>
+                                                                </td>
+                                                                <td style={{ padding: '8px', color: '#4b5563', fontSize: '12px' }}>{m.closedBy || '—'}</td>
+                                                            </tr>
+                                                        ))}
+                                                    </tbody>
+                                                </table>
+                                            ) : (
+                                                <div style={{ textAlign: 'center', padding: '16px', color: '#9ca3af', fontSize: '12px' }}>No manifests matched</div>
+                                            )}
+                                        </div>
+
+                                        <div style={card}>
+                                            <div style={label}>Matched Box Unsealings ({searchResults.unsealedBoxes.length})</div>
+                                            {searchResults.unsealedBoxes.length > 0 ? (
+                                                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px', textAlign: 'left' }}>
+                                                    <thead>
+                                                        <tr style={{ borderBottom: '2px solid #e5e7eb' }}>
+                                                            <th style={{ padding: '8px', color: '#6b7280', fontSize: '11px', textTransform: 'uppercase' }}>Box Bag No</th>
+                                                            <th style={{ padding: '8px', color: '#6b7280', fontSize: '11px', textTransform: 'uppercase' }}>MAWB Ref</th>
+                                                            <th style={{ padding: '8px', color: '#6b7280', fontSize: '11px', textTransform: 'uppercase' }}>Scanned/Expected</th>
+                                                        </tr>
+                                                    </thead>
+                                                    <tbody>
+                                                        {searchResults.unsealedBoxes.map((u, idx) => (
+                                                            <tr key={`u-${idx}`} style={{ borderBottom: '1px solid #f3f4f6' }}>
+                                                                <td style={{ padding: '8px', fontWeight: '700', color: '#111827' }}>{u.bagNumber || 'Box'}</td>
+                                                                <td style={{ padding: '8px', color: '#374151' }}>{u.mawbRef}</td>
+                                                                <td style={{ padding: '8px', fontWeight: '700', color: u.scannedCount === u.expectedCount ? '#166534' : '#dc2626' }}>
+                                                                    {u.scannedCount} / {u.expectedCount}
+                                                                </td>
+                                                            </tr>
+                                                        ))}
+                                                    </tbody>
+                                                </table>
+                                            ) : (
+                                                <div style={{ textAlign: 'center', padding: '16px', color: '#9ca3af', fontSize: '12px' }}>No box unsealings matched</div>
+                                            )}
+                                        </div>
+                                    </div>
+                                </div>
+                            )}
+                        </div>
+                    )}
+
+                    {/* ═══════════════════════════════════════════════════════
+                    TAB 6 — OPERATIONAL DASHBOARD
+                ═══════════════════════════════════════════════════════ */}
+                    {activeTab === 'dashboard' && (
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+                            {/* Header Control Bar */}
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                <div>
+                                    <h2 style={{ fontSize: '20px', fontWeight: '800', color: '#111827', margin: 0 }}>Operational Real-Time Dashboard</h2>
+                                    <p style={{ fontSize: '12px', color: '#6b7280', margin: '4px 0 0 0' }}>Real-time parcel sorting, bag allocation, manifest statuses, exceptions, and operator performance.</p>
+                                </div>
+                                <button
+                                    onClick={fetchDashboard}
+                                    disabled={isLoadingDashboard}
+                                    style={{ ...btnPrimary, backgroundColor: '#111827', color: '#ffffff', display: 'flex', alignItems: 'center', gap: '6px', fontSize: '13px' }}
+                                >
+                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="23 4 23 10 17 10" /><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10" /></svg>
+                                    {isLoadingDashboard ? 'Refreshing...' : 'Refresh Metrics'}
+                                </button>
+                            </div>
+
+                            {/* 6 Top KPI Metrics Cards Grid */}
+                            {dashboardData && (
+                                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(6, 1fr)', gap: '12px' }}>
+                                    <div style={{ backgroundColor: '#ffffff', border: '1px solid #e5e7eb', borderRadius: '10px', padding: '16px 12px', textAlign: 'center', boxShadow: '0 1px 3px rgba(0,0,0,0.05)' }}>
+                                        <div style={{ fontSize: '10px', fontWeight: '700', color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Total Received</div>
+                                        <div style={{ fontSize: '26px', fontWeight: '800', color: '#111827', marginTop: '4px' }}>{dashboardData.totalReceived}</div>
+                                        <div style={{ fontSize: '11px', color: '#6b7280', marginTop: '4px' }}>Parcels Inbound</div>
+                                    </div>
+
+                                    <div style={{ backgroundColor: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: '10px', padding: '16px 12px', textAlign: 'center', boxShadow: '0 1px 3px rgba(0,0,0,0.05)' }}>
+                                        <div style={{ fontSize: '10px', fontWeight: '700', color: '#166534', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Parcels Sorted</div>
+                                        <div style={{ fontSize: '26px', fontWeight: '800', color: '#166534', marginTop: '4px' }}>{dashboardData.totalSorted}</div>
+                                        <div style={{ fontSize: '11px', color: '#15803d', marginTop: '4px' }}>Allocated in Bags</div>
+                                    </div>
+
+                                    <div style={{ backgroundColor: '#fffbeb', border: '1px solid #fef3c7', borderRadius: '10px', padding: '16px 12px', textAlign: 'center', boxShadow: '0 1px 3px rgba(0,0,0,0.05)' }}>
+                                        <div style={{ fontSize: '10px', fontWeight: '700', color: '#92400e', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Pending Parcels</div>
+                                        <div style={{ fontSize: '26px', fontWeight: '800', color: '#b45309', marginTop: '4px' }}>{dashboardData.pendingParcels}</div>
+                                        <div style={{ fontSize: '11px', color: '#a16207', marginTop: '4px' }}>Awaiting Sorting</div>
+                                    </div>
+
+                                    <div style={{ backgroundColor: '#ffffff', border: '1px solid #e5e7eb', borderRadius: '10px', padding: '16px 12px', textAlign: 'center', boxShadow: '0 1px 3px rgba(0,0,0,0.05)' }}>
+                                        <div style={{ fontSize: '10px', fontWeight: '700', color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Total Bags</div>
+                                        <div style={{ fontSize: '26px', fontWeight: '800', color: '#111827', marginTop: '4px' }}>{dashboardData.totalBagsCreated}</div>
+                                        <div style={{ fontSize: '10px', color: '#4b5563', marginTop: '4px', display: 'flex', justifyContent: 'center', gap: '4px' }}>
+                                            <span style={{ color: '#166534', fontWeight: '700' }}>{dashboardData.openBags} Open</span> •
+                                            <span style={{ color: '#dc2626', fontWeight: '700' }}>{dashboardData.sealedBags} Sealed</span>
+                                        </div>
+                                    </div>
+
+                                    <div style={{ backgroundColor: '#ffffff', border: '1px solid #e5e7eb', borderRadius: '10px', padding: '16px 12px', textAlign: 'center', boxShadow: '0 1px 3px rgba(0,0,0,0.05)' }}>
+                                        <div style={{ fontSize: '10px', fontWeight: '700', color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Manifests</div>
+                                        <div style={{ fontSize: '26px', fontWeight: '800', color: '#111827', marginTop: '4px' }}>{dashboardData.totalManifests}</div>
+                                        <div style={{ fontSize: '10px', color: '#4b5563', marginTop: '4px', display: 'flex', justifyContent: 'center', gap: '4px' }}>
+                                            <span style={{ color: '#166534', fontWeight: '700' }}>{dashboardData.openManifests} Open</span> •
+                                            <span style={{ color: '#dc2626', fontWeight: '700' }}>{dashboardData.closedManifests} Closed</span>
+                                        </div>
+                                    </div>
+
+                                    <div style={{ backgroundColor: '#fef2f2', border: '1px solid #fca5a5', borderRadius: '10px', padding: '16px 12px', textAlign: 'center', boxShadow: '0 1px 3px rgba(0,0,0,0.05)' }}>
+                                        <div style={{ fontSize: '10px', fontWeight: '700', color: '#991b1b', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Exceptions</div>
+                                        <div style={{ fontSize: '26px', fontWeight: '800', color: '#dc2626', marginTop: '4px' }}>
+                                            {dashboardData.exceptions.damagedLabelsCount + dashboardData.exceptions.discrepancyCount}
+                                        </div>
+                                        <div style={{ fontSize: '10px', color: '#991b1b', marginTop: '4px' }}>
+                                            {dashboardData.exceptions.damagedLabelsCount} Damaged / {dashboardData.exceptions.discrepancyCount} Shortage
+                                        </div>
+                                    </div>
+                                </div>
+                            )}
+
+                            {/* Operational Analytics & User Productivity */}
+                            {dashboardData && (
+                                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px' }}>
+                                    {/* User Productivity Breakdown Table */}
+                                    <div style={card}>
+                                        <div style={label}>User Productivity Performance</div>
+                                        {dashboardData.userProductivity && dashboardData.userProductivity.length > 0 ? (
+                                            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px', textAlign: 'left' }}>
+                                                <thead>
+                                                    <tr style={{ borderBottom: '2px solid #e5e7eb', backgroundColor: '#f9fafb' }}>
+                                                        {['Operator Name', 'Parcels Processed', 'Bags Sealed', 'Manifests Closed'].map(h => (
+                                                            <th key={h} style={{ padding: '10px 8px', color: '#6b7280', fontWeight: '700', fontSize: '11px', textTransform: 'uppercase' }}>{h}</th>
+                                                        ))}
+                                                    </tr>
+                                                </thead>
+                                                <tbody>
+                                                    {dashboardData.userProductivity.map((u: any, idx: number) => (
+                                                        <tr key={`u-prod-${idx}`} style={{ borderBottom: '1px solid #f3f4f6' }}>
+                                                            <td style={{ padding: '10px 8px', fontWeight: '700', color: '#111827', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                                                <div style={{ width: '28px', height: '28px', borderRadius: '50%', backgroundColor: '#e21b22', color: '#ffffff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '12px', fontWeight: '800' }}>
+                                                                    {u.operator.substring(0, 2).toUpperCase()}
+                                                                </div>
+                                                                {u.operator}
+                                                            </td>
+                                                            <td style={{ padding: '10px 8px', fontWeight: '800', color: '#166534' }}>{u.scanned} parcels</td>
+                                                            <td style={{ padding: '10px 8px', fontWeight: '700', color: '#111827' }}>{u.bagsSealed} bags</td>
+                                                            <td style={{ padding: '10px 8px', fontWeight: '700', color: '#374151' }}>{u.manifestsClosed} manifests</td>
+                                                        </tr>
+                                                    ))}
+                                                </tbody>
+                                            </table>
+                                        ) : (
+                                            <div style={{ textAlign: 'center', padding: '24px', color: '#9ca3af', fontSize: '13px' }}>No operator productivity data recorded yet today.</div>
+                                        )}
+                                    </div>
+
+                                    {/* Partner Distribution Breakdown */}
+                                    <div style={card}>
+                                        <div style={label}>Courier Partner Allocation Distribution</div>
+                                        <div style={{ display: 'flex', flexDirection: 'column', gap: '16px', marginTop: '12px' }}>
+                                            {[
+                                                { name: 'PickMe', count: dashboardData.partnerDistribution.PickMe || 0, bg: '#ffcc00', color: '#000000' },
+                                                { name: 'Domex', count: dashboardData.partnerDistribution.Domex || 0, bg: '#881337', color: '#ffffff' },
+                                                { name: 'Pronto', count: dashboardData.partnerDistribution.Pronto || 0, bg: '#1d4ed8', color: '#ffffff' },
+                                                { name: 'Other', count: dashboardData.partnerDistribution.Other || 0, bg: '#4b5563', color: '#ffffff' }
+                                            ].map(partner => {
+                                                const pct = dashboardData.totalReceived > 0 ? Math.round((partner.count / dashboardData.totalReceived) * 100) : 0;
+                                                return (
+                                                    <div key={partner.name} style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                                                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '13px' }}>
+                                                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                                                <span style={{ backgroundColor: partner.bg, color: partner.color, padding: '2px 8px', borderRadius: '4px', fontWeight: '800', fontSize: '11px', textTransform: 'uppercase' }}>
+                                                                    {partner.name}
+                                                                </span>
+                                                                <span style={{ fontWeight: '600', color: '#111827' }}>{partner.count} parcels</span>
+                                                            </div>
+                                                            <span style={{ fontWeight: '700', color: '#6b7280' }}>{pct}%</span>
+                                                        </div>
+                                                        <div style={{ width: '100%', height: '8px', backgroundColor: '#f3f4f6', borderRadius: '4px', overflow: 'hidden' }}>
+                                                            <div style={{ width: `${pct}%`, height: '100%', backgroundColor: partner.bg, borderRadius: '4px', transition: 'width 0.5s ease' }} />
+                                                        </div>
+                                                    </div>
+                                                );
+                                            })}
+                                        </div>
+                                    </div>
+                                </div>
+                            )}
                         </div>
                     )}
                 </main>
