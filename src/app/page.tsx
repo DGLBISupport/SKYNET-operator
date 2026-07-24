@@ -48,6 +48,26 @@ function generateCode128SVG(text: string): string {
     return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${x + 10} 60" width="100%" height="60" preserveAspectRatio="none">${rects.join('')}</svg>`;
 }
 
+function resolvePartnerName(bag: any): string {
+    if (!bag) return 'LMD Delivery Partner';
+    let p = bag.targetPartner || bag.partner;
+    if (!p || p === 'ALL') {
+        const bn = (bag.bagNumber || '').toUpperCase();
+        if (bn.includes('PICKME')) p = 'PickMe';
+        else if (bn.includes('DOMEX')) p = 'Domex';
+        else if (bn.includes('PRONTO')) p = 'Pronto';
+        else if (bag.parcels && bag.parcels.length > 0) {
+            const firstP = bag.parcels[0];
+            p = firstP.assignedPartner || firstP.partner || firstP.service_provider;
+        }
+    }
+    if (!p || p === 'ALL') return 'ALL PARTNERS';
+    if (p === 'PickMe') return 'PickMe Courier';
+    if (p === 'Domex') return 'Domex Express';
+    if (p === 'Pronto') return 'Pronto Lanka';
+    return p;
+}
+
 export default function WorkstationDashboard() {
     const router = useRouter();
     const [currentUser, setCurrentUser] = useState<any>(null);
@@ -248,8 +268,15 @@ export default function WorkstationDashboard() {
         senderReference?: string;
         scannedMethod?: string;
         originalMethod?: string;
+        isTemuScanDuplicate?: boolean;
+        bagNumber?: string;
         message?: string;
         type: 'allocate' | 'verify';
+    } | null>(null);
+    const [invalidBarcodeModal, setInvalidBarcodeModal] = useState<{
+        barcode: string;
+        message: string;
+        isCombined?: boolean;
     } | null>(null);
     const [confirmFinishModal, setConfirmFinishModal] = useState(false);
     const [successModal, setSuccessModal] = useState<{ title: string; message: string } | null>(null);
@@ -1348,6 +1375,9 @@ export default function WorkstationDashboard() {
 
     const handleSealOutboundBag = async (bagNumber: string) => {
         if (!activeOutboundBag) return;
+        const activeOperator = currentUser
+            ? `${currentUser.firstName || ''} ${currentUser.lastName || ''}`.trim() || currentUser.username || currentUser.email
+            : 'Staff';
         try {
             const res = await fetch('/api/lmd-bags', {
                 method: 'POST',
@@ -1356,6 +1386,9 @@ export default function WorkstationDashboard() {
                     action: 'seal',
                     mawbRef: selectedSecondScanMawb,
                     bagNumber: bagNumber,
+                    targetPartner: activeOutboundBag.targetPartner || 'ALL',
+                    destinationHub: activeOutboundBag.destinationHub || (activeOutboundBag.targetPartner && activeOutboundBag.targetPartner !== 'ALL' ? `${activeOutboundBag.targetPartner} Central Hub` : 'Main Sort Hub'),
+                    operator: activeOperator,
                     parcelCount: activeOutboundBag.parcelCount,
                     totalWeight: activeOutboundBag.totalWeight,
                     parcels: activeOutboundBag.parcels
@@ -1384,11 +1417,12 @@ export default function WorkstationDashboard() {
         const barcode = barcodeInput.trim();
         if (!barcode) return;
 
-        // Clear input instantly to prevent barcode concatenation
-        setBarcodeInput('');
-        if (scanInputRef.current) scanInputRef.current.value = '';
+        // Keep scanned barcode visible in input field until next scan, and set lastScanned for prefix stripping
+        setLastScanned(barcode);
+        setBarcodeInput(barcode);
+        if (scanInputRef.current) scanInputRef.current.value = barcode;
 
-        // Auto select input text so next scan overwrites it
+        // Auto select input text so next scan overwrites or strips it
         setTimeout(() => {
             scanInputRef.current?.select();
         }, 50);
@@ -1437,16 +1471,22 @@ export default function WorkstationDashboard() {
         if (preExistingLMD && foundBag) {
             const skynetCode = preExistingLMD.trackingNumber || barcode;
             const temuCode = preExistingLMD.senderReference;
-            const isTemu = preExistingLMD._scannedVia === 'TEMU';
+            const isDifferentBag = foundBag.bagNumber !== activeOutboundBag.bagNumber;
             const isSealed = foundBag.status === 'SEALED';
+            const isTemuSameBag = !isDifferentBag && !isSealed && Boolean(
+                preExistingLMD._scannedVia === 'TEMU' ||
+                preExistingLMD.isTemuScan ||
+                preExistingLMD.scannedMethod === 'TEMU' ||
+                (temuCode && (cleanBarcodeLMD === skynetCode.trim().toLowerCase() || cleanBarcodeLMD === temuCode.trim().toLowerCase()))
+            );
 
             const dupMsg = isSealed
-                ? `Already scanned — parcel (${skynetCode}) is ALREADY sealed in Bag "${foundBag.bagNumber}". Cannot assign to another bag.`
-                : foundBag.bagNumber !== activeOutboundBag.bagNumber
-                    ? `Already scanned — parcel (${skynetCode}) is ALREADY assigned to Bag "${foundBag.bagNumber}".`
-                    : isTemu
-                        ? `This parcel (${skynetCode}) was already added to Bag "${activeOutboundBag.bagNumber}" using its Temu Barcode "${temuCode}". Cannot scan Skynet barcode again.`
-                        : `Already scanned — this barcode is already assigned to Bag "${activeOutboundBag.bagNumber}".`;
+                ? `Already scanned!! Parcel (${skynetCode}) is ALREADY sealed in Bag "${foundBag.bagNumber}". Cannot assign to another bag.`
+                : isDifferentBag
+                    ? `Already scanned!! Parcel (${skynetCode}) is ALREADY assigned to Bag "${foundBag.bagNumber}".`
+                    : isTemuSameBag
+                        ? `Already scanned via Temu Barcode (${temuCode}) in Bag "${foundBag.bagNumber}".`
+                        : `Already scanned!! This barcode is already assigned to Bag "${activeOutboundBag.bagNumber}".`;
 
             setStatus('ERROR');
             setErrorMessage(dupMsg);
@@ -1460,7 +1500,9 @@ export default function WorkstationDashboard() {
                 barcode,
                 skynetTrackingNumber: skynetCode,
                 senderReference: temuCode,
-                originalMethod: isTemu ? `Temu Barcode (${temuCode})` : `Skynet Barcode (${skynetCode})`,
+                originalMethod: isTemuSameBag ? `Temu Barcode (${temuCode})` : `Skynet Barcode (${skynetCode})`,
+                isTemuScanDuplicate: isTemuSameBag,
+                bagNumber: foundBag.bagNumber,
                 message: dupMsg,
                 type: 'allocate'
             });
@@ -1530,30 +1572,43 @@ export default function WorkstationDashboard() {
                 }
 
             } else {
-                // Validation: INCORRECT — show popup, do NOT update Parcel Validation Result
+                // Validation: INCORRECT — categorize error for exact modal window
                 setStatus('ERROR');
                 const errMsg = data.error || `Parcel validation failed for "${barcode}".`;
                 setErrorMessage(errMsg);
 
-                // Show popup modal with error — Parcel Validation Result stays unchanged
-                setDuplicateModal({
-                    barcode,
-                    skynetTrackingNumber: data.parcel?.trackingNumber || barcode,
-                    senderReference: data.parcel?.senderReference,
-                    originalMethod: `Scan`,
-                    message: errMsg,
-                    type: 'allocate'
-                });
+                const lowerErr = errMsg.toLowerCase();
+                const isCombined = barcode.length > 20 || barcode.toLowerCase().includes('e+') || (barcode.match(/\d/g) || []).length > 18 || lowerErr.includes('e+');
+                const isPartnerMismatch = lowerErr.includes('partner mismatch');
+                const isManifestMismatch = lowerErr.includes('manifest mismatch');
+                const isDuplicate = data.reason === 'DUPLICATE' || lowerErr.includes('already') || lowerErr.includes('duplicate');
+
+                if ((isPartnerMismatch || isManifestMismatch || isDuplicate) && !isCombined) {
+                    setDuplicateModal({
+                        barcode,
+                        skynetTrackingNumber: data.parcel?.trackingNumber || barcode,
+                        senderReference: data.parcel?.senderReference,
+                        originalMethod: `Scan`,
+                        message: errMsg,
+                        type: 'allocate'
+                    });
+                } else {
+                    setInvalidBarcodeModal({
+                        barcode,
+                        message: errMsg,
+                        isCombined
+                    });
+                }
             }
 
         } catch (err: any) {
             setErrorMessage(err.message || 'API connection failure');
             setStatus('ERROR');
-            setDuplicateModal({
+            const isCombined = barcode.length > 20 || barcode.toLowerCase().includes('e+');
+            setInvalidBarcodeModal({
                 barcode,
-                skynetTrackingNumber: barcode,
                 message: err.message || 'API connection failure',
-                type: 'allocate'
+                isCombined
             });
         }
     };
@@ -3225,30 +3280,45 @@ export default function WorkstationDashboard() {
                                                     <div style={{ borderLeft: '1px solid #e5e7eb', paddingLeft: '16px', display: 'flex', gap: '16px' }}>
                                                         <div>
                                                             <div style={{ fontSize: '10px', color: '#6b7280', textTransform: 'uppercase' }}>Parcels Inside</div>
-                                                            <div style={{ fontSize: '14px', fontWeight: '800', color: '#047857' }}>{activeOutboundBag.parcelCount || 0} Pcs</div>
+                                                            <div style={{ fontSize: '14px', fontWeight: '800', color: '#0b0c0cff' }}>{activeOutboundBag.parcelCount || 0} Pcs</div>
                                                         </div>
                                                         <div>
                                                             <div style={{ fontSize: '10px', color: '#6b7280', textTransform: 'uppercase' }}>Total Weight</div>
                                                             <div style={{ fontSize: '14px', fontWeight: '800', color: '#111827' }}>{activeOutboundBag.totalWeight || '0.00'} kg</div>
                                                         </div>
-                                                        <div>
-                                                            <div style={{ fontSize: '10px', color: '#6b7280', textTransform: 'uppercase' }}>Status</div>
-                                                            <span style={{
-                                                                backgroundColor: activeOutboundBag.status === 'SEALED' ? '#dc2626' : '#ecfdf5',
-                                                                color: activeOutboundBag.status === 'SEALED' ? '#ffffff' : '#047857',
-                                                                fontSize: '10px',
-                                                                fontWeight: '800',
-                                                                padding: '2px 8px',
-                                                                borderRadius: '4px'
-                                                            }}>
-                                                                {activeOutboundBag.status || 'OPEN'}
-                                                            </span>
-                                                        </div>
                                                     </div>
                                                 </div>
 
-                                                {/* Right: Seal & Close Bag Now button */}
-                                                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                                {/* Right: Status badge & Seal & Close Bag Now button */}
+                                                <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                                                    <div style={{
+                                                        backgroundColor: '#ffffff',
+                                                        border: '1px solid #d1d5db',
+                                                        color: '#374151',
+                                                        borderRadius: '8px',
+                                                        padding: '0 14px',
+                                                        height: '38px',
+                                                        boxSizing: 'border-box',
+                                                        fontSize: '12px',
+                                                        fontWeight: '600',
+                                                        display: 'inline-flex',
+                                                        alignItems: 'center',
+                                                        gap: '6px'
+                                                    }}>
+                                                        <span>Status:</span>
+                                                        <span style={{
+                                                            backgroundColor: activeOutboundBag.status === 'SEALED' ? '#fee2e2' : '#f3f4f6',
+                                                            color: activeOutboundBag.status === 'SEALED' ? '#dc2626' : '#374151',
+                                                            border: activeOutboundBag.status === 'SEALED' ? '1px solid #fca5a5' : '1px solid #e5e7eb',
+                                                            padding: '2px 8px',
+                                                            borderRadius: '4px',
+                                                            fontWeight: '700',
+                                                            fontSize: '11px'
+                                                        }}>
+                                                            {activeOutboundBag.status || 'OPEN'}
+                                                        </span>
+                                                    </div>
+
                                                     {activeOutboundBag.status === 'OPEN' ? (
                                                         <button
                                                             onClick={() => {
@@ -3264,7 +3334,12 @@ export default function WorkstationDashboard() {
                                                                 border: '1px solid #d1d5db',
                                                                 color: '#374151',
                                                                 borderRadius: '8px',
-                                                                padding: '10px 14px',
+                                                                padding: '0 14px',
+                                                                height: '38px',
+                                                                boxSizing: 'border-box',
+                                                                display: 'inline-flex',
+                                                                alignItems: 'center',
+                                                                justifyContent: 'center',
                                                                 fontSize: '12px',
                                                                 fontWeight: '600',
                                                                 cursor: activeOutboundBag.parcelCount === 0 ? 'not-allowed' : 'pointer',
@@ -3281,7 +3356,12 @@ export default function WorkstationDashboard() {
                                                                 border: '1px solid #d1d5db',
                                                                 color: '#374151',
                                                                 borderRadius: '8px',
-                                                                padding: '10px 14px',
+                                                                padding: '0 14px',
+                                                                height: '38px',
+                                                                boxSizing: 'border-box',
+                                                                display: 'inline-flex',
+                                                                alignItems: 'center',
+                                                                justifyContent: 'center',
                                                                 fontSize: '12px',
                                                                 fontWeight: '600',
                                                                 cursor: 'pointer'
@@ -3307,7 +3387,7 @@ export default function WorkstationDashboard() {
                                         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
                                             <div style={label}>Parcel Barcode Input</div>
                                             {activeOutboundBag && (
-                                                <span style={{ fontSize: '11px', fontWeight: '800', color: activeOutboundBag.status === 'SEALED' ? '#dc2626' : '#047857' }}>
+                                                <span style={{ fontSize: '11px', fontWeight: '800', color: activeOutboundBag.status === 'SEALED' ? '#dc2626' : '#151817ff' }}>
                                                     Allocating to: <strong>{activeOutboundBag.bagNumber}</strong> ({activeOutboundBag.targetPartner || 'ALL'})
                                                 </span>
                                             )}
@@ -3317,7 +3397,28 @@ export default function WorkstationDashboard() {
                                                 ref={scanInputRef}
                                                 type="text"
                                                 value={barcodeInput}
-                                                onChange={(e) => setBarcodeInput(e.target.value)}
+                                                onKeyDown={(e) => {
+                                                    if (lastScanned && e.key !== 'Enter' && e.key !== 'Tab') {
+                                                        const currentVal = e.currentTarget.value.trim();
+                                                        if (currentVal === lastScanned.trim() || currentVal.startsWith(lastScanned.trim())) {
+                                                            setBarcodeInput('');
+                                                            setLastScanned('');
+                                                            e.currentTarget.value = '';
+                                                        }
+                                                    }
+                                                }}
+                                                onChange={(e) => {
+                                                    const val = e.target.value;
+                                                    if (lastScanned && val.startsWith(lastScanned) && val.length > lastScanned.length) {
+                                                        setBarcodeInput(val.slice(lastScanned.length));
+                                                        setLastScanned('');
+                                                    } else if (lastScanned && val !== lastScanned) {
+                                                        setBarcodeInput(val);
+                                                        setLastScanned('');
+                                                    } else {
+                                                        setBarcodeInput(val);
+                                                    }
+                                                }}
                                                 onFocus={(e) => e.target.select()}
                                                 disabled={!activeOutboundBag || activeOutboundBag.status === 'SEALED'}
                                                 placeholder={
@@ -3402,7 +3503,7 @@ export default function WorkstationDashboard() {
                                                         )}
                                                     </div>
 
-                                                    {/* Zone Pill Badge */}
+                                                    {/* Zone Pill Badge
                                                     <div style={{
                                                         display: 'inline-flex',
                                                         alignItems: 'center',
@@ -3415,19 +3516,34 @@ export default function WorkstationDashboard() {
                                                         color: validationCard.assignedPartner === 'Domex' || validationCard.assignedPartner === 'Pronto' ? '#ffffff' : '#000000'
                                                     }}>
                                                         Zone: <span style={{ fontWeight: '800', marginLeft: '4px' }}>{validationCard.assignedZone || 'Default-Zone'}</span>
-                                                    </div>
-                                                </div>
+                                                    </div> */}
 
-                                                {/* Green success footer */}
-                                                <div style={{
-                                                    padding: '10px 18px',
-                                                    textAlign: 'center',
-                                                    fontSize: '13px',
-                                                    fontWeight: '800',
-                                                    color: '#059669',
-                                                    backgroundColor: '#ecfdf5'
-                                                }}>
-                                                    ✓ CORRECT — Assigned to Bag {validationCard.bagNumber}
+                                                    {/* Validation Result Badge */}
+                                                    <div style={{
+                                                        display: 'inline-flex',
+                                                        alignItems: 'center',
+                                                        justifyContent: 'center',
+                                                        gap: '6px',
+                                                        // backgroundColor: validationCard.assignedPartner === 'Domex' || validationCard.assignedPartner === 'Pronto'
+                                                        //     ? 'rgba(255, 255, 255, 0.15)'
+                                                        //     : 'rgba(0, 0, 0, 0.06)',
+                                                        // border: validationCard.assignedPartner === 'Domex' || validationCard.assignedPartner === 'Pronto'
+                                                        //     ? '1px solid rgba(255, 255, 255, 0.3)'
+                                                        //     : '1px solid rgba(0, 0, 0, 0.2)',
+                                                        // borderRadius: '20px',
+                                                        // padding: '7px 20px',
+                                                        fontSize: '10px',
+                                                        fontWeight: '800',
+                                                        color: validationCard.assignedPartner === 'Domex' || validationCard.assignedPartner === 'Pronto' ? '#ffffff' : '#000000',
+                                                        textAlign: 'center'
+                                                    }}>
+                                                        <span style={{
+                                                            color: validationCard.assignedPartner === 'Domex' || validationCard.assignedPartner === 'Pronto'
+                                                                ? '#222523ff'
+                                                                : '#121414ff'
+                                                        }}></span>
+                                                        <span>✓ CORRECT Assigned to Bag <strong>{validationCard.bagNumber}</strong></span>
+                                                    </div>
                                                 </div>
                                             </div>
                                         ) : (
@@ -3468,10 +3584,38 @@ export default function WorkstationDashboard() {
                                     <tbody>
                                         {activeOutboundBag?.parcels?.map((parcel: any, idx: number) => {
                                             const isLatest = idx === 0;
+                                            const partner = parcel.assignedPartner || activeOutboundBag?.targetPartner || 'ALL';
+                                            const partnerBorderColor = partner === 'Domex'
+                                                ? '#7b0f1a'
+                                                : partner === 'Pronto'
+                                                    ? '#ea580c'
+                                                    : partner === 'PickMe'
+                                                        ? '#eab308'
+                                                        : '#3b82f6';
+
                                             return (
-                                                <tr key={idx} style={{ borderBottom: '1px solid #f3f4f6', backgroundColor: isLatest ? '#ecfdf5' : 'transparent' }}>
+                                                <tr
+                                                    key={idx}
+                                                    style={{
+                                                        borderBottom: '1px solid #f3f4f6',
+                                                        backgroundColor: '#ffffff',
+                                                        outline: isLatest ? `2px solid ${partnerBorderColor}` : 'none',
+                                                        outlineOffset: '-2px'
+                                                    }}
+                                                >
                                                     <td style={{ padding: '10px 8px' }}>
-                                                        <span style={{ backgroundColor: '#10b981', color: '#ffffff', padding: '2px 6px', borderRadius: '4px', fontSize: '10px', fontWeight: 'bold' }}>
+                                                        <span style={{
+                                                            backgroundColor: '#f3f4f6',
+                                                            border: '1px solid #e5e7eb',
+                                                            color: '#374151',
+                                                            padding: '3px 8px',
+                                                            borderRadius: '4px',
+                                                            fontSize: '11px',
+                                                            fontWeight: '700',
+                                                            display: 'inline-flex',
+                                                            alignItems: 'center',
+                                                            gap: '4px'
+                                                        }}>
                                                             ✓ Correct
                                                         </span>
                                                     </td>
@@ -3479,17 +3623,17 @@ export default function WorkstationDashboard() {
                                                     <td style={{ padding: '10px 8px', color: '#374151' }}>{parcel.recipientName}</td>
                                                     <td style={{ padding: '10px 8px' }}>
                                                         <span style={{
-                                                            backgroundColor: activeOutboundBag.targetPartner === 'PickMe' ? '#ffcc00' : '#7b0f1a',
-                                                            color: activeOutboundBag.targetPartner === 'PickMe' ? '#000000' : '#ffffff',
+                                                            backgroundColor: partner === 'PickMe' ? '#ffcc00' : partner === 'Pronto' ? '#ea580c' : partner === 'Domex' ? '#7b0f1a' : '#4b5563',
+                                                            color: partner === 'PickMe' ? '#000000' : '#ffffff',
                                                             padding: '2px 6px',
                                                             borderRadius: '4px',
                                                             fontWeight: '800',
                                                             fontSize: '10px'
                                                         }}>
-                                                            {activeOutboundBag.targetPartner || 'ALL'}
+                                                            {partner}
                                                         </span>
                                                     </td>
-                                                    <td style={{ padding: '10px 8px', color: '#374151' }}>{parcel.province || 'Zone'}</td>
+                                                    <td style={{ padding: '10px 8px', color: '#374151' }}>{parcel.province || parcel.assignedZone || 'Zone'}</td>
                                                     <td style={{ padding: '10px 8px', fontWeight: '600' }}>{parcel.weight || '0.1'} kg</td>
                                                     <td style={{ padding: '10px 8px', color: '#6b7280' }}>{parcel.city}</td>
                                                 </tr>
@@ -4356,8 +4500,6 @@ export default function WorkstationDashboard() {
             {duplicateModal && (() => {
                 const isPartnerMismatch = duplicateModal.message?.toLowerCase().includes('partner mismatch');
                 const isManifestMismatch = duplicateModal.message?.toLowerCase().includes('manifest mismatch');
-                const isMismatch = isPartnerMismatch || isManifestMismatch;
-                const isTemuDuplicate = (duplicateModal.originalMethod?.toLowerCase().includes('temu') || duplicateModal.message?.toLowerCase().includes('temu barcode')) && !isMismatch;
 
                 const titleText = isPartnerMismatch
                     ? 'Courier Partner Mismatch'
@@ -4366,10 +4508,10 @@ export default function WorkstationDashboard() {
                         : 'Duplicate Scan Detected';
 
                 const warningText = isPartnerMismatch
-                    ? '⚠️ Courier Partner Mismatch'
+                    ? 'Courier Partner Mismatch'
                     : isManifestMismatch
-                        ? '⚠️ Manifest Mismatch'
-                        : '⚠️ Duplicate Scan Warning';
+                        ? 'Manifest Mismatch'
+                        : 'Duplicate Scan Warning';
 
                 return (
                     <div style={{
@@ -4415,24 +4557,15 @@ export default function WorkstationDashboard() {
                             {/* Content Message */}
                             {duplicateModal.message ? (
                                 <div style={{ fontSize: '13px', color: '#374151', lineHeight: '1.5', margin: '0 0 20px 0', textAlign: 'left', backgroundColor: '#fef2f2', border: '1px solid #fca5a5', borderRadius: '8px', padding: '14px 16px' }}>
-                                    <div style={{ fontWeight: '800', color: '#dc2626', marginBottom: isMismatch ? '4px' : '8px', fontSize: '14px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                                    <div style={{ fontWeight: '800', color: '#dc2626', marginBottom: '6px', fontSize: '14px', display: 'flex', alignItems: 'center', gap: '6px' }}>
                                         <span>{warningText}</span>
                                     </div>
-                                    <div style={{ fontSize: '13px', color: '#111827', fontWeight: '600', marginBottom: (!isMismatch && isTemuDuplicate) ? '10px' : '0', lineHeight: '1.4' }}>
+                                    <div style={{ fontSize: '13px', color: '#111827', fontWeight: '600', lineHeight: '1.4' }}>
                                         {duplicateModal.message}
                                     </div>
-                                    {!isMismatch && isTemuDuplicate && (
-                                        <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', borderTop: '1px solid #fca5a5', paddingTop: '8px', marginTop: '8px' }}>
-                                            {duplicateModal.senderReference && (
-                                                <div style={{ fontSize: '12px', color: '#374151' }}>
-                                                    • <strong>Temu Barcode:</strong> <span style={{ fontWeight: '700', color: '#dc2626' }}>{duplicateModal.senderReference}</span>
-                                                </div>
-                                            )}
-                                            {duplicateModal.originalMethod && (
-                                                <div style={{ fontSize: '12px', marginTop: '4px', fontWeight: '700', color: '#991b1b', backgroundColor: '#fee2e2', padding: '4px 8px', borderRadius: '4px' }}>
-                                                    Already Scanned Via: {duplicateModal.originalMethod}
-                                                </div>
-                                            )}
+                                    {duplicateModal.isTemuScanDuplicate && duplicateModal.senderReference && (
+                                        <div style={{ fontSize: '12px', color: '#991b1b', marginTop: '8px', paddingTop: '6px', borderTop: '1px solid #fca5a5' }}>
+                                            • <strong>Scanned via Temu Barcode:</strong> {duplicateModal.senderReference}
                                         </div>
                                     )}
                                 </div>
@@ -4455,7 +4588,7 @@ export default function WorkstationDashboard() {
                                     }, 50);
                                 }}
                                 style={{
-                                    backgroundColor: '#e21b22', // Red button background instead of black
+                                    backgroundColor: '#e21b22',
                                     color: '#ffffff',
                                     border: 'none',
                                     borderRadius: '8px',
@@ -4467,10 +4600,121 @@ export default function WorkstationDashboard() {
                                     transition: 'all 0.15s ease',
                                     boxShadow: '0 2px 4px rgba(0, 0, 0, 0.1)'
                                 }}
-                                onMouseOver={(e) => { e.currentTarget.style.backgroundColor = '#b91c1c'; }} // Darker red on hover
+                                onMouseOver={(e) => { e.currentTarget.style.backgroundColor = '#b91c1c'; }}
                                 onMouseOut={(e) => { e.currentTarget.style.backgroundColor = '#e21b22'; }}
                             >
                                 Acknowledge (Press Enter)
+                            </button>
+                        </div>
+                    </div>
+                );
+            })()}
+
+            {/* ── INVALID / COMBINED BARCODE ERROR MODAL ── */}
+            {invalidBarcodeModal && (() => {
+                const isCombined = invalidBarcodeModal.isCombined;
+                const isNotFound = invalidBarcodeModal.message?.toLowerCase().includes('not found') || invalidBarcodeModal.message?.toLowerCase().includes('database');
+
+                const titleText = isCombined
+                    ? 'Multiple Barcodes Combined'
+                    : isNotFound
+                        ? 'Parcel Not Found'
+                        : 'Barcode Scan Error';
+
+                const warningText = isCombined
+                    ? '⚠ Barcode Entry Mixed'
+                    : isNotFound
+                        ? '⚠ Shipment Not in Database'
+                        : '⚠ Scan Verification Error';
+
+                return (
+                    <div style={{
+                        position: 'fixed',
+                        top: 0, left: 0, right: 0, bottom: 0,
+                        backgroundColor: 'rgba(0, 0, 0, 0.6)',
+                        backdropFilter: 'blur(3px)',
+                        display: 'flex', alignItems: 'center', justifyContent: 'center',
+                        zIndex: 3000,
+                        animation: 'fadeIn 0.2s ease-out'
+                    }}>
+                        <div style={{
+                            backgroundColor: '#ffffff',
+                            border: '2px solid #e21b22',
+                            borderRadius: '12px',
+                            padding: '30px 24px',
+                            width: '450px',
+                            maxWidth: '90%',
+                            boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.15), 0 10px 10px -5px rgba(0, 0, 0, 0.04)',
+                            textAlign: 'center'
+                        }}>
+                            {/* Warning Icon */}
+                            <div style={{
+                                backgroundColor: '#fee2e2',
+                                color: '#e21b22',
+                                width: '56px', height: '56px',
+                                borderRadius: '50%',
+                                display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                                marginBottom: '20px'
+                            }}>
+                                <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                                    <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
+                                    <line x1="12" y1="9" x2="12" y2="13" />
+                                    <line x1="12" y1="17" x2="12.01" y2="17" />
+                                </svg>
+                            </div>
+
+                            {/* Title */}
+                            <h3 style={{ fontSize: '18px', fontWeight: '700', color: '#111827', margin: '0 0 10px 0' }}>
+                                {titleText}
+                            </h3>
+
+                            {/* Content Message */}
+                            <div style={{ fontSize: '13px', color: '#374151', lineHeight: '1.5', margin: '0 0 20px 0', textAlign: 'left', backgroundColor: '#fef2f2', border: '1px solid #fca5a5', borderRadius: '8px', padding: '14px 16px' }}>
+                                <div style={{ fontWeight: '800', color: '#dc2626', marginBottom: '6px', fontSize: '14px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                                    <span>{warningText}</span>
+                                </div>
+                                <div style={{ fontSize: '13px', color: '#111827', fontWeight: '600', lineHeight: '1.4' }}>
+                                    {isCombined
+                                        ? `Multiple barcodes were detected in a single scan ("${invalidBarcodeModal.barcode}"). The previous barcode entry was not cleared before scanning the next item.`
+                                        : invalidBarcodeModal.message}
+                                </div>
+                                {isCombined && (
+                                    <div style={{ fontSize: '12px', color: '#991b1b', marginTop: '8px', paddingTop: '6px', borderTop: '1px solid #fca5a5', fontWeight: '600' }}>
+                                        ℹ️ Please scan the single parcel barcode again cleanly.
+                                    </div>
+                                )}
+                            </div>
+
+                            {/* Dismiss Action Button */}
+                            <button
+                                onClick={() => {
+                                    setInvalidBarcodeModal(null);
+                                    setBarcodeInput('');
+                                    setLastScanned('');
+                                    if (scanInputRef.current) scanInputRef.current.value = '';
+                                    setTimeout(() => {
+                                        if (activeTab === 'first-scan') firstScanInputRef.current?.focus();
+                                        else if (activeTab === 'second-scan') scanInputRef.current?.focus();
+                                        else if (activeTab === 'verify') verifyInputRef.current?.focus();
+                                    }, 50);
+                                }}
+                                style={{
+                                    backgroundColor: '#e21b22',
+                                    color: '#ffffff',
+                                    border: 'none',
+                                    borderRadius: '8px',
+                                    padding: '12px 24px',
+                                    fontSize: '14px',
+                                    fontWeight: '600',
+                                    width: '100%',
+                                    cursor: 'pointer',
+                                    transition: 'all 0.15s ease',
+                                    boxShadow: '0 2px 4px rgba(0, 0, 0, 0.1)'
+                                }}
+                                onMouseOver={(e) => { e.currentTarget.style.backgroundColor = '#b91c1c'; }}
+                                onMouseOut={(e) => { e.currentTarget.style.backgroundColor = '#e21b22'; }}
+                            >
+                                Acknowledge & Rescan (Press Enter)
                             </button>
                         </div>
                     </div>
@@ -5842,8 +6086,8 @@ export default function WorkstationDashboard() {
                                     <span style={{ backgroundColor: '#111827', color: '#ffffff', fontSize: '9px', fontWeight: '800', padding: '2px 6px', borderRadius: '3px', textTransform: 'uppercase' }}>
                                         OUTBOUND LMD BAG
                                     </span>
-                                    <div style={{ fontSize: '11px', fontWeight: '800', color: '#e21b22', marginTop: '2px' }}>
-                                        {printOutboundBagLabelModal.targetPartner || 'ALL PARTNERS'}
+                                    <div style={{ fontSize: '11px', fontWeight: '800', color: '#e21b22', marginTop: '2px', textTransform: 'uppercase' }}>
+                                        {resolvePartnerName(printOutboundBagLabelModal)}
                                     </div>
                                 </div>
                             </div>
@@ -5872,14 +6116,27 @@ export default function WorkstationDashboard() {
                                 </div>
                                 <div>
                                     <span style={{ color: '#6b7280', fontSize: '9px', textTransform: 'uppercase', display: 'block' }}>DESTINATION HUB</span>
-                                    <strong style={{ fontSize: '11px', color: '#e21b22' }}>{printOutboundBagLabelModal.destinationHub || 'Main Sort Hub'}</strong>
+                                    <strong style={{ fontSize: '11px', color: '#e21b22', fontWeight: '800' }}>
+                                        {(() => {
+                                            const resolvedPartner = resolvePartnerName(printOutboundBagLabelModal);
+                                            const hub = printOutboundBagLabelModal.destinationHub;
+                                            if (hub && hub !== 'Main Sort Hub' && !hub.toLowerCase().includes('main sort')) {
+                                                return hub;
+                                            }
+                                            return resolvedPartner !== 'ALL PARTNERS' ? `${resolvedPartner} Hub` : 'Main Sort Hub';
+                                        })()}
+                                    </strong>
                                 </div>
                             </div>
 
                             {/* Footer Status */}
                             <div style={{ borderTop: '1px solid #000000', paddingTop: '6px', fontSize: '9px', display: 'flex', justifyContent: 'space-between', color: '#4b5563' }}>
                                 <span>SEALED: {new Date(printOutboundBagLabelModal.sealedAt || Date.now()).toLocaleTimeString()}</span>
-                                <span>OPERATOR: {printOutboundBagLabelModal.operator || 'Staff'}</span>
+                                <span>OPERATOR: {
+                                    (currentUser ? `${currentUser.firstName || ''} ${currentUser.lastName || ''}`.trim() || currentUser.username : '') ||
+                                    printOutboundBagLabelModal.operator ||
+                                    'Staff'
+                                }</span>
                             </div>
                         </div>
 

@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 
-// In-memory store for outbound LMD dispatch bags (synchronized across multi-device sessions)
+// In-memory cache for outbound LMD dispatch bags (for instant response & backup)
 interface OutboundBag {
     bagNumber: string;
     mawbRef: string;
@@ -11,6 +11,7 @@ interface OutboundBag {
     totalWeight: number;
     createdAt: string;
     sealedAt?: string;
+    sealedBy?: string;
     operator?: string;
     parcels: any[];
 }
@@ -19,17 +20,73 @@ interface ManifestSession {
     mawbRef: string;
     status: 'OPEN' | 'CLOSED';
     closedAt?: string;
+    closedBy?: string;
 }
 
 const outboundBagsMap = new Map<string, OutboundBag>();
 const manifestsMap = new Map<string, ManifestSession>();
+
+const getSupabaseConfig = () => {
+    const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+    const key = process.env.NEXT_PUBLIC_SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+    if (!url || !key) return null;
+    return {
+        url,
+        headers: {
+            "apikey": key,
+            "Authorization": `Bearer ${key}`,
+            "Content-Type": "application/json",
+            "Prefer": "return=representation"
+        }
+    };
+};
 
 export async function GET(request: Request) {
     const { searchParams } = new URL(request.url);
     const mawbRef = searchParams.get('mawbRef');
     const bagNumber = searchParams.get('bagNumber');
 
+    const sb = getSupabaseConfig();
+
     if (bagNumber) {
+        // Try fetching specific bag from Supabase
+        if (sb) {
+            try {
+                const bagRes = await fetch(`${sb.url}/rest/v1/outbound_lmd_bags?bag_number=eq.${encodeURIComponent(bagNumber)}`, { headers: sb.headers });
+                const bagsData = await bagRes.json();
+                if (Array.isArray(bagsData) && bagsData.length > 0) {
+                    const row = bagsData[0];
+                    // Fetch items
+                    const itemsRes = await fetch(`${sb.url}/rest/v1/outbound_lmd_bag_items?bag_number=eq.${encodeURIComponent(bagNumber)}`, { headers: sb.headers });
+                    const itemsData = await itemsRes.json();
+                    const parcels = Array.isArray(itemsData) ? itemsData.map((it: any) => ({
+                        trackingNumber: it.shipment_ref,
+                        weight: it.weight || 0.1,
+                        scannedBy: it.scanned_by
+                    })) : [];
+
+                    const bag: OutboundBag = {
+                        bagNumber: row.bag_number,
+                        mawbRef: row.mawb_ref,
+                        targetPartner: row.target_partner || 'ALL',
+                        destinationHub: row.destination_hub,
+                        status: row.status as 'OPEN' | 'SEALED',
+                        parcelCount: row.parcel_count || parcels.length,
+                        totalWeight: row.total_weight || 0,
+                        createdAt: row.created_at,
+                        sealedAt: row.sealed_at,
+                        sealedBy: row.sealed_by,
+                        operator: row.created_by || 'Staff',
+                        parcels
+                    };
+                    outboundBagsMap.set(bagNumber, bag);
+                    return NextResponse.json({ success: true, bag });
+                }
+            } catch (e) {
+                console.error("Supabase GET bag error:", e);
+            }
+        }
+
         const bag = outboundBagsMap.get(bagNumber);
         if (!bag) {
             return NextResponse.json({ success: false, error: `Bag "${bagNumber}" not found.` }, { status: 404 });
@@ -38,6 +95,70 @@ export async function GET(request: Request) {
     }
 
     if (mawbRef) {
+        if (sb) {
+            try {
+                // Fetch bags for this MAWB from Supabase DB
+                const bagsRes = await fetch(`${sb.url}/rest/v1/outbound_lmd_bags?mawb_ref=eq.${encodeURIComponent(mawbRef)}&order=created_at.desc`, { headers: sb.headers });
+                const bagsData = await bagsRes.json();
+
+                // Fetch manifest session from DB
+                const manifestRes = await fetch(`${sb.url}/rest/v1/manifest_sessions?mawb_ref=eq.${encodeURIComponent(mawbRef)}`, { headers: sb.headers });
+                const manifestData = await manifestRes.json();
+                const manifestStatus = Array.isArray(manifestData) && manifestData.length > 0 ? manifestData[0].status : 'OPEN';
+
+                if (Array.isArray(bagsData) && bagsData.length > 0) {
+                    const bagNumbers = bagsData.map((b: any) => b.bag_number);
+                    // Fetch items for all these bags
+                    const inQuery = bagNumbers.map((bn: string) => `"${bn}"`).join(',');
+                    const itemsRes = await fetch(`${sb.url}/rest/v1/outbound_lmd_bag_items?bag_number=in.(${inQuery})`, { headers: sb.headers });
+                    const itemsData = await itemsRes.json();
+
+                    const itemsMap = new Map<string, any[]>();
+                    if (Array.isArray(itemsData)) {
+                        for (const it of itemsData) {
+                            if (!itemsMap.has(it.bag_number)) itemsMap.set(it.bag_number, []);
+                            itemsMap.get(it.bag_number)?.push({
+                                trackingNumber: it.shipment_ref,
+                                weight: it.weight || 0.1,
+                                scannedBy: it.scanned_by
+                            });
+                        }
+                    }
+
+                    const dbBags: OutboundBag[] = bagsData.map((row: any) => {
+                        const parcels = itemsMap.get(row.bag_number) || [];
+                        const b: OutboundBag = {
+                            bagNumber: row.bag_number,
+                            mawbRef: row.mawb_ref,
+                            targetPartner: row.target_partner || 'ALL',
+                            destinationHub: row.destination_hub,
+                            status: row.status as 'OPEN' | 'SEALED',
+                            parcelCount: row.parcel_count || parcels.length,
+                            totalWeight: row.total_weight || 0,
+                            createdAt: row.created_at,
+                            sealedAt: row.sealed_at,
+                            sealedBy: row.sealed_by,
+                            operator: row.created_by || 'Staff',
+                            parcels
+                        };
+                        outboundBagsMap.set(b.bagNumber, b);
+                        return b;
+                    });
+
+                    manifestsMap.set(mawbRef, { mawbRef, status: manifestStatus });
+
+                    return NextResponse.json({
+                        success: true,
+                        mawbRef,
+                        manifestStatus,
+                        bags: dbBags
+                    });
+                }
+            } catch (e) {
+                console.error("Supabase GET mawbRef bags error:", e);
+            }
+        }
+
         const bags = Array.from(outboundBagsMap.values()).filter(b => b.mawbRef.toLowerCase() === mawbRef.toLowerCase());
         const manifestSession = manifestsMap.get(mawbRef) || { mawbRef, status: 'OPEN' };
         return NextResponse.json({
@@ -64,6 +185,8 @@ export async function POST(request: Request) {
             return NextResponse.json({ success: false, error: 'Missing mawbRef parameter' }, { status: 400 });
         }
 
+        const sb = getSupabaseConfig();
+
         // Check if manifest is closed
         const manifestSession = manifestsMap.get(mawbRef);
         if (manifestSession && manifestSession.status === 'CLOSED' && action === 'create') {
@@ -75,7 +198,6 @@ export async function POST(request: Request) {
 
         // ACTION: CREATE NEW LMD OUTBOUND BAG
         if (action === 'create') {
-            // Find existing bags for this MAWB to calculate next index number
             const existingBags = Array.from(outboundBagsMap.values()).filter(b => b.mawbRef.toLowerCase() === mawbRef.toLowerCase());
             const nextIndex = existingBags.length + 1;
             const formattedIndex = String(nextIndex).padStart(2, '0');
@@ -87,7 +209,7 @@ export async function POST(request: Request) {
                 bagNumber: newBagNumber,
                 mawbRef,
                 targetPartner: partner || 'ALL',
-                destinationHub: destinationHub || (partner ? `${partner} Hub` : 'Main Sort Hub'),
+                destinationHub: destinationHub || (partner && partner !== 'ALL' ? `${partner} Central Hub` : 'Main Sort Hub'),
                 status: 'OPEN',
                 parcelCount: 0,
                 totalWeight: 0,
@@ -99,6 +221,37 @@ export async function POST(request: Request) {
             outboundBagsMap.set(newBagNumber, newBag);
             if (!manifestsMap.has(mawbRef)) {
                 manifestsMap.set(mawbRef, { mawbRef, status: 'OPEN' });
+            }
+
+            // Persist to Supabase Postgres DB
+            if (sb) {
+                try {
+                    await fetch(`${sb.url}/rest/v1/outbound_lmd_bags`, {
+                        method: 'POST',
+                        headers: sb.headers,
+                        body: JSON.stringify({
+                            mawb_ref: mawbRef,
+                            bag_number: newBagNumber,
+                            target_partner: partner || 'ALL',
+                            destination_hub: newBag.destinationHub,
+                            status: 'OPEN',
+                            parcel_count: 0,
+                            total_weight: 0,
+                            created_by: operator || 'Staff'
+                        })
+                    });
+
+                    await fetch(`${sb.url}/rest/v1/manifest_sessions`, {
+                        method: 'POST',
+                        headers: { ...sb.headers, "Prefer": "resolution=merge-duplicates" },
+                        body: JSON.stringify({
+                            mawb_ref: mawbRef,
+                            status: 'OPEN'
+                        })
+                    });
+                } catch (err) {
+                    console.error("Supabase insert outbound_lmd_bags error:", err);
+                }
             }
 
             return NextResponse.json({
@@ -113,9 +266,20 @@ export async function POST(request: Request) {
             if (!bagNumber) {
                 return NextResponse.json({ success: false, error: 'Missing bagNumber' }, { status: 400 });
             }
-            const bag = outboundBagsMap.get(bagNumber);
+            let bag = outboundBagsMap.get(bagNumber);
             if (!bag) {
-                return NextResponse.json({ success: false, error: `Bag "${bagNumber}" not found.` }, { status: 404 });
+                bag = {
+                    bagNumber: bagNumber,
+                    mawbRef: mawbRef,
+                    targetPartner: partner || body.targetPartner || 'ALL',
+                    destinationHub: destinationHub || 'Main Sort Hub',
+                    status: 'OPEN',
+                    parcelCount: 0,
+                    totalWeight: 0,
+                    createdAt: new Date().toISOString(),
+                    operator: operator || 'Staff',
+                    parcels: []
+                };
             }
 
             if (bag.status === 'SEALED') {
@@ -134,6 +298,39 @@ export async function POST(request: Request) {
             }
 
             outboundBagsMap.set(bagNumber, bag);
+
+            // Persist parcel addition to Supabase DB
+            if (sb) {
+                try {
+                    await fetch(`${sb.url}/rest/v1/outbound_lmd_bags?bag_number=eq.${encodeURIComponent(bagNumber)}`, {
+                        method: 'PATCH',
+                        headers: sb.headers,
+                        body: JSON.stringify({
+                            parcel_count: bag.parcelCount,
+                            total_weight: bag.totalWeight
+                        })
+                    });
+
+                    if (newParcel) {
+                        const tracking = newParcel.trackingNumber || newParcel.reference_number;
+                        if (tracking) {
+                            await fetch(`${sb.url}/rest/v1/outbound_lmd_bag_items`, {
+                                method: 'POST',
+                                headers: sb.headers,
+                                body: JSON.stringify({
+                                    bag_number: bagNumber,
+                                    shipment_ref: tracking,
+                                    weight: Number(newParcel.weight) || 0.1,
+                                    scanned_by: operator || 'Staff'
+                                })
+                            });
+                        }
+                    }
+                } catch (err) {
+                    console.error("Supabase add-parcel update error:", err);
+                }
+            }
+
             return NextResponse.json({ success: true, bag });
         }
 
@@ -142,18 +339,74 @@ export async function POST(request: Request) {
             if (!bagNumber) {
                 return NextResponse.json({ success: false, error: 'Missing bagNumber' }, { status: 400 });
             }
-            const bag = outboundBagsMap.get(bagNumber);
+            const sealedTimestamp = new Date().toISOString();
+            const sealingOperator = operator || 'Staff';
+
+            let bag = outboundBagsMap.get(bagNumber);
             if (!bag) {
-                return NextResponse.json({ success: false, error: `Bag "${bagNumber}" not found.` }, { status: 404 });
+                bag = {
+                    bagNumber: bagNumber,
+                    mawbRef: mawbRef,
+                    targetPartner: partner || body.targetPartner || 'ALL',
+                    destinationHub: destinationHub || 'Main Sort Hub',
+                    status: 'SEALED',
+                    parcelCount: parcelCount || 0,
+                    totalWeight: totalWeight || 0,
+                    createdAt: sealedTimestamp,
+                    sealedAt: sealedTimestamp,
+                    sealedBy: sealingOperator,
+                    operator: sealingOperator,
+                    parcels: parcels || []
+                };
+            } else {
+                bag.status = 'SEALED';
+                bag.sealedAt = sealedTimestamp;
+                bag.sealedBy = sealingOperator;
+                if (parcelCount !== undefined) bag.parcelCount = parcelCount;
+                if (totalWeight !== undefined) bag.totalWeight = totalWeight;
+                if (parcels) bag.parcels = parcels;
             }
 
-            bag.status = 'SEALED';
-            bag.sealedAt = new Date().toISOString();
-            if (parcelCount !== undefined) bag.parcelCount = parcelCount;
-            if (totalWeight !== undefined) bag.totalWeight = totalWeight;
-            if (parcels) bag.parcels = parcels;
-
             outboundBagsMap.set(bagNumber, bag);
+
+            // Persist SEALED status and operator details to Supabase Postgres DB
+            if (sb) {
+                try {
+                    await fetch(`${sb.url}/rest/v1/outbound_lmd_bags?bag_number=eq.${encodeURIComponent(bagNumber)}`, {
+                        method: 'PATCH',
+                        headers: sb.headers,
+                        body: JSON.stringify({
+                            status: 'SEALED',
+                            sealed_at: sealedTimestamp,
+                            sealed_by: sealingOperator,
+                            parcel_count: bag.parcelCount,
+                            total_weight: bag.totalWeight
+                        })
+                    });
+
+                    // Save all parcels in bag items table
+                    if (bag.parcels && Array.isArray(bag.parcels)) {
+                        for (const item of bag.parcels) {
+                            const tracking = item.trackingNumber || item.reference_number;
+                            if (tracking) {
+                                await fetch(`${sb.url}/rest/v1/outbound_lmd_bag_items`, {
+                                    method: 'POST',
+                                    headers: { ...sb.headers, "Prefer": "resolution=merge-duplicates" },
+                                    body: JSON.stringify({
+                                        bag_number: bagNumber,
+                                        shipment_ref: tracking,
+                                        weight: Number(item.weight) || 0.1,
+                                        scanned_by: sealingOperator
+                                    })
+                                }).catch(e => console.error("Error inserting bag item:", e));
+                            }
+                        }
+                    }
+                } catch (err) {
+                    console.error("Supabase seal bag update error:", err);
+                }
+            }
+
             return NextResponse.json({
                 success: true,
                 message: `Outbound Bag "${bagNumber}" has been SEALED & CLOSED.`,
@@ -163,11 +416,32 @@ export async function POST(request: Request) {
 
         // ACTION: CLOSE MANIFEST
         if (action === 'close-manifest') {
+            const closedTimestamp = new Date().toISOString();
+            const closingOperator = operator || 'Staff';
+
             manifestsMap.set(mawbRef, {
                 mawbRef,
                 status: 'CLOSED',
-                closedAt: new Date().toISOString()
+                closedAt: closedTimestamp,
+                closedBy: closingOperator
             });
+
+            if (sb) {
+                try {
+                    await fetch(`${sb.url}/rest/v1/manifest_sessions`, {
+                        method: 'POST',
+                        headers: { ...sb.headers, "Prefer": "resolution=merge-duplicates" },
+                        body: JSON.stringify({
+                            mawb_ref: mawbRef,
+                            status: 'CLOSED',
+                            closed_at: closedTimestamp,
+                            closed_by: closingOperator
+                        })
+                    });
+                } catch (err) {
+                    console.error("Supabase close manifest error:", err);
+                }
+            }
 
             return NextResponse.json({
                 success: true,

@@ -152,6 +152,8 @@ CREATE TABLE public.district_city_mapping (
   area_code text,
   zipcode bigint,
   is_active boolean,
+  area_name_aliases text,
+  city_aliases text,
   CONSTRAINT district_city_mapping_pkey PRIMARY KEY (id),
   CONSTRAINT district_city_mapping_duplicate_zone_fkey FOREIGN KEY (zone) REFERENCES public.zones(id)
 );
@@ -180,6 +182,11 @@ CREATE TABLE public.mawb (
   fetched_at timestamp with time zone DEFAULT now(),
   acknowledged_at timestamp with time zone,
   notes text,
+  json_file_path text,
+  xml_file_path text,
+  log_file_path text,
+  has_zones_allocated boolean DEFAULT false,
+  has_service_providers_allocated boolean DEFAULT false,
   CONSTRAINT mawb_pkey PRIMARY KEY (mawb_reference)
 );
 CREATE TABLE public.service_provider_allocation (
@@ -291,6 +298,8 @@ CREATE TABLE public.mawb_duplicate (
   json_file_path text,
   xml_file_path text,
   log_file_path text,
+  has_zones_allocated boolean DEFAULT false,
+  has_service_providers_allocated boolean DEFAULT false,
   CONSTRAINT mawb_duplicate_pkey PRIMARY KEY (mawb_reference)
 );
 CREATE TABLE public.shipments_duplicate (
@@ -391,7 +400,6 @@ CREATE TABLE public.shipments_duplicate (
   CONSTRAINT shipments_duplicate_pkey PRIMARY KEY (reference_number),
   CONSTRAINT shipments_duplicate_mawb_reference_fkey FOREIGN KEY (mawb_reference) REFERENCES public.mawb_duplicate(mawb_reference)
 );
-
 CREATE TABLE public.outbound_lmd_bags (
   id bigint GENERATED ALWAYS AS IDENTITY NOT NULL,
   created_at timestamp with time zone NOT NULL DEFAULT now(),
@@ -399,15 +407,15 @@ CREATE TABLE public.outbound_lmd_bags (
   bag_number text NOT NULL UNIQUE,
   target_partner text,
   destination_hub text NOT NULL,
-  status text NOT NULL DEFAULT 'OPEN',
+  status text NOT NULL DEFAULT 'OPEN'::text,
   parcel_count integer NOT NULL DEFAULT 0,
   total_weight double precision NOT NULL DEFAULT 0,
   created_by text,
   sealed_at timestamp with time zone,
+  sealed_by text,
   CONSTRAINT outbound_lmd_bags_pkey PRIMARY KEY (id),
   CONSTRAINT outbound_lmd_bags_mawb_ref_fkey FOREIGN KEY (mawb_ref) REFERENCES public.mawb(mawb_reference)
 );
-
 CREATE TABLE public.outbound_lmd_bag_items (
   id bigint GENERATED ALWAYS AS IDENTITY NOT NULL,
   created_at timestamp with time zone NOT NULL DEFAULT now(),
@@ -416,13 +424,12 @@ CREATE TABLE public.outbound_lmd_bag_items (
   weight double precision,
   scanned_by text,
   CONSTRAINT outbound_lmd_bag_items_pkey PRIMARY KEY (id),
-  CONSTRAINT outbound_lmd_bag_items_bag_number_fkey FOREIGN KEY (bag_number) REFERENCES public.outbound_lmd_bags(bag_number) ON DELETE CASCADE,
+  CONSTRAINT outbound_lmd_bag_items_bag_number_fkey FOREIGN KEY (bag_number) REFERENCES public.outbound_lmd_bags(bag_number),
   CONSTRAINT outbound_lmd_bag_items_shipment_ref_fkey FOREIGN KEY (shipment_ref) REFERENCES public.shipments(reference_number)
 );
-
 CREATE TABLE public.manifest_sessions (
   mawb_ref text NOT NULL,
-  status text NOT NULL DEFAULT 'OPEN',
+  status text NOT NULL DEFAULT 'OPEN'::text,
   closed_at timestamp with time zone,
   closed_by text,
   CONSTRAINT manifest_sessions_pkey PRIMARY KEY (mawb_ref),
