@@ -61,7 +61,7 @@ export async function GET(request: Request) {
             fetchAllSupabaseRows('outbound_lmd_bags', 'id,bag_number,mawb_ref,target_partner,destination_hub,status,parcel_count,total_weight,created_by,sealed_by,created_at,sealed_at', sb),
             fetchAllSupabaseRows('manifest_sessions', 'id,manifest_id,mawb_ref,status,total_bags,total_parcels,closed_by,created_at,closed_at', sb),
             fetchAllSupabaseRows('damaged_barcodes', 'id,barcode,reason,reported_by,created_at', sb),
-            fetchAllSupabaseRows('bag_unsealing', 'id,bag_number,mawb_ref,status,unsealed_by,scanned_count,expected_count,created_at', sb),
+            fetchAllSupabaseRows('bag_unsealing', 'id,bag_number,mawb_ref,status,unsealed_by,scanned_count,expected_count,created_at,scanned_parcels', sb),
             fetchAllSupabaseRows('service_provider_allocation', 'id', sb),
             fetchAllSupabaseRows('service_providers', 'id,name,code', sb),
             fetchAllSupabaseRows('service_provider_allocation', 'shipment_ref,service_provider', sb)
@@ -222,7 +222,8 @@ export async function GET(request: Request) {
             expectedCount: u.expected_count || 0,
             unsealedBy: u.unsealed_by || 'Staff',
             status: u.status || 'Unsealed',
-            createdAt: u.created_at || ''
+            createdAt: u.created_at || '',
+            scannedParcels: u.scanned_parcels || []
         }));
 
         // 4. Exception Counts & Structured List

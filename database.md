@@ -214,6 +214,7 @@ CREATE TABLE public.bag_unsealing (
   discrepancy integer NOT NULL,
   status text NOT NULL,
   unsealed_by text,
+  scanned_parcels jsonb,
   CONSTRAINT bag_unsealing_pkey PRIMARY KEY (id),
   CONSTRAINT bag_unsealing_mawb_ref_fkey FOREIGN KEY (mawb_ref) REFERENCES public.mawb(mawb_reference)
 );

@@ -141,7 +141,8 @@ export async function GET(request: Request) {
                         scannedCount: u.scanned_count,
                         status: u.status,
                         unsealedBy: u.unsealed_by || u.operator || 'Staff',
-                        createdAt: u.created_at
+                        createdAt: u.created_at,
+                        scannedParcels: u.scanned_parcels || []
                     }));
                 }
             }

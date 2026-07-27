@@ -209,7 +209,9 @@ export default function WorkstationDashboard() {
         status?: string;
         discrepancy?: number;
         unsealedBy?: string;
+        scannedParcels?: any[];
     }>>([]);
+    const [viewingUnsealedParcelsModal, setViewingUnsealedParcelsModal] = useState<{ bagNumber: string; mawb: string; parcels: any[] } | null>(null);
 
     const [discrepancyReason, setDiscrepancyReason] = useState('');
     const [customDiscrepancyNote, setCustomDiscrepancyNote] = useState('');
@@ -497,7 +499,8 @@ export default function WorkstationDashboard() {
                         timestamp: new Date(ub.created_at).toLocaleTimeString(),
                         status: ub.status,
                         discrepancy: ub.discrepancy,
-                        unsealedBy: ub.unsealed_by
+                        unsealedBy: ub.unsealed_by,
+                        scannedParcels: ub.scanned_parcels || []
                     }));
                     setUnsealedBoxes(mapped);
                 }
@@ -628,7 +631,8 @@ export default function WorkstationDashboard() {
                     expectedCount: Number(firstScanExpected),
                     scannedCount: firstScanHistory.length,
                     status: finalStatus,
-                    operator: currentUser ? `${currentUser.firstName} ${currentUser.lastName}` : 'System'
+                    operator: currentUser ? `${currentUser.firstName} ${currentUser.lastName}` : 'System',
+                    scannedParcels: firstScanHistory
                 }),
             });
             const data = await response.json();
@@ -642,7 +646,8 @@ export default function WorkstationDashboard() {
                         timestamp: new Date().toLocaleTimeString(),
                         status: finalStatus,
                         discrepancy: firstScanHistory.length - Number(firstScanExpected),
-                        unsealedBy: currentUser ? `${currentUser.firstName} ${currentUser.lastName}` : 'System'
+                        unsealedBy: currentUser ? `${currentUser.firstName} ${currentUser.lastName}` : 'System',
+                        scannedParcels: firstScanHistory
                     },
                     ...prev
                 ]);
@@ -932,7 +937,8 @@ export default function WorkstationDashboard() {
                     expectedCount: expected,
                     scannedCount: history.length,
                     status: 'COUNTED',
-                    operator: currentUser ? `${currentUser.firstName} ${currentUser.lastName}` : 'System'
+                    operator: currentUser ? `${currentUser.firstName} ${currentUser.lastName}` : 'System',
+                    scannedParcels: history
                 }),
             });
             const data = await response.json();
@@ -946,7 +952,8 @@ export default function WorkstationDashboard() {
                         timestamp: new Date().toLocaleTimeString(),
                         status: 'COUNTED',
                         discrepancy: 0,
-                        unsealedBy: currentUser ? `${currentUser.firstName} ${currentUser.lastName}` : 'System'
+                        unsealedBy: currentUser ? `${currentUser.firstName} ${currentUser.lastName}` : 'System',
+                        scannedParcels: history
                     },
                     ...prev
                 ]);
@@ -4474,7 +4481,7 @@ export default function WorkstationDashboard() {
                                 <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px', textAlign: 'left' }}>
                                     <thead>
                                         <tr style={{ borderBottom: '2px solid #e5e7eb' }}>
-                                            {['Timestamp', 'MAWB Ref', 'Bag Number', 'Expected Count', 'Actual Scanned', 'Discrepancy', 'Status', 'Unsealed By'].map(h => (
+                                            {['Timestamp', 'MAWB Ref', 'Bag Number', 'Expected Count', 'Actual Scanned', 'Discrepancy', 'Status', 'Unsealed By', 'Scanned Parcels'].map(h => (
                                                 <th key={h} style={{ padding: '8px', color: '#6b7280', fontWeight: '600', fontSize: '11px', textTransform: 'uppercase' }}>{h}</th>
                                             ))}
                                         </tr>
@@ -4482,6 +4489,7 @@ export default function WorkstationDashboard() {
                                     <tbody>
                                         {unsealedBoxes.map((box, idx) => {
                                             const diff = box.scanned - box.expected;
+                                            const parcelList = box.scannedParcels || [];
                                             return (
                                                 <tr key={`box-${idx}`} style={{ borderBottom: '1px solid #f3f4f6' }}>
                                                     <td style={{ padding: '8px', color: '#6b7280' }}>{box.timestamp}</td>
@@ -6441,7 +6449,7 @@ export default function WorkstationDashboard() {
                 let actionText = 'Proceed';
 
                 if (isWrongBag) {
-                    modalTitle = '⚠ Wrong Bag Detected';
+                    modalTitle = 'Wrong Bag Detected';
                     message = `Parcel "${extraParcelModal.barcode}" belongs to Bag "${extraParcelModal.actualBag || 'Unknown'}", not "${extraParcelModal.expectedBag}".`;
                     actionText = `Move to Bag "${extraParcelModal.expectedBag}"`;
                 } else if (isUnassigned) {
@@ -7503,6 +7511,121 @@ export default function WorkstationDashboard() {
                                     color: '#374151',
                                     borderRadius: '8px',
                                     padding: '12px',
+                                    fontSize: '13px',
+                                    fontWeight: '600',
+                                    cursor: 'pointer'
+                                }}
+                            >
+                                Close
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* ── MODAL: VIEW SCANNED PARCELS IN UNSEALED BAG ── */}
+            {viewingUnsealedParcelsModal && (
+                <div style={{
+                    position: 'fixed',
+                    top: 0, left: 0, right: 0, bottom: 0,
+                    backgroundColor: 'rgba(0, 0, 0, 0.65)',
+                    backdropFilter: 'blur(3px)',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    zIndex: 4000
+                }}>
+                    <div style={{
+                        backgroundColor: '#ffffff',
+                        borderRadius: '12px',
+                        padding: '24px',
+                        maxWidth: '750px',
+                        width: '90%',
+                        boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.25)'
+                    }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', borderBottom: '1px solid #e5e7eb', paddingBottom: '12px' }}>
+                            <div>
+                                <h3 style={{ margin: 0, fontSize: '16px', fontWeight: '800', color: '#111827' }}>
+                                    Scanned Parcels in Bag: {viewingUnsealedParcelsModal.bagNumber}
+                                </h3>
+                                <span style={{ fontSize: '12px', color: '#6b7280' }}>
+                                    MAWB Ref: {viewingUnsealedParcelsModal.mawb} • Total Stored: {viewingUnsealedParcelsModal.parcels.length} Parcels
+                                </span>
+                            </div>
+                            <button
+                                onClick={() => setViewingUnsealedParcelsModal(null)}
+                                style={{ background: 'none', border: 'none', fontSize: '16px', cursor: 'pointer', color: '#6b7280', fontWeight: 'bold' }}
+                            >
+                                ✕
+                            </button>
+                        </div>
+
+                        <div style={{ maxHeight: '420px', overflowY: 'auto' }}>
+                            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px', textAlign: 'left' }}>
+                                <thead>
+                                    <tr style={{ borderBottom: '2px solid #e5e7eb', backgroundColor: '#f9fafb' }}>
+                                        <th style={{ padding: '8px 10px', color: '#6b7280', fontWeight: '700' }}>#</th>
+                                        <th style={{ padding: '8px 10px', color: '#6b7280', fontWeight: '700' }}>Tracking Number / Barcode</th>
+                                        <th style={{ padding: '8px 10px', color: '#6b7280', fontWeight: '700' }}>Sender Ref / Temu</th>
+                                        <th style={{ padding: '8px 10px', color: '#6b7280', fontWeight: '700' }}>Consignee</th>
+                                        <th style={{ padding: '8px 10px', color: '#6b7280', fontWeight: '700' }}>City</th>
+                                        <th style={{ padding: '8px 10px', color: '#6b7280', fontWeight: '700' }}>Partner</th>
+                                        <th style={{ padding: '8px 10px', color: '#6b7280', fontWeight: '700' }}>Time</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {viewingUnsealedParcelsModal.parcels.map((p: any, idx: number) => (
+                                        <tr key={idx} style={{ borderBottom: '1px solid #f3f4f6' }}>
+                                            <td style={{ padding: '8px 10px', color: '#9ca3af' }}>{idx + 1}</td>
+                                            <td style={{ padding: '8px 10px', fontWeight: '700', color: '#111827' }}>
+                                                {p.skynetTrackingNumber || p.trackingNumber || p.tracking_number || '—'}
+                                            </td>
+                                            <td style={{ padding: '8px 10px', color: '#4b5563', fontFamily: 'monospace' }}>
+                                                {p.senderReference || p.sender_reference || (p.isTemuScan ? p.trackingNumber : '—')}
+                                            </td>
+                                            <td style={{ padding: '8px 10px', color: '#374151' }}>
+                                                {p.recipientName || p.recipient_name || '—'}
+                                            </td>
+                                            <td style={{ padding: '8px 10px', color: '#374151' }}>
+                                                {p.city || '—'}
+                                            </td>
+                                            <td style={{ padding: '8px 10px' }}>
+                                                {p.assignedPartner ? (
+                                                    <span style={{
+                                                        backgroundColor: p.assignedPartner === 'PickMe' ? '#ffcc00' : p.assignedPartner === 'Domex' ? '#7b0f1a' : '#ea580c',
+                                                        color: p.assignedPartner === 'PickMe' ? '#000000' : '#ffffff',
+                                                        padding: '2px 6px',
+                                                        borderRadius: '4px',
+                                                        fontWeight: '700',
+                                                        fontSize: '10px'
+                                                    }}>
+                                                        {p.assignedPartner}
+                                                    </span>
+                                                ) : '—'}
+                                            </td>
+                                            <td style={{ padding: '8px 10px', color: '#6b7280' }}>
+                                                {p.timestamp || '—'}
+                                            </td>
+                                        </tr>
+                                    ))}
+                                    {viewingUnsealedParcelsModal.parcels.length === 0 && (
+                                        <tr>
+                                            <td colSpan={7} style={{ padding: '24px', textAlign: 'center', color: '#9ca3af' }}>
+                                                No parcel details recorded for this bag unsealing session.
+                                            </td>
+                                        </tr>
+                                    )}
+                                </tbody>
+                            </table>
+                        </div>
+
+                        <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '16px', borderTop: '1px solid #e5e7eb', paddingTop: '12px' }}>
+                            <button
+                                onClick={() => setViewingUnsealedParcelsModal(null)}
+                                style={{
+                                    backgroundColor: '#ffffff',
+                                    border: '1px solid #d1d5db',
+                                    color: '#374151',
+                                    borderRadius: '6px',
+                                    padding: '8px 16px',
                                     fontSize: '13px',
                                     fontWeight: '600',
                                     cursor: 'pointer'

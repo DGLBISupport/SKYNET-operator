@@ -119,7 +119,9 @@ export async function POST(request: Request) {
             operator,
             targetMawb,
             targetPartner,
-            outboundBagNumber
+            outboundBagNumber,
+            scannedParcels,
+            scanned_parcels
         } = await request.json();
 
         const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -143,6 +145,7 @@ export async function POST(request: Request) {
             }
 
             const discrepancy = (scannedCount || 0) - (expectedCount || 0);
+            const parcelsToStore = scannedParcels || scanned_parcels || [];
 
             const insertRes = await fetch(`${supabaseUrl}/rest/v1/bag_unsealing`, {
                 method: 'POST',
@@ -158,7 +161,8 @@ export async function POST(request: Request) {
                     scanned_count: scannedCount || 0,
                     discrepancy: discrepancy,
                     status: bagStatus || 'COUNTED',
-                    unsealed_by: operator || 'Unknown'
+                    unsealed_by: operator || 'Unknown',
+                    scanned_parcels: parcelsToStore
                 })
             });
 

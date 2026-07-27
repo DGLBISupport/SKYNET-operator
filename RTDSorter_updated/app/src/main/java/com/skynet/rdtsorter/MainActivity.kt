@@ -460,6 +460,16 @@ class MainActivity : ComponentActivity() {
 
         firstScanStatus.value = "FETCHING"
         lifecycleScope.launch {
+            val jsonArr = JSONArray()
+            for (item in firstScanHistory) {
+                val obj = JSONObject()
+                    .put("trackingNumber", item.trackingNumber)
+                    .put("recipientName", item.recipientName)
+                    .put("city", item.city)
+                    .put("timestamp", item.timestamp)
+                jsonArr.put(obj)
+            }
+
             val payload = JSONObject()
                 .put("stage", "finish-bag")
                 .put("mawbRef", mawb)
@@ -467,6 +477,7 @@ class MainActivity : ComponentActivity() {
                 .put("expectedCount", expected)
                 .put("scannedCount", scanned)
                 .put("status", "COUNTED")
+                .put("scannedParcels", jsonArr)
 
             val res = callPostEndpoint(payload)
             if (res != null && res.optBoolean("success")) {
