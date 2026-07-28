@@ -48,12 +48,13 @@ export async function GET(request: Request) {
                 const shipData = await shipRes.json();
                 if (Array.isArray(shipData) && shipData.length > 0) {
                     let partnerMap: Record<string, string> = {};
+                    let scanStatusMap: Record<string, { firstScanDone: boolean; scanStatus: string }> = {};
                     const refs = shipData.map((s: any) => s.reference_number).filter(Boolean);
                     if (refs.length > 0) {
                         const refsQuery = refs.map((r: string) => `shipment_ref.eq.${encodeURIComponent(r)}`).join(',');
                         try {
                             const spaRes = await fetch(
-                                `${sb.url}/rest/v1/service_provider_allocation?or=(${refsQuery})&select=shipment_ref,service_provider`,
+                                `${sb.url}/rest/v1/service_provider_allocation?or=(${refsQuery})&select=shipment_ref,service_provider,unsealed,scan_status`,
                                 { headers: sb.headers }
                             );
                             if (spaRes.ok) {
@@ -74,6 +75,12 @@ export async function GET(request: Request) {
                                             else if (name.toLowerCase().includes('pronto')) name = 'Pronto';
                                             partnerMap[alloc.shipment_ref] = name;
                                         }
+                                        if (alloc.shipment_ref) {
+                                            scanStatusMap[alloc.shipment_ref] = {
+                                                firstScanDone: alloc.unsealed === true,
+                                                scanStatus: alloc.scan_status || 'PENDING'
+                                            };
+                                        }
                                     });
                                 }
                             }
@@ -82,21 +89,26 @@ export async function GET(request: Request) {
                         }
                     }
 
-                    parcels = shipData.map(s => ({
-                        referenceNumber: s.reference_number,
-                        trackingNumber: s.reference_number,
-                        senderReference: s.sender_reference || s.alternate_reference || '',
-                        mawbRef: s.mawb_reference || '',
-                        bagNumber: s.bag_number || '',
-                        consigneeName: s.consignee_name || 'Unknown Recipient',
-                        consigneeAddress: s.consignee_address_1 || s.consignee_address_3 || '',
-                        city: s.consignee_location_name || s.consignee_address_3 || 'Unknown City',
-                        assignedPartner: partnerMap[s.reference_number] || 'Unknown',
-                        assignedZone: s.delivery_route_code || 'Default-Zone',
-                        weight: s.weight || s.dead_weight || 0.1,
-                        goodsDescription: s.goods_description || '',
-                        createdAt: s.created_at || s.updated_at || ''
-                    }));
+                    parcels = shipData.map(s => {
+                        const scanInfo = scanStatusMap[s.reference_number];
+                        return ({
+                            referenceNumber: s.reference_number,
+                            trackingNumber: s.reference_number,
+                            senderReference: s.sender_reference || s.alternate_reference || '',
+                            mawbRef: s.mawb_reference || '',
+                            bagNumber: s.bag_number || '',
+                            consigneeName: s.consignee_name || 'Unknown Recipient',
+                            consigneeAddress: s.consignee_address_1 || s.consignee_address_3 || '',
+                            city: s.consignee_location_name || s.consignee_address_3 || 'Unknown City',
+                            assignedPartner: partnerMap[s.reference_number] || 'Unknown',
+                            assignedZone: s.delivery_route_code || 'Default-Zone',
+                            weight: s.weight || s.dead_weight || 0.1,
+                            goodsDescription: s.goods_description || '',
+                            firstScanDone: scanInfo?.firstScanDone ?? false,
+                            status: scanInfo?.scanStatus || 'PENDING',
+                            createdAt: s.created_at || s.updated_at || ''
+                        });
+                    });
                 }
             }
         } catch (e) {

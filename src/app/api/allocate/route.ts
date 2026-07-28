@@ -229,6 +229,7 @@ export async function POST(request: Request) {
             }
 
             // Handle registerExtra if shipment is NOT found
+            let isNewShipment = false;
             if (!shipment && registerExtra) {
                 let trackingStr = trackingNumber.trim();
                 let refToInsert: string = shipmentRef;
@@ -263,6 +264,7 @@ export async function POST(request: Request) {
                     shipment = insertedShipments && insertedShipments[0];
                     if (shipment) {
                         shipmentRef = String(shipment.reference_number);
+                        isNewShipment = true;
                     }
                 } else {
                     const errText = await insertShipRes.text();
@@ -279,6 +281,7 @@ export async function POST(request: Request) {
             }
 
             // Handle overrideBag if shipment is found but bag number doesn't match
+            let overridePerformed = false;
             if (bagNumber) {
                 // Quick guard: if this bag has already been unsealed, block further first-scan attempts
                 try {
@@ -305,7 +308,7 @@ export async function POST(request: Request) {
                 const shipmentBag = shipment.bag_number || '';
                 if (shipmentBag.toLowerCase() !== bagNumber.toLowerCase()) {
                     if (overrideBag) {
-                        // Update bag_number in database
+                        // Update bag_number in database (scan status is tracked in service_provider_allocation)
                         const updateShipRes = await fetch(`${supabaseUrl}/rest/v1/shipments?reference_number=eq.${shipmentRef}`, {
                             method: 'PATCH',
                             headers: {
@@ -319,6 +322,7 @@ export async function POST(request: Request) {
                         });
                         if (updateShipRes.ok) {
                             shipment.bag_number = bagNumber;
+                            overridePerformed = true;
                         } else {
                             const errText = await updateShipRes.text();
                             return NextResponse.json({ success: false, error: `Failed to update shipment bag: ${errText}` }, { status: 500 });
@@ -335,6 +339,8 @@ export async function POST(request: Request) {
                 }
             }
 
+            // Scan status is tracked entirely in service_provider_allocation — no shipments write needed here.
+
             // 2. Fetch allocation record if present (Read-only lookup from service_provider_allocation)
             const spaRes = await fetch(`${supabaseUrl}/rest/v1/service_provider_allocation?shipment_ref=eq.${shipmentRef}`, { headers });
             let finalAllocation = null;
@@ -345,13 +351,26 @@ export async function POST(request: Request) {
             
             const finalMawb = mawbRef || shipment.mawb_ref || '';
 
-            // Set unsealed flag on service_provider_allocation record if present
+            // Mark 1st scan done on service_provider_allocation (source of truth for scan status)
             if (finalAllocation && finalAllocation.id) {
                 fetch(`${supabaseUrl}/rest/v1/service_provider_allocation?id=eq.${finalAllocation.id}`, {
                     method: 'PATCH',
                     headers: { ...headers, "Content-Type": "application/json" },
-                    body: JSON.stringify({ unsealed: true, updated_at: new Date().toISOString() })
-                }).catch(e => console.error("Failed to set unsealed flag on allocation:", e));
+                    body: JSON.stringify({ unsealed: true, scan_status: '1ST_SCAN_DONE', updated_at: new Date().toISOString() })
+                }).catch(e => console.error("Failed to set 1ST_SCAN_DONE on allocation:", e));
+            } else {
+                // Parcel has no allocation row yet — create a minimal one to record scan status
+                fetch(`${supabaseUrl}/rest/v1/service_provider_allocation`, {
+                    method: 'POST',
+                    headers: { ...headers, "Content-Type": "application/json", "Prefer": "return=minimal" },
+                    body: JSON.stringify({
+                        shipment_ref: shipmentRef,
+                        mawb_ref: mawbRef || shipment.mawb_ref || null,
+                        unsealed: true,
+                        scan_status: '1ST_SCAN_DONE',
+                        updated_at: new Date().toISOString()
+                    })
+                }).catch(e => console.error("Failed to create minimal allocation for 1ST_SCAN_DONE:", e));
             }
 
             // Resolve zone and partner using helper
@@ -382,19 +401,17 @@ export async function POST(request: Request) {
         // ═══════════════════════════════════════════════════════
         // STAGE 2 — LMD ALLOCATION (SECOND SCAN)
         // ═══════════════════════════════════════════════════════
-        // 1. Concurrently fetch service provider allocation and shipment details (parallelized step 1)
-        const spaPromise = fetch(`${supabaseUrl}/rest/v1/service_provider_allocation?shipment_ref=eq.${shipmentRef}`, { headers });
-        const shipPromise = resolvedShipment
-            ? Promise.resolve(null)
-            : fetch(`${supabaseUrl}/rest/v1/shipments?reference_number=eq.${shipmentRef}`, { headers }).then(res => res.json());
-
-        const [spaRes, shipResData] = await Promise.all([
-            spaPromise,
-            shipPromise
+        // Always fetch FRESH shipment data from DB for Stage 2 — do NOT reuse
+        // resolvedShipment which was fetched before any Stage 1 update ran.
+        const [spaRes, freshShipRes] = await Promise.all([
+            fetch(`${supabaseUrl}/rest/v1/service_provider_allocation?shipment_ref=eq.${shipmentRef}`, { headers }),
+            fetch(`${supabaseUrl}/rest/v1/shipments?reference_number=eq.${encodeURIComponent(shipmentRef)}`, { headers })
         ]);
 
         const allocations = await spaRes.json();
-        const shipment = resolvedShipment || (shipResData && shipResData[0]);
+        const freshShipData = await freshShipRes.json();
+        // Use fresh DB row for shipment details (scan status is checked via allocation below)
+        const shipment = (freshShipData && freshShipData[0]) || resolvedShipment;
 
         if (!shipment) {
             return NextResponse.json({
@@ -405,87 +422,22 @@ export async function POST(request: Request) {
 
         let allocation = allocations && allocations[0];
         let missedFirstScan = false;
-        let firstScanParcelMatched = false;
         let firstScanConfirmed = false;
 
-        // Check bag_unsealing history first to track individual parcel first-scan completion
-        const targetBagNum = shipment.bag_number;
-        let unsealRecord: any = null;
-        let existingParcels: any[] = [];
-        if (targetBagNum) {
-            try {
-                const unsealRes = await fetch(`${supabaseUrl}/rest/v1/bag_unsealing?bag_number=eq.${encodeURIComponent(targetBagNum)}`, { headers });
-                if (unsealRes.ok) {
-                    const unsealList = await unsealRes.json();
-                    unsealRecord = unsealList && unsealList[0];
-                    if (unsealRecord) {
-                        existingParcels = Array.isArray(unsealRecord.scanned_parcels) ? unsealRecord.scanned_parcels : [];
-                        firstScanParcelMatched = existingParcels.some((p: any) =>
-                            (p.skynetTrackingNumber || p.trackingNumber || p.tracking_number)?.toString() === shipmentRef.toString()
-                        );
-                    }
-                }
-            } catch (e) {
-                console.error("Failed to read bag_unsealing parcel history:", e);
-            }
-        }
+        // Parcel-level 1st scan check — read from service_provider_allocation (source of truth).
+        // allocation.unsealed is set to true during Stage 1 (Box Unsealing).
+        firstScanConfirmed = Boolean(
+            allocation?.unsealed === true ||
+            allocation?.scan_status === '1ST_SCAN_DONE' ||
+            allocation?.scan_status === '2ND_SCAN_DONE'
+        );
 
-        // Determine first-scan completion using parcel-level history when available.
-        if (unsealRecord) {
-            firstScanConfirmed = firstScanParcelMatched;
-        } else {
-            firstScanConfirmed = Boolean(allocation && allocation.unsealed === true);
-        }
-
-        // Check if parcel was unsealed during 1st Scan (First scan compulsory check)
+        // Flag parcels that bypassed 1st scan
         missedFirstScan = !firstScanConfirmed;
 
-        if (firstScanConfirmed && allocation && allocation.id && !allocation.unsealed) {
-            // Reconcile service_provider_allocation state when parcel was already recorded in bag_unsealing.
-            fetch(`${supabaseUrl}/rest/v1/service_provider_allocation?id=eq.${allocation.id}`, {
-                method: 'PATCH',
-                headers: { ...headers, "Content-Type": "application/json" },
-                body: JSON.stringify({ unsealed: true, updated_at: new Date().toISOString() })
-            }).catch(e => console.error("Failed to reconcile allocation unsealed state:", e));
-        }
 
-        if (missedFirstScan && unsealRecord) {
-            try {
-                const alreadyInBag = existingParcels.some((p: any) =>
-                    (p.skynetTrackingNumber || p.trackingNumber || p.tracking_number)?.toString() === shipmentRef.toString()
-                );
 
-                if (!alreadyInBag) {
-                    const newParcelEntry = {
-                        trackingNumber: shipment.sender_reference || shipmentRef.toString(),
-                        skynetTrackingNumber: shipmentRef.toString(),
-                        senderReference: shipment.sender_reference || null,
-                        recipientName: shipment.consignee_name || 'Unknown Recipient',
-                        city: shipment.consignee_location_name || 'Unknown City',
-                        timestamp: new Date().toLocaleTimeString(),
-                        missedFirstScanReconciled: true
-                    };
-                    const updatedParcels = [newParcelEntry, ...existingParcels];
-                    const newScannedCount = (unsealRecord.scanned_count || 0) + 1;
-                    const newDiscrepancy = newScannedCount - (unsealRecord.expected_count || 0);
 
-                    await fetch(`${supabaseUrl}/rest/v1/bag_unsealing?id=eq.${unsealRecord.id}`, {
-                        method: 'PATCH',
-                        headers: {
-                            ...headers,
-                            "Content-Type": "application/json"
-                        },
-                        body: JSON.stringify({
-                            scanned_count: newScannedCount,
-                            discrepancy: newDiscrepancy,
-                            scanned_parcels: updatedParcels
-                        })
-                    });
-                }
-            } catch (e) {
-                console.error("Failed to reconcile missed first scan into bag_unsealing:", e);
-            }
-        }
 
         // 2. Concurrently resolve details (parallelized step 2 with cache fallbacks)
         const spId = allocation?.service_provider;
@@ -623,12 +575,21 @@ export async function POST(request: Request) {
         let validationReason: string | undefined = undefined;
         let validationError: string | undefined = undefined;
 
-        // 1. Manifest Mismatch Check
-        const parcelMawb = allocation?.mawb_ref || shipment?.mawb_ref;
-        if (targetMawb && parcelMawb && parcelMawb.trim().toLowerCase() !== targetMawb.trim().toLowerCase()) {
+        // 0. FIRST SCAN REQUIRED CHECK (highest priority — blocks all other checks)
+        if (missedFirstScan) {
             validationStatus = 'INCORRECT';
-            validationReason = 'MANIFEST_MISMATCH';
-            validationError = `Manifest Mismatch: Parcel belongs to Manifest "${parcelMawb}", not selected Manifest "${targetMawb}".`;
+            validationReason = 'MISSED_FIRST_SCAN';
+            validationError = 'This parcel has not completed the 1st scan (Box Unsealing). Please perform the 1st scan first before proceeding to LMD Verification.';
+        }
+
+        // 1. Manifest Mismatch Check
+        if (validationStatus === 'CORRECT') {
+            const parcelMawb = allocation?.mawb_ref || shipment?.mawb_ref;
+            if (targetMawb && parcelMawb && parcelMawb.trim().toLowerCase() !== targetMawb.trim().toLowerCase()) {
+                validationStatus = 'INCORRECT';
+                validationReason = 'MANIFEST_MISMATCH';
+                validationError = `Manifest Mismatch: Parcel belongs to Manifest "${parcelMawb}", not selected Manifest "${targetMawb}".`;
+            }
         }
 
         // 2. Partner Mismatch & Unallocated Check
@@ -642,6 +603,19 @@ export async function POST(request: Request) {
                 validationReason = 'PARTNER_MISMATCH';
                 validationError = `Courier Partner Mismatch: Parcel is assigned to "${assignedPartner}", but active Bag is assigned to "${targetPartner}".`;
             }
+        }
+
+        if (validationStatus === 'CORRECT' && allocation && allocation.id) {
+            // Mark 2nd scan done on service_provider_allocation (source of truth)
+            fetch(`${supabaseUrl}/rest/v1/service_provider_allocation?id=eq.${allocation.id}`, {
+                method: 'PATCH',
+                headers: { ...headers, "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    validated: true,
+                    scan_status: '2ND_SCAN_DONE',
+                    updated_at: new Date().toISOString()
+                })
+            }).catch(e => console.error("Failed to update allocation to 2ND_SCAN_DONE:", e));
         }
 
         return NextResponse.json({

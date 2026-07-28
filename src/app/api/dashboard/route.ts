@@ -66,7 +66,7 @@ export async function GET(request: Request) {
             fetchAllSupabaseRows('bag_unsealing', 'id,bag_number,mawb_ref,status,unsealed_by,scanned_count,expected_count,created_at,scanned_parcels', sb),
             fetchAllSupabaseRows('service_provider_allocation', 'id', sb),
             fetchAllSupabaseRows('service_providers', 'id,name,code', sb),
-            fetchAllSupabaseRows('service_provider_allocation', 'shipment_ref,service_provider', sb)
+            fetchAllSupabaseRows('service_provider_allocation', 'shipment_ref,service_provider,unsealed,scan_status', sb)
         ]);
 
         const shipData = shipResult.status === 'fulfilled' ? shipResult.value : [];
@@ -89,13 +89,20 @@ export async function GET(request: Request) {
             providerMap[sp.id] = normName;
         });
 
-        // Build Shipment Ref -> Partner Name Map from service_provider_allocation
+        // Build Shipment Ref -> Partner Name + Scan Status Map from service_provider_allocation
         const shipmentToPartnerMap: Record<string, string> = {};
+        const shipmentToScanStatusMap: Record<string, { firstScanDone: boolean; scanStatus: string }> = {};
         spAllocData.forEach((alloc: any) => {
             if (alloc.shipment_ref && alloc.service_provider) {
                 const spNum = Number(alloc.service_provider);
                 const partnerName = providerMap[spNum] || providerMap[alloc.service_provider] || 'Other';
                 shipmentToPartnerMap[alloc.shipment_ref] = partnerName;
+            }
+            if (alloc.shipment_ref) {
+                shipmentToScanStatusMap[alloc.shipment_ref] = {
+                    firstScanDone: alloc.unsealed === true,
+                    scanStatus: alloc.scan_status || 'PENDING'
+                };
             }
         });
 
@@ -137,6 +144,7 @@ export async function GET(request: Request) {
                 partnerDetailsMap[pName].pendingParcels++;
             }
 
+            const scanInfo = shipmentToScanStatusMap[s.reference_number];
             return {
                 referenceNumber: s.reference_number || 'N/A',
                 senderReference: s.sender_reference || '-',
@@ -146,7 +154,9 @@ export async function GET(request: Request) {
                 consigneeLocation: s.consignee_location_name || 'N/A',
                 weight: s.weight ? `${s.weight} kg` : '-',
                 createdAt: s.created_at || new Date().toISOString(),
-                isSorted
+                isSorted,
+                firstScanDone: scanInfo?.firstScanDone ?? false,
+                status: scanInfo?.scanStatus || 'PENDING'
             };
         });
 

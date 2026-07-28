@@ -2015,16 +2015,6 @@ export default function WorkstationDashboard() {
                     setPendingDispatch((prev) => prev + 1);
                 }
 
-                if (data.missedFirstScan) {
-                    setMissedFirstScanModal({
-                        barcode: barcode,
-                        parcel: data.parcel,
-                        bagNumber: activeOutboundBag.bagNumber,
-                        mawbRef: selectedSecondScanMawb,
-                        assignedPartner: data.assignedPartner,
-                        assignedZone: data.assignedZone
-                    });
-                }
 
             } else {
                 // Validation: INCORRECT — categorize error for exact modal window
@@ -2034,27 +2024,27 @@ export default function WorkstationDashboard() {
 
                 const lowerErr = errMsg.toLowerCase();
                 const isCombined = barcode.length > 20 || barcode.toLowerCase().includes('e+') || (barcode.match(/\d/g) || []).length > 18 || lowerErr.includes('e+');
+                const isMissedFirstScan = data.reason === 'MISSED_FIRST_SCAN' || data.missedFirstScan === true;
                 const isPartnerMismatch = lowerErr.includes('partner mismatch');
                 const isUnallocated = lowerErr.includes('unallocated') || data.reason === 'UNALLOCATED_PARTNER';
                 const isManifestMismatch = lowerErr.includes('manifest mismatch');
                 const isDuplicate = data.reason === 'DUPLICATE' || lowerErr.includes('already') || lowerErr.includes('duplicate');
 
-                if (isUnallocated && !isCombined) {
-                    if (data.missedFirstScan) {
-                        setMissedFirstScanModal({
-                            barcode,
-                            parcel: data.parcel,
-                            bagNumber: activeOutboundBag.bagNumber,
-                            mawbRef: selectedSecondScanMawb,
-                            assignedPartner: data.assignedPartner,
-                            assignedZone: data.assignedZone,
-                            message: 'This parcel is not assigned to a service provider and was not scanned during Box Unsealing (1st Scan).'
-                        });
-                    } else {
-                        setUnallocatedPartnerModal({
-                            trackingNumber: data.parcel?.trackingNumber || barcode
-                        });
-                    }
+                if (isMissedFirstScan) {
+                    // Parcel skipped 1st scan — show clear warning, do NOT add to bag
+                    setMissedFirstScanModal({
+                        barcode,
+                        parcel: data.parcel,
+                        bagNumber: activeOutboundBag.bagNumber,
+                        mawbRef: selectedSecondScanMawb,
+                        assignedPartner: data.assignedPartner,
+                        assignedZone: data.assignedZone,
+                        message: data.error || 'This parcel has not completed the 1st scan (Box Unsealing). Please perform the 1st scan first before proceeding to LMD Verification.'
+                    });
+                } else if (isUnallocated && !isCombined) {
+                    setUnallocatedPartnerModal({
+                        trackingNumber: data.parcel?.trackingNumber || barcode
+                    });
                 } else if ((isPartnerMismatch || isManifestMismatch || isDuplicate) && !isCombined) {
                     setDuplicateModal({
                         barcode,
