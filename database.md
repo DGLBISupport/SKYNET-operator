@@ -198,11 +198,14 @@ CREATE TABLE public.service_provider_allocation (
   updated_at timestamp with time zone,
   validated boolean,
   mapped_city bigint,
+  unsealed boolean DEFAULT false,
+  mapped_zone bigint,
   CONSTRAINT service_provider_allocation_pkey PRIMARY KEY (id),
   CONSTRAINT service_provider_allocation_mawb_ref_fkey FOREIGN KEY (mawb_ref) REFERENCES public.mawb(mawb_reference),
   CONSTRAINT service_provider_allocation_service_provider_fkey FOREIGN KEY (service_provider) REFERENCES public.service_providers(id),
   CONSTRAINT service_provider_allocation_mapped_city_fkey FOREIGN KEY (mapped_city) REFERENCES public.district_city_mapping(id),
-  CONSTRAINT service_provider_allocation_shipment_ref_fkey FOREIGN KEY (shipment_ref) REFERENCES public.shipments(reference_number)
+  CONSTRAINT service_provider_allocation_shipment_ref_fkey FOREIGN KEY (shipment_ref) REFERENCES public.shipments(reference_number),
+  CONSTRAINT service_provider_allocation_mapped_zone_fkey FOREIGN KEY (mapped_zone) REFERENCES public.zones(id)
 );
 CREATE TABLE public.bag_unsealing (
   id bigint GENERATED ALWAYS AS IDENTITY NOT NULL,
@@ -215,6 +218,7 @@ CREATE TABLE public.bag_unsealing (
   status text NOT NULL,
   unsealed_by text,
   scanned_parcels jsonb,
+  unsealed boolean DEFAULT true,
   CONSTRAINT bag_unsealing_pkey PRIMARY KEY (id),
   CONSTRAINT bag_unsealing_mawb_ref_fkey FOREIGN KEY (mawb_ref) REFERENCES public.mawb(mawb_reference)
 );
@@ -436,4 +440,32 @@ CREATE TABLE public.manifest_sessions (
   closed_by text,
   CONSTRAINT manifest_sessions_pkey PRIMARY KEY (mawb_ref),
   CONSTRAINT manifest_sessions_mawb_ref_fkey FOREIGN KEY (mawb_ref) REFERENCES public.mawb(mawb_reference)
+);
+CREATE TABLE public.admin_portal_users (
+  id bigint GENERATED ALWAYS AS IDENTITY NOT NULL,
+  created_at timestamp with time zone NOT NULL DEFAULT now(),
+  first_name text,
+  last_name text,
+  email text,
+  status USER-DEFINED,
+  role text,
+  CONSTRAINT admin_portal_users_pkey PRIMARY KEY (id)
+);
+CREATE TABLE public.service_provider_allocation_duplicate (
+  id bigint GENERATED ALWAYS AS IDENTITY NOT NULL,
+  created_at timestamp with time zone NOT NULL DEFAULT now(),
+  mawb_ref text,
+  shipment_ref text,
+  service_provider bigint,
+  updated_at timestamp with time zone,
+  validated boolean,
+  mapped_city bigint,
+  unsealed boolean DEFAULT false,
+  mapped_zone bigint,
+  CONSTRAINT service_provider_allocation_duplicate_pkey PRIMARY KEY (id),
+  CONSTRAINT service_provider_allocation_duplicate_mapped_city_fkey FOREIGN KEY (mapped_city) REFERENCES public.district_city_mapping(id),
+  CONSTRAINT service_provider_allocation_duplicate_mapped_zone_fkey FOREIGN KEY (mapped_zone) REFERENCES public.zones(id),
+  CONSTRAINT service_provider_allocation_duplicate_mawb_ref_fkey FOREIGN KEY (mawb_ref) REFERENCES public.mawb(mawb_reference),
+  CONSTRAINT service_provider_allocation_duplicate_service_provider_fkey FOREIGN KEY (service_provider) REFERENCES public.service_providers(id),
+  CONSTRAINT service_provider_allocation_duplicate_shipment_ref_fkey FOREIGN KEY (shipment_ref) REFERENCES public.shipments(reference_number)
 );

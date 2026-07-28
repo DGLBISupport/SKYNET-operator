@@ -76,28 +76,25 @@ async function resolveZoneAndPartner(
 
     // Resolve partner
     let assignedPartner = "Unknown";
-    if (!spId) {
-        // Allocate dynamically: PickMe (1) or Domex (2)
-        if (assignedZone.toLowerCase().includes('b') || assignedZone.toLowerCase().includes('c') || shipmentRef % 2 === 0) {
-            assignedPartner = 'Domex';
-        } else {
+    if (spId) {
+        const numId = Number(spId);
+        if (numId === 1) {
             assignedPartner = 'PickMe';
-        }
-    } else {
-        // Retrieve provider name from cache or DB
-        if (cache.providers.has(spId)) {
-            assignedPartner = cache.providers.get(spId)!;
+        } else if (numId === 2) {
+            assignedPartner = 'Domex';
+        } else if (cache.providers.has(numId)) {
+            assignedPartner = cache.providers.get(numId)!;
         } else {
             const spRes = await fetch(`${supabaseUrl}/rest/v1/service_providers?id=eq.${spId}`, { headers });
             const providers = await spRes.json();
             if (providers && providers[0]) {
                 assignedPartner = providers[0].name || "Unknown";
-                cache.providers.set(spId, assignedPartner);
+                cache.providers.set(numId, assignedPartner);
             }
         }
-        if (assignedPartner.toLowerCase() === 'pickme') assignedPartner = 'PickMe';
-        else if (assignedPartner.toLowerCase() === 'domex') assignedPartner = 'Domex';
-        else if (assignedPartner.toLowerCase() === 'pronto') assignedPartner = 'Pronto';
+        if (assignedPartner.toLowerCase().includes('pickme')) assignedPartner = 'PickMe';
+        else if (assignedPartner.toLowerCase().includes('domex')) assignedPartner = 'Domex';
+        else if (assignedPartner.toLowerCase().includes('pronto')) assignedPartner = 'Pronto';
     }
 
     return { assignedZone, assignedPartner, mappedCity };
@@ -161,6 +158,7 @@ export async function POST(request: Request) {
                     scanned_count: scannedCount || 0,
                     discrepancy: discrepancy,
                     status: bagStatus || 'COUNTED',
+                    unsealed: true,
                     unsealed_by: operator || 'Unknown',
                     scanned_parcels: parcelsToStore
                 })
@@ -183,19 +181,18 @@ export async function POST(request: Request) {
         }
 
         let resolvedShipment: any = null;
-        let shipmentRef: number = 0;
         const cleanBar = trackingNumber.trim();
+        let shipmentRef: string = cleanBar;
         const isNumeric = /^\d+$/.test(cleanBar);
 
         if (isNumeric) {
-            shipmentRef = parseInt(cleanBar, 10);
             // First search both reference_number and sender_reference
-            const searchRes = await fetch(`${supabaseUrl}/rest/v1/shipments?or=(reference_number.eq.${shipmentRef},sender_reference.eq.${encodeURIComponent(cleanBar)})`, { headers });
+            const searchRes = await fetch(`${supabaseUrl}/rest/v1/shipments?or=(reference_number.eq.${encodeURIComponent(cleanBar)},sender_reference.eq.${encodeURIComponent(cleanBar)})`, { headers });
             if (searchRes.ok) {
                 const shipments = await searchRes.json();
                 if (shipments && shipments[0]) {
                     resolvedShipment = shipments[0];
-                    shipmentRef = resolvedShipment.reference_number;
+                    shipmentRef = String(resolvedShipment.reference_number);
                 }
             }
         }
@@ -207,7 +204,7 @@ export async function POST(request: Request) {
                 const shipments = await temuRes.json();
                 if (shipments && shipments[0]) {
                     resolvedShipment = shipments[0];
-                    shipmentRef = resolvedShipment.reference_number;
+                    shipmentRef = String(resolvedShipment.reference_number);
                 }
             }
         }
@@ -234,9 +231,9 @@ export async function POST(request: Request) {
             // Handle registerExtra if shipment is NOT found
             if (!shipment && registerExtra) {
                 let trackingStr = trackingNumber.trim();
-                let refToInsert = shipmentRef;
+                let refToInsert: string = shipmentRef;
                 if (!isNumeric) {
-                    refToInsert = Math.floor(100000000 + Math.random() * 900000000);
+                    refToInsert = Math.floor(100000000 + Math.random() * 900000000).toString();
                 }
                 const newShipment = {
                     reference_number: refToInsert,
@@ -265,7 +262,7 @@ export async function POST(request: Request) {
                     const insertedShipments = await insertShipRes.json();
                     shipment = insertedShipments && insertedShipments[0];
                     if (shipment) {
-                        shipmentRef = shipment.reference_number;
+                        shipmentRef = String(shipment.reference_number);
                     }
                 } else {
                     const errText = await insertShipRes.text();
@@ -283,6 +280,28 @@ export async function POST(request: Request) {
 
             // Handle overrideBag if shipment is found but bag number doesn't match
             if (bagNumber) {
+                // Quick guard: if this bag has already been unsealed, block further first-scan attempts
+                try {
+                    const checkUnsealRes = await fetch(`${supabaseUrl}/rest/v1/bag_unsealing?bag_number=eq.${encodeURIComponent(bagNumber)}`, { headers });
+                    if (checkUnsealRes.ok) {
+                        const unsealList = await checkUnsealRes.json();
+                        const unsealRec = unsealList && unsealList[0];
+                        if (unsealRec && unsealRec.unsealed) {
+                            return NextResponse.json({ success: false, error: 'BAG_ALREADY_COMPLETED', message: `Bag "${bagNumber}" has already been unsealed.` }, { status: 409 });
+                        }
+                        // If parcel already present in scanned_parcels, return duplicate indicator
+                        if (unsealRec && Array.isArray(unsealRec.scanned_parcels)) {
+                            const found = unsealRec.scanned_parcels.some((p: any) =>
+                                (p.skynetTrackingNumber || p.trackingNumber || p.tracking_number)?.toString() === shipmentRef.toString()
+                            );
+                            if (found) {
+                                return NextResponse.json({ success: false, error: 'ALREADY_UNSEALED_PARCEL', message: `Parcel ${shipmentRef} already unsealed in Bag "${bagNumber}".` }, { status: 409 });
+                            }
+                        }
+                    }
+                } catch (e) {
+                    console.error('Failed to check bag_unsealing before first-scan:', e);
+                }
                 const shipmentBag = shipment.bag_number || '';
                 if (shipmentBag.toLowerCase() !== bagNumber.toLowerCase()) {
                     if (overrideBag) {
@@ -316,57 +335,23 @@ export async function POST(request: Request) {
                 }
             }
 
-            // 2. Check if already exists in allocations
+            // 2. Fetch allocation record if present (Read-only lookup from service_provider_allocation)
             const spaRes = await fetch(`${supabaseUrl}/rest/v1/service_provider_allocation?shipment_ref=eq.${shipmentRef}`, { headers });
-            if (!spaRes.ok) {
-                const errText = await spaRes.text();
-                throw new Error(`Failed to fetch allocations: ${errText}`);
+            let finalAllocation = null;
+            if (spaRes.ok) {
+                const allocations = await spaRes.json();
+                finalAllocation = allocations && allocations[0];
             }
-            const allocations = await spaRes.json();
             
             const finalMawb = mawbRef || shipment.mawb_ref || '';
 
-            let finalAllocation = allocations && allocations[0];
-
-            if (!allocations || allocations.length === 0) {
-                // Insert new allocation row (only first 4 columns: id, created_at, mawb_ref, shipment_ref)
-                const insertRes = await fetch(`${supabaseUrl}/rest/v1/service_provider_allocation`, {
-                    method: 'POST',
-                    headers: {
-                        ...headers,
-                        "Content-Type": "application/json",
-                        "Prefer": "return=representation"
-                    },
-                    body: JSON.stringify({
-                        mawb_ref: finalMawb,
-                        shipment_ref: shipmentRef
-                    })
-                });
-                if (!insertRes.ok) {
-                    const errText = await insertRes.text();
-                    throw new Error(`Database save failure: ${errText}`);
-                }
-                const inserted = await insertRes.json();
-                finalAllocation = inserted && inserted[0];
-            } else {
-                // Update existing record's MAWB reference to associate it with this box session
-                const updateRes = await fetch(`${supabaseUrl}/rest/v1/service_provider_allocation?id=eq.${allocations[0].id}`, {
+            // Set unsealed flag on service_provider_allocation record if present
+            if (finalAllocation && finalAllocation.id) {
+                fetch(`${supabaseUrl}/rest/v1/service_provider_allocation?id=eq.${finalAllocation.id}`, {
                     method: 'PATCH',
-                    headers: {
-                        ...headers,
-                        "Content-Type": "application/json",
-                        "Prefer": "return=representation"
-                    },
-                    body: JSON.stringify({
-                        mawb_ref: finalMawb
-                    })
-                });
-                if (!updateRes.ok) {
-                    const errText = await updateRes.text();
-                    throw new Error(`Database update failure: ${errText}`);
-                }
-                const updated = await updateRes.json();
-                finalAllocation = updated && updated[0];
+                    headers: { ...headers, "Content-Type": "application/json" },
+                    body: JSON.stringify({ unsealed: true, updated_at: new Date().toISOString() })
+                }).catch(e => console.error("Failed to set unsealed flag on allocation:", e));
             }
 
             // Resolve zone and partner using helper
@@ -420,39 +405,94 @@ export async function POST(request: Request) {
 
         let allocation = allocations && allocations[0];
         let missedFirstScan = false;
+        let firstScanParcelMatched = false;
+        let firstScanConfirmed = false;
 
-        // If no allocation row exists (Missed First Scan):
-        if (!allocation) {
-            missedFirstScan = true;
-            const finalMawb = shipment.mawb_ref || '';
-
-            // Auto-record to first scan (insert new row with first 4 columns)
-            const insertRes = await fetch(`${supabaseUrl}/rest/v1/service_provider_allocation`, {
-                method: 'POST',
-                headers: {
-                    ...headers,
-                    "Content-Type": "application/json",
-                    "Prefer": "return=representation"
-                },
-                body: JSON.stringify({
-                    mawb_ref: finalMawb,
-                    shipment_ref: shipmentRef
-                })
-            });
-            if (!insertRes.ok) {
-                const errText = await insertRes.text();
-                throw new Error(`Failed to auto-record missed first scan: ${errText}`);
+        // Check bag_unsealing history first to track individual parcel first-scan completion
+        const targetBagNum = shipment.bag_number;
+        let unsealRecord: any = null;
+        let existingParcels: any[] = [];
+        if (targetBagNum) {
+            try {
+                const unsealRes = await fetch(`${supabaseUrl}/rest/v1/bag_unsealing?bag_number=eq.${encodeURIComponent(targetBagNum)}`, { headers });
+                if (unsealRes.ok) {
+                    const unsealList = await unsealRes.json();
+                    unsealRecord = unsealList && unsealList[0];
+                    if (unsealRecord) {
+                        existingParcels = Array.isArray(unsealRecord.scanned_parcels) ? unsealRecord.scanned_parcels : [];
+                        firstScanParcelMatched = existingParcels.some((p: any) =>
+                            (p.skynetTrackingNumber || p.trackingNumber || p.tracking_number)?.toString() === shipmentRef.toString()
+                        );
+                    }
+                }
+            } catch (e) {
+                console.error("Failed to read bag_unsealing parcel history:", e);
             }
-            const insertedRows = await insertRes.json();
-            allocation = insertedRows && insertedRows[0];
+        }
+
+        // Determine first-scan completion using parcel-level history when available.
+        if (unsealRecord) {
+            firstScanConfirmed = firstScanParcelMatched;
+        } else {
+            firstScanConfirmed = Boolean(allocation && allocation.unsealed === true);
+        }
+
+        // Check if parcel was unsealed during 1st Scan (First scan compulsory check)
+        missedFirstScan = !firstScanConfirmed;
+
+        if (firstScanConfirmed && allocation && allocation.id && !allocation.unsealed) {
+            // Reconcile service_provider_allocation state when parcel was already recorded in bag_unsealing.
+            fetch(`${supabaseUrl}/rest/v1/service_provider_allocation?id=eq.${allocation.id}`, {
+                method: 'PATCH',
+                headers: { ...headers, "Content-Type": "application/json" },
+                body: JSON.stringify({ unsealed: true, updated_at: new Date().toISOString() })
+            }).catch(e => console.error("Failed to reconcile allocation unsealed state:", e));
+        }
+
+        if (missedFirstScan && unsealRecord) {
+            try {
+                const alreadyInBag = existingParcels.some((p: any) =>
+                    (p.skynetTrackingNumber || p.trackingNumber || p.tracking_number)?.toString() === shipmentRef.toString()
+                );
+
+                if (!alreadyInBag) {
+                    const newParcelEntry = {
+                        trackingNumber: shipment.sender_reference || shipmentRef.toString(),
+                        skynetTrackingNumber: shipmentRef.toString(),
+                        senderReference: shipment.sender_reference || null,
+                        recipientName: shipment.consignee_name || 'Unknown Recipient',
+                        city: shipment.consignee_location_name || 'Unknown City',
+                        timestamp: new Date().toLocaleTimeString(),
+                        missedFirstScanReconciled: true
+                    };
+                    const updatedParcels = [newParcelEntry, ...existingParcels];
+                    const newScannedCount = (unsealRecord.scanned_count || 0) + 1;
+                    const newDiscrepancy = newScannedCount - (unsealRecord.expected_count || 0);
+
+                    await fetch(`${supabaseUrl}/rest/v1/bag_unsealing?id=eq.${unsealRecord.id}`, {
+                        method: 'PATCH',
+                        headers: {
+                            ...headers,
+                            "Content-Type": "application/json"
+                        },
+                        body: JSON.stringify({
+                            scanned_count: newScannedCount,
+                            discrepancy: newDiscrepancy,
+                            scanned_parcels: updatedParcels
+                        })
+                    });
+                }
+            } catch (e) {
+                console.error("Failed to reconcile missed first scan into bag_unsealing:", e);
+            }
         }
 
         // 2. Concurrently resolve details (parallelized step 2 with cache fallbacks)
-        const spId = allocation.service_provider;
-        const mappedCityId = allocation.mapped_city;
+        const spId = allocation?.service_provider;
+        const mappedCityId = allocation?.mapped_city;
         let cityName = shipment.consignee_location_name || "";
         let districtName = shipment.consignee_address_3 || "";
-        const mawbRefVal = allocation.mawb_ref;
+        const mawbRefVal = allocation?.mawb_ref;
 
         const cityPromise = mappedCityId
             ? (cache.cities.has(mappedCityId)
@@ -515,57 +555,28 @@ export async function POST(request: Request) {
             assignedZone = 'Zone C';
         }
 
-        // Allocate dynamic partner if not set (or always re-allocate if stage 2 is scanned)
+        // Resolve partner strictly from service_provider_allocation table (No dynamic allocation)
         let assignedPartner = "Unknown";
-        let finalProviderId = spId;
 
-        if (!spId) {
-            // Allocate dynamically: PickMe (1) or Domex (2)
-            if (assignedZone.toLowerCase().includes('b') || assignedZone.toLowerCase().includes('c') || shipmentRef % 2 === 0) {
-                finalProviderId = 2; // Domex
-                assignedPartner = 'Domex';
-            } else {
-                finalProviderId = 1; // PickMe
+        if (spId) {
+            const numId = Number(spId);
+            if (numId === 1) {
                 assignedPartner = 'PickMe';
-            }
-
-            // Save the allocated provider back to the database row
-            if (allocation.id) {
-                const patchRes = await fetch(`${supabaseUrl}/rest/v1/service_provider_allocation?id=eq.${allocation.id}`, {
-                    method: "PATCH",
-                    headers: {
-                        ...headers,
-                        "Content-Type": "application/json",
-                        "Prefer": "return=minimal"
-                    },
-                    body: JSON.stringify({
-                        service_provider: finalProviderId,
-                        validated: true,
-                        mapped_city: mappedCity ? mappedCity.id : null
-                    })
-                });
-                if (!patchRes.ok) {
-                    const errText = await patchRes.text();
-                    throw new Error(`Failed to save allocated partner back to database: ${errText}`);
-                }
-            } else {
-                throw new Error("Cannot save allocation: Database row ID is missing.");
-            }
-        } else {
-            // Retrieve provider name from cache or DB
-            if (cache.providers.has(spId)) {
-                assignedPartner = cache.providers.get(spId)!;
+            } else if (numId === 2) {
+                assignedPartner = 'Domex';
+            } else if (cache.providers.has(numId)) {
+                assignedPartner = cache.providers.get(numId)!;
             } else {
                 const spRes = await fetch(`${supabaseUrl}/rest/v1/service_providers?id=eq.${spId}`, { headers });
                 const providers = await spRes.json();
                 if (providers && providers[0]) {
                     assignedPartner = providers[0].name || "Unknown";
-                    cache.providers.set(spId, assignedPartner);
+                    cache.providers.set(numId, assignedPartner);
                 }
             }
-            if (assignedPartner.toLowerCase() === 'pickme') assignedPartner = 'PickMe';
-            else if (assignedPartner.toLowerCase() === 'domex') assignedPartner = 'Domex';
-            else if (assignedPartner.toLowerCase() === 'pronto') assignedPartner = 'Pronto';
+            if (assignedPartner.toLowerCase().includes('pickme')) assignedPartner = 'PickMe';
+            else if (assignedPartner.toLowerCase().includes('domex')) assignedPartner = 'Domex';
+            else if (assignedPartner.toLowerCase().includes('pronto')) assignedPartner = 'Pronto';
         }
 
         const skynetData: SkyNetParcelData = {
@@ -593,9 +604,9 @@ export async function POST(request: Request) {
             weight: shipment.weight_measure?.toUpperCase() === 'G' ? (shipment.weight || 0) / 1000 : (shipment.weight || 0),
             value: shipment.customs_value ? `${shipment.customs_currency_code || 'LKR'} ${shipment.customs_value.toFixed(2)}` : undefined,
             account: shipment.shipper_code || undefined,
-            apiSync: allocation.validated ? "Validated" : "Pending",
+            apiSync: allocation?.validated ? "Validated" : "Pending",
             goodsDesc: shipment.goods_desc || undefined,
-            mawbRef: allocation.mawb_ref || undefined,
+            mawbRef: allocation?.mawb_ref || undefined,
             mawbCarrier: mawbDetails ? mawbDetails.carrier : undefined,
             mawbFlight: mawbDetails ? mawbDetails.travel_id : undefined,
             mawbBags: mawbDetails ? mawbDetails.declared_bags : undefined,
@@ -613,16 +624,20 @@ export async function POST(request: Request) {
         let validationError: string | undefined = undefined;
 
         // 1. Manifest Mismatch Check
-        const parcelMawb = allocation.mawb_ref || shipment.mawb_ref;
+        const parcelMawb = allocation?.mawb_ref || shipment?.mawb_ref;
         if (targetMawb && parcelMawb && parcelMawb.trim().toLowerCase() !== targetMawb.trim().toLowerCase()) {
             validationStatus = 'INCORRECT';
             validationReason = 'MANIFEST_MISMATCH';
             validationError = `Manifest Mismatch: Parcel belongs to Manifest "${parcelMawb}", not selected Manifest "${targetMawb}".`;
         }
 
-        // 2. Partner Mismatch Check
-        if (validationStatus === 'CORRECT' && targetPartner && targetPartner !== 'ALL') {
-            if (assignedPartner.trim().toLowerCase() !== targetPartner.trim().toLowerCase()) {
+        // 2. Partner Mismatch & Unallocated Check
+        if (validationStatus === 'CORRECT') {
+            if (assignedPartner === 'Unknown') {
+                validationStatus = 'INCORRECT';
+                validationReason = 'UNALLOCATED_PARTNER';
+                validationError = 'Not assigned to a service provider and not scanned in first scan.';
+            } else if (targetPartner && targetPartner !== 'ALL' && assignedPartner.trim().toLowerCase() !== targetPartner.trim().toLowerCase()) {
                 validationStatus = 'INCORRECT';
                 validationReason = 'PARTNER_MISMATCH';
                 validationError = `Courier Partner Mismatch: Parcel is assigned to "${assignedPartner}", but active Bag is assigned to "${targetPartner}".`;
@@ -854,13 +869,50 @@ export async function GET(request: Request) {
                 }
             }
 
+            let partnerMap: Record<string, string> = {};
+            if (Array.isArray(shipments) && shipments.length > 0) {
+                const refs = shipments.map((s: any) => s.reference_number).filter(Boolean);
+                if (refs.length > 0) {
+                    const refsQuery = refs.map((r: string) => `shipment_ref.eq.${encodeURIComponent(r)}`).join(',');
+                    try {
+                        const spaRes = await fetch(
+                            `${supabaseUrl}/rest/v1/service_provider_allocation?or=(${refsQuery})&select=shipment_ref,service_provider`,
+                            { headers }
+                        );
+                        if (spaRes.ok) {
+                            const spaData = await spaRes.json();
+                            const spRes = await fetch(`${supabaseUrl}/rest/v1/service_providers?select=id,name`, { headers });
+                            if (spRes.ok) {
+                                const spData = await spRes.json();
+                                const spMap: Record<number, string> = { 1: 'PickMe', 2: 'Domex' };
+                                (spData || []).forEach((sp: any) => {
+                                    spMap[sp.id] = sp.name;
+                                });
+                                (spaData || []).forEach((alloc: any) => {
+                                    if (alloc.shipment_ref && alloc.service_provider) {
+                                        const numId = Number(alloc.service_provider);
+                                        let name = spMap[numId] || spMap[alloc.service_provider] || 'Unknown';
+                                        if (name.toLowerCase().includes('pickme')) name = 'PickMe';
+                                        else if (name.toLowerCase().includes('domex')) name = 'Domex';
+                                        else if (name.toLowerCase().includes('pronto')) name = 'Pronto';
+                                        partnerMap[alloc.shipment_ref] = name;
+                                    }
+                                });
+                            }
+                        }
+                    } catch (err) {
+                        console.error("Error loading allocations for bag parcels:", err);
+                    }
+                }
+            }
+
             const parcels = (Array.isArray(shipments) ? shipments : []).map((s: any) => ({
                 trackingNumber: s.reference_number,
                 skynetTrackingNumber: s.reference_number,
                 senderReference: s.sender_reference || s.alternate_reference || '',
                 recipientName: s.consignee_name || 'Unknown Recipient',
                 city: s.consignee_location_name || s.consignee_address_3 || 'Unknown City',
-                assignedPartner: s.delivery_agent_code || 'PickMe',
+                assignedPartner: partnerMap[s.reference_number] || 'Unknown',
                 assignedZone: s.delivery_route_code || 'Default-Zone',
                 weight: s.weight || s.dead_weight || 0.1
             }));

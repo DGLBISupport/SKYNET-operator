@@ -1,5 +1,7 @@
 import { NextResponse } from 'next/server';
 
+export const dynamic = 'force-dynamic';
+
 const getSupabaseConfig = () => {
     const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
     const key = process.env.NEXT_PUBLIC_SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
@@ -77,7 +79,7 @@ export async function GET(request: Request) {
         const spAllocData = spAllocResult.status === 'fulfilled' ? spAllocResult.value : [];
 
         // Build Service Provider Map (id -> Normalized Name)
-        const providerMap: Record<number, string> = {};
+        const providerMap: Record<number, string> = { 1: 'PickMe', 2: 'Domex' };
         spData.forEach((sp: any) => {
             const rawName = (sp.name || sp.code || '').trim();
             let normName = rawName || 'Other';
@@ -91,7 +93,8 @@ export async function GET(request: Request) {
         const shipmentToPartnerMap: Record<string, string> = {};
         spAllocData.forEach((alloc: any) => {
             if (alloc.shipment_ref && alloc.service_provider) {
-                const partnerName = providerMap[alloc.service_provider] || 'Other';
+                const spNum = Number(alloc.service_provider);
+                const partnerName = providerMap[spNum] || providerMap[alloc.service_provider] || 'Other';
                 shipmentToPartnerMap[alloc.shipment_ref] = partnerName;
             }
         });
@@ -113,8 +116,8 @@ export async function GET(request: Request) {
             const isSorted = Boolean(s.bag_number && String(s.bag_number).trim() !== '');
             if (isSorted) totalSorted++;
             
-            // Resolve LMD Courier Partner via service_provider_allocation table, fallback to delivery_agent_code
-            let rawPartner = shipmentToPartnerMap[s.reference_number] || s.delivery_agent_code || '';
+            // Resolve LMD Courier Partner strictly via service_provider_allocation table
+            let rawPartner = shipmentToPartnerMap[s.reference_number] || '';
             let pName = 'Other';
             if (rawPartner.toLowerCase().includes('pickme')) pName = 'PickMe';
             else if (rawPartner.toLowerCase().includes('domex')) pName = 'Domex';

@@ -1,5 +1,8 @@
 import { NextResponse } from 'next/server';
 
+export const dynamic = 'force-dynamic';
+export const revalidate = 0;
+
 // In-memory cache for outbound LMD dispatch bags (for instant response & backup)
 interface OutboundBag {
     bagNumber: string;
@@ -106,15 +109,15 @@ export async function GET(request: Request) {
         if (sb) {
             try {
                 // Fetch bags for this MAWB from Supabase DB
-                const bagsRes = await fetch(`${sb.url}/rest/v1/outbound_lmd_bags?mawb_ref=eq.${encodeURIComponent(mawbRef)}&order=created_at.desc`, { headers: sb.headers });
+                const bagsRes = await fetch(`${sb.url}/rest/v1/outbound_lmd_bags?mawb_ref=eq.${encodeURIComponent(mawbRef)}&order=created_at.desc`, { headers: sb.headers, cache: 'no-store' });
                 const bagsData = await bagsRes.json();
 
                 // Fetch manifest session from DB
-                const manifestRes = await fetch(`${sb.url}/rest/v1/manifest_sessions?mawb_ref=eq.${encodeURIComponent(mawbRef)}`, { headers: sb.headers });
+                const manifestRes = await fetch(`${sb.url}/rest/v1/manifest_sessions?mawb_ref=eq.${encodeURIComponent(mawbRef)}`, { headers: sb.headers, cache: 'no-store' });
                 const manifestData = await manifestRes.json();
                 const manifestStatus = Array.isArray(manifestData) && manifestData.length > 0 ? manifestData[0].status : 'OPEN';
 
-                if (Array.isArray(bagsData) && bagsData.length > 0) {
+                if (Array.isArray(bagsData)) {
                     const dbBags: OutboundBag[] = bagsData.map((row: any) => {
                         let parcels: any[] = [];
                         if (Array.isArray(row.parcels)) {
@@ -136,10 +139,16 @@ export async function GET(request: Request) {
                             operator: row.created_by || 'Staff',
                             parcels
                         };
-                        outboundBagsMap.set(b.bagNumber, b);
                         return b;
                     });
-                    
+
+                    outboundBagsMap.forEach((bag, bagNumber) => {
+                        if (bag.mawbRef.toLowerCase() === mawbRef.toLowerCase()) {
+                            outboundBagsMap.delete(bagNumber);
+                        }
+                    });
+
+                    dbBags.forEach((bag) => outboundBagsMap.set(bag.bagNumber, bag));
                     manifestsMap.set(mawbRef, { mawbRef, status: manifestStatus });
 
                     return NextResponse.json({

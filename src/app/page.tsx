@@ -48,6 +48,22 @@ function generateCode128SVG(text: string): string {
     return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${x + 10} 60" width="100%" height="60" preserveAspectRatio="none">${rects.join('')}</svg>`;
 }
 
+function extractLatestBarcode(rawInput: string): string {
+    if (!rawInput) return '';
+    let clean = rawInput.trim();
+    // If input contains concatenated tracking numbers (e.g. 710283381872710283381883...)
+    if (clean.length >= 24 && /^\d+$/.test(clean)) {
+        if (clean.length % 12 === 0) {
+            clean = clean.slice(-12);
+        } else if (clean.length % 15 === 0) {
+            clean = clean.slice(-15);
+        } else {
+            clean = clean.slice(-12);
+        }
+    }
+    return clean;
+}
+
 function resolvePartnerName(bag: any): string {
     if (!bag) return 'LMD Delivery Partner';
     let p = bag.targetPartner || bag.partner;
@@ -212,6 +228,15 @@ export default function WorkstationDashboard() {
         scannedParcels?: any[];
     }>>([]);
     const [viewingUnsealedParcelsModal, setViewingUnsealedParcelsModal] = useState<{ bagNumber: string; mawb: string; parcels: any[] } | null>(null);
+    const [missedFirstScanModal, setMissedFirstScanModal] = useState<{
+        barcode: string;
+        parcel: any;
+        bagNumber?: string;
+        mawbRef?: string;
+        assignedPartner?: string;
+        assignedZone?: string;
+        message?: string;
+    } | null>(null);
 
     const [discrepancyReason, setDiscrepancyReason] = useState('');
     const [customDiscrepancyNote, setCustomDiscrepancyNote] = useState('');
@@ -298,6 +323,9 @@ export default function WorkstationDashboard() {
     } | null>(null);
     const [confirmFinishModal, setConfirmFinishModal] = useState(false);
     const [successModal, setSuccessModal] = useState<{ title: string; message: string } | null>(null);
+    const [unallocatedPartnerModal, setUnallocatedPartnerModal] = useState<{ trackingNumber: string } | null>(null);
+    const [unallocatedBagUnsealModal, setUnallocatedBagUnsealModal] = useState<{ bagNumber: string; unallocatedCount: number; unallocatedParcels: any[] } | null>(null);
+    const [unallocatedBagNote, setUnallocatedBagNote] = useState<string>('');
     const [invalidBagParcelModal, setInvalidBagParcelModal] = useState<{ barcode: string; expectedBag: string; actualBag: string | null; reason: 'WRONG_BAG' | 'NOT_FOUND' | 'BAG_ALREADY_COMPLETED' | 'INVALID_BAG' | 'NO_BAG_SELECTED' } | null>(null);
     const [customConfirmModal, setCustomConfirmModal] = useState<{ title: string; message: string; onConfirm: () => void } | null>(null);
     const [overageCheckModal, setOverageCheckModal] = useState<{ bagNumber: string; expected: number; history: any[] } | null>(null);
@@ -587,6 +615,25 @@ export default function WorkstationDashboard() {
     useEffect(() => {
         if (!duplicateModal) return;
         const handleModalKey = (e: KeyboardEvent) => {
+            // If Enter key pressed and active scan input contains text, a barcode scan just occurred!
+            // Dismiss active notification modal and allow form submission to process the new barcode cleanly.
+            if (e.key === 'Enter') {
+                const firstScanVal = (firstScanInputRef.current?.value || firstScanInput).trim();
+                const secondScanVal = (scanInputRef.current?.value || barcodeInput).trim();
+                const hasScanInput = activeTab === 'first-scan' ? Boolean(firstScanVal) : activeTab === 'second-scan' ? Boolean(secondScanVal) : false;
+
+                if (hasScanInput) {
+                    setMissedFirstScanModal(null);
+                    setDuplicateModal(null);
+                    setInvalidBarcodeModal(null);
+                    setManifestClosedModal(null);
+                    setUnallocatedPartnerModal(null);
+                    setSuccessModal(null);
+                    setInvalidBagParcelModal(null);
+                    setUnallocatedBagUnsealModal(null);
+                    return; // Allow form submit event to proceed cleanly
+                }
+            }
             if (e.key === 'Enter' || e.key === 'Escape' || e.key === ' ') {
                 e.preventDefault();
                 setDuplicateModal(null);
@@ -602,8 +649,93 @@ export default function WorkstationDashboard() {
         return () => window.removeEventListener('keydown', handleModalKey);
     }, [duplicateModal, activeTab]);
 
+    const handleForceUnsealWithNote = async () => {
+        if (!firstScanMawb || !firstScanSelectedBag || firstScanExpected === '' || !unallocatedBagUnsealModal) return;
+
+        const isMatch = firstScanHistory.length === Number(firstScanExpected);
+        const diff = firstScanHistory.length - Number(firstScanExpected);
+        let baseStatus = 'COUNTED';
+        if (!isMatch) {
+            const prefix = diff < 0 ? 'Shortage' : 'Overage';
+            if (discrepancyReason === 'Other (Custom Note)' && customDiscrepancyNote.trim()) {
+                baseStatus = `${prefix}: ${customDiscrepancyNote.trim()}`;
+            } else {
+                baseStatus = `${prefix}: ${discrepancyReason || 'Discrepancy'}`;
+            }
+        }
+
+        const noteText = unallocatedBagNote.trim() || `Unsealed with ${unallocatedBagUnsealModal.unallocatedCount} unallocated parcel(s)`;
+        const finalStatus = `${baseStatus} | UNALLOCATED NOTE: ${noteText}`;
+
+        try {
+            setFirstScanStatus('FETCHING');
+            const response = await fetch('/api/allocate', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    stage: 'finish-bag',
+                    mawbRef: firstScanMawb,
+                    bagNumber: firstScanSelectedBag,
+                    expectedCount: Number(firstScanExpected),
+                    scannedCount: firstScanHistory.length,
+                    status: finalStatus,
+                    operator: currentUser ? `${currentUser.firstName} ${currentUser.lastName}` : 'System',
+                    scannedParcels: firstScanHistory
+                }),
+            });
+            const data = await response.json();
+            if (data.success) {
+                setUnsealedBoxes(prev => [
+                    {
+                        mawb: firstScanMawb,
+                        bagNumber: firstScanSelectedBag,
+                        expected: Number(firstScanExpected),
+                        scanned: firstScanHistory.length,
+                        timestamp: new Date().toLocaleTimeString(),
+                        status: finalStatus,
+                        discrepancy: firstScanHistory.length - Number(firstScanExpected),
+                        unsealedBy: currentUser ? `${currentUser.firstName} ${currentUser.lastName}` : 'System',
+                        scannedParcels: firstScanHistory
+                    },
+                    ...prev
+                ]);
+
+                setSuccessModal({
+                    title: "Bag Unsealed with Note",
+                    message: `Bag "${firstScanSelectedBag}" has been unsealed with note: ${noteText}`
+                });
+
+                handleClearFirstScan();
+            } else {
+                setFirstScanError(data.error || "Failed to save unsealing log to database.");
+            }
+        } catch (err: any) {
+            setFirstScanError(err.message || "Failed to connect to server.");
+        } finally {
+            setFirstScanStatus('READY');
+            setConfirmFinishModal(false);
+            setUnallocatedBagUnsealModal(null);
+            setDiscrepancyReason('');
+            setCustomDiscrepancyNote('');
+            setUnallocatedBagNote('');
+        }
+    };
+
     const handleConfirmFinish = async () => {
         if (!firstScanMawb || !firstScanSelectedBag || firstScanExpected === '') return;
+
+        // Intercept if any parcel in bag is unallocated
+        const unallocatedList = firstScanHistory.filter(p => !p.assignedPartner || p.assignedPartner === 'Unknown');
+        if (unallocatedList.length > 0 && !unallocatedBagUnsealModal) {
+            setConfirmFinishModal(false);
+            setUnallocatedBagNote(`Unsealed with ${unallocatedList.length} unallocated parcel(s): ${unallocatedList.map(p => p.trackingNumber).join(', ')}`);
+            setUnallocatedBagUnsealModal({
+                bagNumber: firstScanSelectedBag,
+                unallocatedCount: unallocatedList.length,
+                unallocatedParcels: unallocatedList
+            });
+            return;
+        }
 
         const isMatch = firstScanHistory.length === Number(firstScanExpected);
 
@@ -673,8 +805,43 @@ export default function WorkstationDashboard() {
 
     // Keyboard wedge support for all modal dialogs
     useEffect(() => {
-        if (!confirmFinishModal && !successModal && !invalidBagParcelModal && !customConfirmModal && !overageCheckModal && !extraParcelModal && !duplicateModal && !invalidBarcodeModal && !manifestClosedModal && !printLabelModal) return;
+        if (!confirmFinishModal && !successModal && !unallocatedPartnerModal && !invalidBagParcelModal && !customConfirmModal && !overageCheckModal && !extraParcelModal && !duplicateModal && !invalidBarcodeModal && !manifestClosedModal && !printLabelModal && !missedFirstScanModal && !unallocatedBagUnsealModal) return;
         const handleModalKey = (e: KeyboardEvent) => {
+            if (missedFirstScanModal) {
+                if (e.key === 'Enter') {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    setMissedFirstScanModal(null);
+                    setTimeout(() => {
+                        if (scanInputRef.current) scanInputRef.current.focus();
+                    }, 50);
+                } else if (e.key === 'Escape') {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    setMissedFirstScanModal(null);
+                    setConfirmFinishModal(true);
+                    setDiscrepancyReason('');
+                    setCustomDiscrepancyNote('');
+                }
+                return;
+            }
+
+            if (e.key === 'Enter') {
+                const firstScanVal = (firstScanInputRef.current?.value || firstScanInput).trim();
+                const secondScanVal = (scanInputRef.current?.value || barcodeInput).trim();
+                const hasScanInput = activeTab === 'first-scan' ? Boolean(firstScanVal) : activeTab === 'second-scan' ? Boolean(secondScanVal) : false;
+
+                if (hasScanInput) {
+                    setMissedFirstScanModal(null);
+                    setDuplicateModal(null);
+                    setInvalidBarcodeModal(null);
+                    setManifestClosedModal(null);
+                    setUnallocatedPartnerModal(null);
+                    setSuccessModal(null);
+                    setInvalidBagParcelModal(null);
+                    return; // Allow form submit event to proceed cleanly
+                }
+            }
             if (duplicateModal) {
                 if (e.key === 'Enter' || e.key === 'Escape' || e.key === ' ') {
                     e.preventDefault();
@@ -710,6 +877,16 @@ export default function WorkstationDashboard() {
                     setManifestClosedModal(null);
                     setTimeout(() => {
                         if (activeTab === 'second-scan') scanInputRef.current?.focus();
+                    }, 50);
+                }
+            } else if (unallocatedPartnerModal) {
+                if (e.key === 'Enter' || e.key === 'Escape' || e.key === ' ') {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    setUnallocatedPartnerModal(null);
+                    setTimeout(() => {
+                        if (activeTab === 'first-scan') firstScanInputRef.current?.focus();
+                        else if (activeTab === 'second-scan') scanInputRef.current?.focus();
                     }, 50);
                 }
             } else if (successModal) {
@@ -844,7 +1021,7 @@ export default function WorkstationDashboard() {
         };
         window.addEventListener('keydown', handleModalKey, true);
         return () => window.removeEventListener('keydown', handleModalKey, true);
-    }, [confirmFinishModal, successModal, invalidBagParcelModal, customConfirmModal, overageCheckModal, extraParcelModal, extraParcelNote, printLabelModal, duplicateModal, invalidBarcodeModal, manifestClosedModal, activeTab, firstScanMawb, firstScanExpected, firstScanHistory]);
+    }, [confirmFinishModal, successModal, invalidBagParcelModal, customConfirmModal, overageCheckModal, extraParcelModal, extraParcelNote, printLabelModal, duplicateModal, invalidBarcodeModal, manifestClosedModal, missedFirstScanModal, activeTab, firstScanMawb, firstScanExpected, firstScanHistory]);
 
     const handleTestScannerKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
         const now = Date.now();
@@ -976,10 +1153,18 @@ export default function WorkstationDashboard() {
 
     const handleFirstScanSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
-        const barcode = firstScanInput.trim();
+        const rawBarcode = firstScanInput.trim();
+        const barcode = extractLatestBarcode(rawBarcode);
         if (!barcode || !firstScanMawb) return;
 
-        // Clear input instantly to prevent barcode concatenation
+        // Reset previous scan output and modals for clean new scan evaluation
+        setFirstScanCurrentScan(null);
+        setUnallocatedPartnerModal(null);
+        setDuplicateModal(null);
+        setInvalidBagParcelModal(null);
+
+        // Clear input instantly and store last scanned to prevent concatenation
+        setFirstScanLastScanned(barcode);
         setFirstScanInput('');
         if (firstScanInputRef.current) firstScanInputRef.current.value = '';
 
@@ -990,6 +1175,54 @@ export default function WorkstationDashboard() {
 
         // 1. Smart Bag Barcode Scan Detection
         const matchedBag = firstScanBags.find(b => b.bagNumber.toLowerCase() === barcode.toLowerCase());
+        const alreadyUnsealedBag = unsealedBoxes.find(ub => ub.mawb?.toLowerCase() === firstScanMawb.toLowerCase() && ub.bagNumber?.toLowerCase() === barcode.toLowerCase());
+
+        if (alreadyUnsealedBag) {
+            setInvalidBagParcelModal({
+                barcode: alreadyUnsealedBag.bagNumber,
+                expectedBag: alreadyUnsealedBag.bagNumber,
+                actualBag: null,
+                reason: 'BAG_ALREADY_COMPLETED'
+            });
+            return;
+        }
+
+        // 1.b Parcel-level check: block parcel scans if their bag is already unsealed
+        try {
+            const barcodeNorm = barcode.trim().toLowerCase();
+            for (const ub of unsealedBoxes) {
+                if (!ub.mawb || ub.mawb.toLowerCase() !== firstScanMawb.toLowerCase()) continue;
+                const scanned = ub.scannedParcels || [];
+                for (const sp of scanned) {
+                    const candidates = [
+                        sp.trackingNumber,
+                        sp.skynetTrackingNumber,
+                        sp.senderReference,
+                        sp.displayTrackingNumber
+                    ].filter(Boolean) as string[];
+                    for (const c of candidates) {
+                        const cNorm = String(c).trim().toLowerCase();
+                        if (!cNorm) continue;
+                        if (cNorm === barcodeNorm ||
+                            `skyt${cNorm}` === barcodeNorm ||
+                            `skyt-${cNorm}` === barcodeNorm ||
+                            barcodeNorm.endsWith(cNorm)) {
+                            setInvalidBagParcelModal({
+                                barcode: ub.bagNumber || '',
+                                expectedBag: ub.bagNumber || '',
+                                actualBag: null,
+                                reason: 'BAG_ALREADY_COMPLETED'
+                            });
+                            return;
+                        }
+                    }
+                }
+            }
+        } catch (err) {
+            // non-fatal: if anything goes wrong here, fall back to normal flow
+            console.warn('Parcel-level unsealed check failed', err);
+        }
+
         if (matchedBag) {
             // Check if this bag is already completed
             const isCompleted = getBagStatus(matchedBag.bagNumber, matchedBag.expectedCount) === 'COMPLETED';
@@ -1177,6 +1410,12 @@ export default function WorkstationDashboard() {
                 setScannedToday((prev) => prev + 1);
                 setFirstScanStatus('SUCCESS');
 
+                // Show warning popup modal if no LMD partner is assigned
+                if (!data.assignedPartner || data.assignedPartner === 'Unknown') {
+                    setUnallocatedPartnerModal({ trackingNumber: displayTrackingNumber });
+                }
+
+
                 if (isTemuScan) {
                     setLastTemuSticker({
                         skynetTrackingNumber: data.parcel.trackingNumber,
@@ -1255,6 +1494,8 @@ export default function WorkstationDashboard() {
         barcode: string,
         opts: { overrideBag?: boolean; registerExtra?: boolean; note?: string }
     ) => {
+        setFirstScanCurrentScan(null);
+        setUnallocatedPartnerModal(null);
         setFirstScanStatus('FETCHING');
         setFirstScanError('');
         setFirstScanLastScanned(barcode);
@@ -1344,6 +1585,12 @@ export default function WorkstationDashboard() {
                 setScannedToday((prev) => prev + 1);
                 setFirstScanStatus('SUCCESS');
 
+                // Show warning popup modal if no LMD partner is assigned
+                if (!data.assignedPartner || data.assignedPartner === 'Unknown') {
+                    setUnallocatedPartnerModal({ trackingNumber: displayTrackingNumber });
+                }
+
+
                 if (isTemuScan) {
                     setLastTemuSticker({
                         skynetTrackingNumber: data.parcel.trackingNumber,
@@ -1412,13 +1659,17 @@ export default function WorkstationDashboard() {
 
     const fetchOutboundBags = async (mawbRef: string) => {
         try {
-            const res = await fetch(`/api/lmd-bags?mawbRef=${encodeURIComponent(mawbRef)}`);
+            const res = await fetch(`/api/lmd-bags?mawbRef=${encodeURIComponent(mawbRef)}`, { cache: 'no-store' });
             const data = await res.json();
             if (data.success) {
+                const bags = Array.isArray(data.bags) ? data.bags : [];
                 setSecondScanManifestStatus(data.manifestStatus || 'OPEN');
-                setOutboundBags(data.bags || []);
-                if (data.bags && data.bags.length > 0 && !activeOutboundBag) {
-                    const openBag = data.bags.find((b: any) => b.status === 'OPEN') || data.bags[0];
+                setOutboundBags(bags);
+
+                if (bags.length === 0) {
+                    setActiveOutboundBag(null);
+                } else if (!activeOutboundBag || !bags.some((b: any) => b.bagNumber === activeOutboundBag.bagNumber)) {
+                    const openBag = bags.find((b: any) => b.status === 'OPEN') || bags[0];
                     setActiveOutboundBag(openBag);
                 }
             }
@@ -1590,13 +1841,18 @@ export default function WorkstationDashboard() {
 
     const handleScanSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
-        const barcode = barcodeInput.trim();
+        const rawBarcode = barcodeInput.trim();
+        const barcode = extractLatestBarcode(rawBarcode);
         if (!barcode) return;
 
-        // Keep scanned barcode visible in input field until next scan, and set lastScanned for prefix stripping
+        // Reset previous scan output and modals for clean new scan evaluation
+        setUnallocatedPartnerModal(null);
+        setValidationCard(null);
+
+        // Clear input instantly and store last scanned to prevent concatenation
         setLastScanned(barcode);
-        setBarcodeInput(barcode);
-        if (scanInputRef.current) scanInputRef.current.value = barcode;
+        setBarcodeInput('');
+        if (scanInputRef.current) scanInputRef.current.value = '';
 
         // Auto select input text so next scan overwrites or strips it
         setTimeout(() => {
@@ -1707,27 +1963,41 @@ export default function WorkstationDashboard() {
                 setStatus('SUCCESS');
                 setScannedToday((prev) => prev + 1);
 
-                // Add to active outbound bag
-                const updatedBag = {
-                    ...activeOutboundBag,
-                    parcelCount: (activeOutboundBag.parcelCount || 0) + 1,
-                    totalWeight: Number(((activeOutboundBag.totalWeight || 0) + (data.parcel?.weight || 0.1)).toFixed(2)),
-                    parcels: [data.parcel, ...(activeOutboundBag.parcels || [])]
+                const parcelToStore = {
+                    ...data.parcel,
+                    scannedBarcode: barcode,
+                    displayTrackingNumber: data.parcel?.senderReference && data.parcel.senderReference.trim().toLowerCase() === barcode.trim().toLowerCase()
+                        ? `${barcode} / SKYT-${data.parcel.trackingNumber}`
+                        : `SKYT-${data.parcel.trackingNumber}`
                 };
-                setActiveOutboundBag(updatedBag);
-                setOutboundBags(prev => prev.map(b => b.bagNumber === updatedBag.bagNumber ? updatedBag : b));
 
-                // Save to lmd-bags API
-                fetch('/api/lmd-bags', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        action: 'add-parcel',
-                        mawbRef: selectedSecondScanMawb,
-                        bagNumber: activeOutboundBag.bagNumber,
-                        parcel: data.parcel
-                    })
-                });
+                // Ensure assigned partner/zone are stored with the parcel for UI rendering
+                parcelToStore.assignedPartner = data.assignedPartner || parcelToStore.assignedPartner || null;
+                parcelToStore.assignedZone = data.assignedZone || parcelToStore.assignedZone || null;
+
+                if (!data.missedFirstScan) {
+                    // Add to active outbound bag only when first scan was already completed.
+                    const updatedBag = {
+                        ...activeOutboundBag,
+                        parcelCount: (activeOutboundBag.parcelCount || 0) + 1,
+                        totalWeight: Number(((activeOutboundBag.totalWeight || 0) + (data.parcel?.weight || 0.1)).toFixed(2)),
+                        parcels: [parcelToStore, ...(activeOutboundBag.parcels || [])]
+                    };
+                    setActiveOutboundBag(updatedBag);
+                    setOutboundBags(prev => prev.map(b => b.bagNumber === updatedBag.bagNumber ? updatedBag : b));
+
+                    // Save to lmd-bags API
+                    fetch('/api/lmd-bags', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            action: 'add-parcel',
+                            mawbRef: selectedSecondScanMawb,
+                            bagNumber: activeOutboundBag.bagNumber,
+                            parcel: parcelToStore
+                        })
+                    });
+                }
 
                 setHistory((prev) => [data, ...prev].slice(0, 10));
 
@@ -1745,6 +2015,17 @@ export default function WorkstationDashboard() {
                     setPendingDispatch((prev) => prev + 1);
                 }
 
+                if (data.missedFirstScan) {
+                    setMissedFirstScanModal({
+                        barcode: barcode,
+                        parcel: data.parcel,
+                        bagNumber: activeOutboundBag.bagNumber,
+                        mawbRef: selectedSecondScanMawb,
+                        assignedPartner: data.assignedPartner,
+                        assignedZone: data.assignedZone
+                    });
+                }
+
             } else {
                 // Validation: INCORRECT — categorize error for exact modal window
                 setStatus('ERROR');
@@ -1754,10 +2035,27 @@ export default function WorkstationDashboard() {
                 const lowerErr = errMsg.toLowerCase();
                 const isCombined = barcode.length > 20 || barcode.toLowerCase().includes('e+') || (barcode.match(/\d/g) || []).length > 18 || lowerErr.includes('e+');
                 const isPartnerMismatch = lowerErr.includes('partner mismatch');
+                const isUnallocated = lowerErr.includes('unallocated') || data.reason === 'UNALLOCATED_PARTNER';
                 const isManifestMismatch = lowerErr.includes('manifest mismatch');
                 const isDuplicate = data.reason === 'DUPLICATE' || lowerErr.includes('already') || lowerErr.includes('duplicate');
 
-                if ((isPartnerMismatch || isManifestMismatch || isDuplicate) && !isCombined) {
+                if (isUnallocated && !isCombined) {
+                    if (data.missedFirstScan) {
+                        setMissedFirstScanModal({
+                            barcode,
+                            parcel: data.parcel,
+                            bagNumber: activeOutboundBag.bagNumber,
+                            mawbRef: selectedSecondScanMawb,
+                            assignedPartner: data.assignedPartner,
+                            assignedZone: data.assignedZone,
+                            message: 'This parcel is not assigned to a service provider and was not scanned during Box Unsealing (1st Scan).'
+                        });
+                    } else {
+                        setUnallocatedPartnerModal({
+                            trackingNumber: data.parcel?.trackingNumber || barcode
+                        });
+                    }
+                } else if ((isPartnerMismatch || isManifestMismatch || isDuplicate) && !isCombined) {
                     setDuplicateModal({
                         barcode,
                         skynetTrackingNumber: data.parcel?.trackingNumber || barcode,
@@ -2568,6 +2866,20 @@ export default function WorkstationDashboard() {
                                                 const scannedVal = bagBarcodeInput.trim();
                                                 if (!scannedVal) return;
                                                 const matchedBag = firstScanBags.find(b => b.bagNumber.toLowerCase() === scannedVal.toLowerCase());
+                                                // Block if this bag has already been unsealed
+                                                const alreadyUnsealed = unsealedBoxes.find(ub => ub.mawb === firstScanMawb && ub.bagNumber && ub.bagNumber.toLowerCase() === scannedVal.toLowerCase());
+                                                if (alreadyUnsealed) {
+                                                    setInvalidBagParcelModal({
+                                                        barcode: alreadyUnsealed.bagNumber,
+                                                        expectedBag: alreadyUnsealed.bagNumber,
+                                                        actualBag: null,
+                                                        reason: 'BAG_ALREADY_COMPLETED'
+                                                    });
+                                                    setFirstScanError(`Bag barcode "${scannedVal}" has already been unsealed.`);
+                                                    setTimeout(() => bagBarcodeInputRef.current?.select(), 50);
+                                                    return;
+                                                }
+
                                                 if (matchedBag) {
                                                     if (firstScanSelectedBag && firstScanSelectedBag !== matchedBag.bagNumber) {
                                                         setCustomConfirmModal({
@@ -2633,6 +2945,17 @@ export default function WorkstationDashboard() {
                                                     const selectedBagNum = e.target.value;
                                                     const matchedBag = firstScanBags.find(b => b.bagNumber === selectedBagNum);
                                                     if (matchedBag) {
+                                                        const alreadyUnsealed = unsealedBoxes.find(ub => ub.mawb === firstScanMawb && ub.bagNumber === matchedBag.bagNumber);
+                                                        if (alreadyUnsealed) {
+                                                            setInvalidBagParcelModal({
+                                                                barcode: alreadyUnsealed.bagNumber,
+                                                                expectedBag: alreadyUnsealed.bagNumber,
+                                                                actualBag: null,
+                                                                reason: 'BAG_ALREADY_COMPLETED'
+                                                            });
+                                                            setFirstScanError(`Bag "${matchedBag.bagNumber}" has already been unsealed.`);
+                                                            return;
+                                                        }
                                                         setFirstScanSelectedBag(matchedBag.bagNumber);
                                                         setFirstScanExpected(matchedBag.expectedCount);
                                                         setFirstScanError('');
@@ -2800,13 +3123,14 @@ export default function WorkstationDashboard() {
                                             type="text"
                                             value={firstScanInput}
                                             onChange={(e) => {
-                                                const val = e.target.value;
+                                                const rawVal = e.target.value;
+                                                let val = rawVal;
                                                 if (firstScanLastScanned && val.startsWith(firstScanLastScanned) && val.length > firstScanLastScanned.length) {
-                                                    setFirstScanInput(val.slice(firstScanLastScanned.length));
+                                                    val = val.slice(firstScanLastScanned.length);
                                                     setFirstScanLastScanned('');
-                                                } else {
-                                                    setFirstScanInput(val);
                                                 }
+                                                const cleanVal = extractLatestBarcode(val);
+                                                setFirstScanInput(cleanVal);
                                             }}
                                             disabled={!firstScanMawb}
                                             placeholder={firstScanMawb
@@ -2831,8 +3155,8 @@ export default function WorkstationDashboard() {
                                 </div>
                             </div>
 
-                            {/* ASSIGNED PARTNER Card (only shown after a barcode scan) */}
-                            {firstScanCurrentScan && (
+                            {/* ASSIGNED PARTNER Card (only shown after a barcode scan if allocated to a valid partner) */}
+                            {firstScanCurrentScan && firstScanCurrentScan.assignedPartner && firstScanCurrentScan.assignedPartner !== 'Unknown' && (
                                 <div style={{
                                     backgroundColor: firstScanCurrentScan.assignedPartner === 'Domex'
                                         ? '#7b0f1a'
@@ -3616,16 +3940,15 @@ export default function WorkstationDashboard() {
                                                     }
                                                 }}
                                                 onChange={(e) => {
-                                                    const val = e.target.value;
+                                                    const rawVal = e.target.value;
+                                                    let val = rawVal;
                                                     if (lastScanned && val.startsWith(lastScanned) && val.length > lastScanned.length) {
-                                                        setBarcodeInput(val.slice(lastScanned.length));
+                                                        val = val.slice(lastScanned.length);
                                                         setLastScanned('');
                                                     } else if (lastScanned && val !== lastScanned) {
-                                                        setBarcodeInput(val);
                                                         setLastScanned('');
-                                                    } else {
-                                                        setBarcodeInput(val);
                                                     }
+                                                    setBarcodeInput(extractLatestBarcode(val));
                                                 }}
                                                 onFocus={(e) => e.target.select()}
                                                 disabled={!activeOutboundBag || activeOutboundBag.status === 'SEALED'}
@@ -3784,66 +4107,53 @@ export default function WorkstationDashboard() {
                                 <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px', textAlign: 'left' }}>
                                     <thead>
                                         <tr style={{ borderBottom: '2px solid #e5e7eb' }}>
-                                            {['Validation Status', 'Tracking no.', 'Consignee', 'LMD Partner', 'Zone', 'Weight (kg)', 'City'].map(h => (
-                                                <th key={h} style={{ padding: '10px 8px', color: '#6b7280', fontWeight: '600', fontSize: '12px', textTransform: 'uppercase', letterSpacing: '0.4px' }}>{h}</th>
-                                            ))}
+                                            {['Tracking no.', 'Consignee', 'LMD Partner', 'Zone', 'Weight (kg)', 'City', 'Validation Status'].map(h => (
+                                                    <th key={h} style={{ padding: '8px', color: '#6b7280', fontWeight: '600', fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.4px' }}>{h}</th>
+                                                ))}
                                         </tr>
                                     </thead>
                                     <tbody>
                                         {activeOutboundBag?.parcels?.map((parcel: any, idx: number) => {
-                                            const isLatest = idx === 0;
-                                            const partner = parcel.assignedPartner || activeOutboundBag?.targetPartner || 'ALL';
-                                            const partnerBorderColor = partner === 'Domex'
-                                                ? '#7b0f1a'
-                                                : partner === 'Pronto'
-                                                    ? '#ea580c'
-                                                    : partner === 'PickMe'
-                                                        ? '#eab308'
-                                                        : '#3b82f6';
-
+                                            const partner = (parcel.assignedPartner && parcel.assignedPartner !== 'Unknown') ? parcel.assignedPartner : '-';
                                             return (
-                                                <tr
-                                                    key={idx}
-                                                    style={{
-                                                        borderBottom: '1px solid #f3f4f6',
-                                                        backgroundColor: '#ffffff',
-                                                        outline: isLatest ? `2px solid ${partnerBorderColor}` : 'none',
-                                                        outlineOffset: '-2px'
-                                                    }}
-                                                >
-                                                    <td style={{ padding: '10px 8px' }}>
+                                                <tr key={idx} style={{ borderBottom: '1px solid #f3f4f6' }}>
+                                                    <td style={{ padding: '8px', fontWeight: '600', color: '#111827' }}>
+                                                        {parcel.displayTrackingNumber || (parcel.senderReference ? `${parcel.senderReference} / SKYT-${parcel.trackingNumber}` : `SKYT-${parcel.trackingNumber}`)}
+                                                    </td>
+                                                    <td style={{ padding: '8px', color: '#374151' }}>{parcel.recipientName}</td>
+                                                    <td style={{ padding: '8px' }}>
+                                                        {partner !== '-' ? (
+                                                            <span style={{
+                                                                backgroundColor: partner === 'PickMe' ? '#ffcc00' : partner === 'Pronto' ? '#ea580c' : partner === 'Domex' ? '#7b0f1a' : '#4b5563',
+                                                                color: partner === 'PickMe' ? '#000000' : '#ffffff',
+                                                                padding: '3px 8px',
+                                                                borderRadius: '4px',
+                                                                fontWeight: '700',
+                                                                fontSize: '11px',
+                                                                textTransform: 'uppercase'
+                                                            }}>
+                                                                {partner}
+                                                            </span>
+                                                        ) : (
+                                                            <span style={{ color: '#9ca3af' }}>-</span>
+                                                        )}
+                                                    </td>
+                                                    <td style={{ padding: '8px', color: '#4b5563' }}>{parcel.province || parcel.assignedZone || 'Zone'}</td>
+                                                    <td style={{ padding: '8px', fontWeight: '600' }}>{parcel.weight || '0.1'} kg</td>
+                                                    <td style={{ padding: '8px', color: '#6b7280' }}>{parcel.city}</td>
+                                                    <td style={{ padding: '8px', color: '#6b7280' }}>
                                                         <span style={{
-                                                            backgroundColor: '#f3f4f6',
-                                                            border: '1px solid #e5e7eb',
-                                                            color: '#374151',
-                                                            padding: '3px 8px',
+                                                            backgroundColor: '#ffffff',
+                                                            color: '#4c5262',
+                                                            border: '1px solid #b6acac',
+                                                            padding: '1px 6px',
                                                             borderRadius: '4px',
                                                             fontSize: '11px',
-                                                            fontWeight: '700',
-                                                            display: 'inline-flex',
-                                                            alignItems: 'center',
-                                                            gap: '4px'
+                                                            fontWeight: '600'
                                                         }}>
                                                             ✓ Correct
                                                         </span>
                                                     </td>
-                                                    <td style={{ padding: '10px 8px', fontWeight: '700', color: '#111827' }}>SKYT-{parcel.trackingNumber}</td>
-                                                    <td style={{ padding: '10px 8px', color: '#374151' }}>{parcel.recipientName}</td>
-                                                    <td style={{ padding: '10px 8px' }}>
-                                                        <span style={{
-                                                            backgroundColor: partner === 'PickMe' ? '#ffcc00' : partner === 'Pronto' ? '#ea580c' : partner === 'Domex' ? '#7b0f1a' : '#4b5563',
-                                                            color: partner === 'PickMe' ? '#000000' : '#ffffff',
-                                                            padding: '2px 6px',
-                                                            borderRadius: '4px',
-                                                            fontWeight: '800',
-                                                            fontSize: '10px'
-                                                        }}>
-                                                            {partner}
-                                                        </span>
-                                                    </td>
-                                                    <td style={{ padding: '10px 8px', color: '#374151' }}>{parcel.province || parcel.assignedZone || 'Zone'}</td>
-                                                    <td style={{ padding: '10px 8px', fontWeight: '600' }}>{parcel.weight || '0.1'} kg</td>
-                                                    <td style={{ padding: '10px 8px', color: '#6b7280' }}>{parcel.city}</td>
                                                 </tr>
                                             );
                                         })}
@@ -5187,7 +5497,7 @@ export default function WorkstationDashboard() {
                                                                     <td style={{ padding: '10px 8px', color: '#4b5563' }}>{b.totalWeight ? `${b.totalWeight} kg` : '-'}</td>
                                                                     <td style={{ padding: '10px 8px' }}>
                                                                         <span style={{ padding: '2px 8px', borderRadius: '4px', fontSize: '11px', fontWeight: '700', backgroundColor: b.status === 'SEALED' ? '#fee2e2' : '#dcfce7', color: b.status === 'SEALED' ? '#dc2626' : '#15803d' }}>
-                                                                            {b.status === 'SEALED' ? '🔒 SEALED' : '📂 OPEN'}
+                                                                            {b.status === 'SEALED' ? 'SEALED' : 'OPEN'}
                                                                         </span>
                                                                     </td>
                                                                     <td style={{ padding: '10px 8px', color: '#4b5563', fontSize: '11px' }}>
@@ -5354,7 +5664,7 @@ export default function WorkstationDashboard() {
                                                                     <td style={{ padding: '10px 8px', color: '#9ca3af', fontSize: '11px' }}>{idx + 1}</td>
                                                                     <td style={{ padding: '10px 8px' }}>
                                                                         <span style={{ padding: '2px 8px', borderRadius: '4px', fontSize: '11px', fontWeight: '700', backgroundColor: ex.type.includes('Damaged') ? '#fee2e2' : '#fef3c7', color: ex.type.includes('Damaged') ? '#dc2626' : '#b45309' }}>
-                                                                            ⚠️ {ex.type}
+                                                                             {ex.type}
                                                                         </span>
                                                                     </td>
                                                                     <td style={{ padding: '10px 8px', fontWeight: '700', color: '#111827', fontFamily: 'monospace' }}>{ex.refNumber}</td>
@@ -6044,7 +6354,10 @@ export default function WorkstationDashboard() {
                 const diff = firstScanHistory.length - Number(firstScanExpected);
                 const isShortage = diff < 0;
                 const isOverage = diff > 0;
-                const accentColor = isExact ? '#16a34a' : isShortage ? '#1d4ed8' : '#b45309';
+                const accentColor = isExact ? '#16a34a' : isShortage ? '#e21b22' : '#b45309';
+                const surfaceColor = isExact ? '#f0fdf4' : isShortage ? '#fef2f2' : '#fffbeb';
+                const borderColor = isExact ? '#bbf7d0' : isShortage ? '#fca5a5' : '#fcd34d';
+                const iconBg = isExact ? '#d1fae5' : isShortage ? '#fee2e2' : '#fef3c7';
                 const shortageOptions = ['Missing Parcels', 'Stolen or Lost in Transit', 'Damaged & Discarded', 'Other (Custom Note)'];
                 const overageOptions = ['Extra Parcels Scanned', 'Wrongly Routed to Bag', 'Other (Custom Note)'];
                 const options = isShortage ? shortageOptions : overageOptions;
@@ -6071,7 +6384,7 @@ export default function WorkstationDashboard() {
                         }}>
                             {/* Icon */}
                             <div style={{
-                                backgroundColor: isExact ? '#d1fae5' : isShortage ? '#dbeafe' : '#fef3c7',
+                                backgroundColor: iconBg,
                                 color: accentColor,
                                 width: '56px', height: '56px',
                                 borderRadius: '50%',
@@ -6086,14 +6399,14 @@ export default function WorkstationDashboard() {
                             </div>
 
                             {/* Title */}
-                            <h3 style={{ fontSize: '18px', fontWeight: '700', color: '#111827', margin: '0 0 8px 0' }}>
-                                {isExact ? '✓ Finish Box Session?' : isShortage ? '⚠ Shortage Detected' : '⚠ Overage Detected'}
+                            <h3 style={{ fontSize: '18px', fontWeight: '700', color: accentColor, margin: '0 0 8px 0' }}>
+                                {isExact ? 'Finish Box Session?' : isShortage ? 'Shortage Detected' : 'Overage Detected'}
                             </h3>
 
                             {/* Count Summary */}
                             <div style={{
                                 display: 'inline-flex', gap: '20px', alignItems: 'center',
-                                backgroundColor: '#f9fafb', border: '1px solid #e5e7eb',
+                                backgroundColor: surfaceColor, border: `1px solid ${borderColor}`,
                                 borderRadius: '8px', padding: '10px 20px', margin: '0 0 16px 0', fontSize: '14px'
                             }}>
                                 <span>Expected: <strong style={{ color: '#111827' }}>{firstScanExpected}</strong></span>
@@ -6275,7 +6588,7 @@ export default function WorkstationDashboard() {
 
                         <p style={{ fontSize: '14px', color: '#4b5563', lineHeight: '1.6', margin: '0 0 20px 0' }}>
                             Bag <strong style={{ color: '#111827' }}>&quot;{overageCheckModal.bagNumber}&quot;</strong> has reached its expected count.
-                            Are there any <strong style={{ color: '#b45309' }}>additional (extra) parcels</strong> still in this bag?
+                            Are there any <strong style={{ color: '#111827' }}>additional (extra) parcels</strong> still in this bag?
                         </p>
 
                         <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
@@ -6295,7 +6608,7 @@ export default function WorkstationDashboard() {
                                 onMouseOver={(e) => { e.currentTarget.style.backgroundColor = '#15803d'; }}
                                 onMouseOut={(e) => { e.currentTarget.style.backgroundColor = '#16a34a'; }}
                             >
-                                ✓ No Extra Parcels — Close Bag (Enter)
+                                No Extra Parcels — Close Bag (Enter)
                             </button>
 
                             {/* Yes, extra parcels → keep scanning, overage will be shown on Finish */}
@@ -6305,7 +6618,7 @@ export default function WorkstationDashboard() {
                                     setTimeout(() => firstScanInputRef.current?.focus(), 50);
                                 }}
                                 style={{
-                                    backgroundColor: '#fffbeb', color: '#b45309',
+                                    color: '#111827',
                                     border: '2px solid #fcd34d', borderRadius: '8px',
                                     padding: '12px 18px', fontSize: '14px', fontWeight: '600',
                                     cursor: 'pointer', width: '100%', transition: 'all 0.15s ease'
@@ -6993,6 +7306,194 @@ export default function WorkstationDashboard() {
                 </div>
             )}
 
+            {/* ── UNALLOCATED PARCELS IN BAG WARNING MODAL ── */}
+            {unallocatedBagUnsealModal && (
+                <div style={{
+                    position: 'fixed',
+                    top: 0, left: 0, right: 0, bottom: 0,
+                    backgroundColor: 'rgba(0, 0, 0, 0.65)',
+                    backdropFilter: 'blur(3px)',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    zIndex: 4000
+                }}>
+                    <div style={{
+                        backgroundColor: '#ffffff',
+                        borderRadius: '12px',
+                        border: '2px solid #dc2626',
+                        padding: '24px',
+                        maxWidth: '560px',
+                        width: '90%',
+                        boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.25)',
+                        display: 'flex',
+                        flexDirection: 'column',
+                        gap: '16px'
+                    }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid #fee2e2', paddingBottom: '12px' }}>
+                            <h3 style={{ margin: 0, fontSize: '17px', fontWeight: '800', color: '#dc2626', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                <span>⚠️ Cannot Unseal Bag Normally</span>
+                            </h3>
+                            <button
+                                onClick={() => setUnallocatedBagUnsealModal(null)}
+                                style={{ background: 'none', border: 'none', fontSize: '18px', cursor: 'pointer', color: '#991b1b', fontWeight: 'bold' }}
+                            >
+                                ✕
+                            </button>
+                        </div>
+
+                        <div style={{ backgroundColor: '#fef2f2', border: '1px solid #fca5a5', borderRadius: '8px', padding: '14px', fontSize: '13px', color: '#991b1b', lineHeight: '1.5' }}>
+                            <strong>Bag "{unallocatedBagUnsealModal.bagNumber}" cannot be unsealed with normal status!</strong><br />
+                            There {unallocatedBagUnsealModal.unallocatedCount === 1 ? 'is' : 'are'} <strong>{unallocatedBagUnsealModal.unallocatedCount} parcel(s)</strong> inside this bag that {unallocatedBagUnsealModal.unallocatedCount === 1 ? 'has' : 'have'} no LMD Delivery Partner assigned.
+                        </div>
+
+                        <div>
+                            <label style={{ fontSize: '11px', fontWeight: '700', color: '#374151', textTransform: 'uppercase', letterSpacing: '0.5px', display: 'block', marginBottom: '6px' }}>
+                                Unallocated Parcels in Bag ({unallocatedBagUnsealModal.unallocatedCount}):
+                            </label>
+                            <div style={{ maxHeight: '130px', overflowY: 'auto', border: '1px solid #e5e7eb', borderRadius: '8px', padding: '8px', backgroundColor: '#f9fafb', display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                                {unallocatedBagUnsealModal.unallocatedParcels.map((p: any, idx: number) => (
+                                    <div key={idx} style={{ fontSize: '12px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#ffffff', border: '1px solid #f3f4f6', padding: '6px 10px', borderRadius: '6px' }}>
+                                        <span style={{ fontWeight: '700', color: '#111827' }}>{p.trackingNumber}</span>
+                                        <span style={{ color: '#6b7280', fontSize: '11px' }}>{p.recipientName || 'Unknown'} ({p.city || 'Unknown'})</span>
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+
+                        <div>
+                            <label style={{ fontSize: '11px', fontWeight: '700', color: '#374151', textTransform: 'uppercase', letterSpacing: '0.5px', display: 'block', marginBottom: '6px' }}>
+                                Unsealing Note (Required to Force Unseal) <span style={{ color: '#dc2626' }}>*</span>
+                            </label>
+                            <textarea
+                                value={unallocatedBagNote}
+                                onChange={(e) => setUnallocatedBagNote(e.target.value)}
+                                placeholder="Enter reason or note for unsealing bag with unallocated parcels..."
+                                rows={3}
+                                style={{
+                                    width: '100%', padding: '10px 12px',
+                                    border: '1px solid #d1d5db', borderRadius: '8px',
+                                    fontSize: '13px', color: '#111827', resize: 'vertical',
+                                    outline: 'none', boxSizing: 'border-box', fontFamily: 'inherit'
+                                }}
+                            />
+                        </div>
+
+                        <div style={{ display: 'flex', gap: '10px', paddingTop: '4px' }}>
+                            <button
+                                onClick={handleForceUnsealWithNote}
+                                disabled={!unallocatedBagNote.trim()}
+                                style={{
+                                    flex: 1,
+                                    backgroundColor: unallocatedBagNote.trim() ? '#dc2626' : '#9ca3af',
+                                    color: '#ffffff',
+                                    border: 'none',
+                                    borderRadius: '8px',
+                                    padding: '11px 16px',
+                                    fontSize: '13px',
+                                    fontWeight: '700',
+                                    cursor: unallocatedBagNote.trim() ? 'pointer' : 'not-allowed',
+                                    boxShadow: unallocatedBagNote.trim() ? '0 2px 4px rgba(220, 38, 38, 0.25)' : 'none'
+                                }}
+                            >
+                                ⚠️ Proceed & Unseal with Note
+                            </button>
+                            <button
+                                onClick={() => setUnallocatedBagUnsealModal(null)}
+                                style={{
+                                    backgroundColor: '#ffffff',
+                                    border: '1px solid #d1d5db',
+                                    color: '#374151',
+                                    borderRadius: '8px',
+                                    padding: '11px 16px',
+                                    fontSize: '13px',
+                                    fontWeight: '600',
+                                    cursor: 'pointer'
+                                }}
+                            >
+                                Cancel & Resolve Parcels
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* ── UNALLOCATED PARTNER MODAL ── */}
+            {unallocatedPartnerModal && (
+                <div style={{
+                    position: 'fixed',
+                    top: 0, left: 0, right: 0, bottom: 0,
+                    backgroundColor: 'rgba(0, 0, 0, 0.6)',
+                    backdropFilter: 'blur(3px)',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    zIndex: 3000,
+                    animation: 'fadeIn 0.2s ease-out'
+                }}>
+                    <div style={{
+                        backgroundColor: '#ffffff',
+                        border: '2px solid #dc2626', // Red warning theme border
+                        borderRadius: '12px',
+                        padding: '30px 24px',
+                        width: '450px',
+                        maxWidth: '90%',
+                        boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.15)',
+                        textAlign: 'center'
+                    }}>
+                        {/* Red/Amber Alert Icon */}
+                        <div style={{
+                            backgroundColor: '#fee2e2',
+                            color: '#dc2626',
+                            width: '56px', height: '56px',
+                            borderRadius: '50%',
+                            display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                            marginBottom: '20px'
+                        }}>
+                            <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                                <circle cx="12" cy="12" r="10" />
+                                <line x1="12" y1="8" x2="12" y2="12" />
+                                <line x1="12" y1="16" x2="12.01" y2="16" />
+                            </svg>
+                        </div>
+
+                        {/* Title */}
+                        <h3 style={{ fontSize: '18px', fontWeight: '700', color: '#111827', margin: '0 0 10px 0' }}>
+                            Parcel Not Allocated to a Partner
+                        </h3>
+
+                        {/* Content Message */}
+                        <p style={{ fontSize: '14px', color: '#4b5563', lineHeight: '1.6', margin: '0 0 24px 0' }}>
+                            Parcel <strong>{unallocatedPartnerModal.trackingNumber}</strong> is not allocated to an LMD partner.
+                        </p>
+
+                        {/* Action button */}
+                        <button
+                            onClick={() => {
+                                setUnallocatedPartnerModal(null);
+                                setTimeout(() => {
+                                    if (activeTab === 'first-scan') firstScanInputRef.current?.focus();
+                                    else if (activeTab === 'second-scan') scanInputRef.current?.focus();
+                                }, 50);
+                            }}
+                            style={{
+                                backgroundColor: '#dc2626',
+                                color: '#ffffff',
+                                border: 'none',
+                                borderRadius: '8px',
+                                padding: '12px 24px',
+                                fontSize: '14px',
+                                fontWeight: '600',
+                                width: '100%',
+                                cursor: 'pointer',
+                                transition: 'all 0.15s ease',
+                                boxShadow: '0 2px 4px rgba(0, 0, 0, 0.1)'
+                            }}
+                            onMouseOver={(e) => { e.currentTarget.style.backgroundColor = '#b91c1c'; }}
+                            onMouseOut={(e) => { e.currentTarget.style.backgroundColor = '#dc2626'; }}
+                        >
+                            Acknowledge (Press Enter)
+                        </button>
+                    </div>
+                </div>
+            )}
+
             {/* ── SUCCESS MODAL ── */}
             {successModal && (
                 <div style={{
@@ -7143,7 +7644,7 @@ export default function WorkstationDashboard() {
 
                             {/* Tracking Number */}
                             <div style={{ textAlign: 'center', fontSize: '20px', fontWeight: '900', letterSpacing: '2px', color: '#000000', marginBottom: '8px' }}>
-                                SKYT-{printLabelModal.trackingNumber}
+                                {printLabelModal.trackingNumber}
                             </div>
 
                             {/* Temu Sender Reference if present */}
@@ -7632,6 +8133,106 @@ export default function WorkstationDashboard() {
                                 }}
                             >
                                 Close
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* ── MODAL: MISSED FIRST SCAN WARNING & RECONCILIATION ── */}
+            {missedFirstScanModal && (
+                <div style={{
+                    position: 'fixed',
+                    top: 0, left: 0, right: 0, bottom: 0,
+                    backgroundColor: 'rgba(0, 0, 0, 0.6)',
+                    backdropFilter: 'blur(3px)',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    zIndex: 4000,
+                    animation: 'fadeIn 0.2s ease-out'
+                }}>
+                    <div style={{
+                        backgroundColor: '#ffffff',
+                        border: '2px solid #e21b22',
+                        borderRadius: '12px',
+                        padding: '24px 20px',
+                        maxWidth: '420px',
+                        width: '92%',
+                        boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.15), 0 10px 10px -5px rgba(0, 0, 0, 0.04)',
+                        display: 'flex',
+                        flexDirection: 'column',
+                        gap: '12px',
+                        textAlign: 'center'
+                    }}>
+                        <div style={{
+                            backgroundColor: '#fee2e2',
+                            color: '#e21b22',
+                            width: '56px', height: '56px',
+                            borderRadius: '50%',
+                            display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                            margin: '0 auto 6px auto'
+                        }}>
+                            <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                                <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
+                                <line x1="12" y1="9" x2="12" y2="13" />
+                                <line x1="12" y1="17" x2="12.01" y2="17" />
+                            </svg>
+                        </div>
+
+                        <h3 style={{ margin: 0, fontSize: '17px', fontWeight: '700', color: '#111827' }}>
+                            {missedFirstScanModal.message?.includes('service provider') ? 'Service Provider Not Assigned' : 'Missed First Scan'}
+                        </h3>
+
+                        <div style={{ backgroundColor: '#fef2f2', border: '1px solid #fca5a5', borderRadius: '8px', padding: '10px 12px', fontSize: '13px', color: '#991b1b', lineHeight: '1.45', textAlign: 'left' }}>
+                            {missedFirstScanModal.message || 'This parcel was not scanned during Box Unsealing (1st scan), but it was reconciled during LMD Verification.'}
+                        </div>
+
+                        <div style={{ fontSize: '13px', color: '#374151', fontWeight: '600' }}>
+                            Are there any other parcels to scan for this bag?
+                        </div>
+
+                        <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end', paddingTop: '4px' }}>
+                            <button
+                                onClick={() => {
+                                    setMissedFirstScanModal(null);
+                                    setTimeout(() => {
+                                        if (scanInputRef.current) scanInputRef.current.focus();
+                                    }, 50);
+                                }}
+                                style={{
+                                    flex: 1,
+                                    backgroundColor: '#ffffff',
+                                    color: '#374151',
+                                    border: '1px solid #d1d5db',
+                                    borderRadius: '8px',
+                                    padding: '10px 12px',
+                                    fontSize: '13px',
+                                    fontWeight: '700',
+                                    cursor: 'pointer'
+                                }}
+                            >
+                                Yes, more parcels
+                            </button>
+                            <button
+                                onClick={() => {
+                                    setMissedFirstScanModal(null);
+                                    setConfirmFinishModal(true);
+                                    setDiscrepancyReason('');
+                                    setCustomDiscrepancyNote('');
+                                }}
+                                style={{
+                                    flex: 1,
+                                    backgroundColor: '#e21b22',
+                                    color: '#ffffff',
+                                    border: 'none',
+                                    borderRadius: '8px',
+                                    padding: '10px 12px',
+                                    fontSize: '13px',
+                                    fontWeight: '700',
+                                    cursor: 'pointer',
+                                    boxShadow: '0 2px 4px rgba(0, 0, 0, 0.1)'
+                                }}
+                            >
+                                No, close this bag
                             </button>
                         </div>
                     </div>

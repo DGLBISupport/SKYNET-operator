@@ -1,5 +1,7 @@
 import { NextResponse } from 'next/server';
 
+export const dynamic = 'force-dynamic';
+
 const getSupabaseConfig = () => {
     const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
     const key = process.env.NEXT_PUBLIC_SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
@@ -44,7 +46,42 @@ export async function GET(request: Request) {
             );
             if (shipRes.ok) {
                 const shipData = await shipRes.json();
-                if (Array.isArray(shipData)) {
+                if (Array.isArray(shipData) && shipData.length > 0) {
+                    let partnerMap: Record<string, string> = {};
+                    const refs = shipData.map((s: any) => s.reference_number).filter(Boolean);
+                    if (refs.length > 0) {
+                        const refsQuery = refs.map((r: string) => `shipment_ref.eq.${encodeURIComponent(r)}`).join(',');
+                        try {
+                            const spaRes = await fetch(
+                                `${sb.url}/rest/v1/service_provider_allocation?or=(${refsQuery})&select=shipment_ref,service_provider`,
+                                { headers: sb.headers }
+                            );
+                            if (spaRes.ok) {
+                                const spaData = await spaRes.json();
+                                const spRes = await fetch(`${sb.url}/rest/v1/service_providers?select=id,name`, { headers: sb.headers });
+                                if (spRes.ok) {
+                                    const spData = await spRes.json();
+                                    const spMap: Record<number, string> = { 1: 'PickMe', 2: 'Domex' };
+                                    (spData || []).forEach((sp: any) => {
+                                        spMap[sp.id] = sp.name;
+                                    });
+                                    (spaData || []).forEach((alloc: any) => {
+                                        if (alloc.shipment_ref && alloc.service_provider) {
+                                            const spNum = Number(alloc.service_provider);
+                                            let name = spMap[spNum] || spMap[alloc.service_provider] || 'Unknown';
+                                            if (name.toLowerCase().includes('pickme')) name = 'PickMe';
+                                            else if (name.toLowerCase().includes('domex')) name = 'Domex';
+                                            else if (name.toLowerCase().includes('pronto')) name = 'Pronto';
+                                            partnerMap[alloc.shipment_ref] = name;
+                                        }
+                                    });
+                                }
+                            }
+                        } catch (err) {
+                            console.error("Error loading allocations in search:", err);
+                        }
+                    }
+
                     parcels = shipData.map(s => ({
                         referenceNumber: s.reference_number,
                         trackingNumber: s.reference_number,
@@ -54,7 +91,7 @@ export async function GET(request: Request) {
                         consigneeName: s.consignee_name || 'Unknown Recipient',
                         consigneeAddress: s.consignee_address_1 || s.consignee_address_3 || '',
                         city: s.consignee_location_name || s.consignee_address_3 || 'Unknown City',
-                        assignedPartner: s.delivery_agent_code || 'PickMe',
+                        assignedPartner: partnerMap[s.reference_number] || 'Unknown',
                         assignedZone: s.delivery_route_code || 'Default-Zone',
                         weight: s.weight || s.dead_weight || 0.1,
                         goodsDescription: s.goods_description || '',
