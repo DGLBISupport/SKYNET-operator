@@ -100,6 +100,94 @@ async function resolveZoneAndPartner(
     return { assignedZone, assignedPartner, mappedCity };
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// FFDX GetonLine Tracking Upload
+// Mirrors track_upload.py — sends EventID 1558 "Collected by Courier Provider"
+// after every successful 1st scan (box unsealing). Fire-and-forget: never
+// blocks the scan response; errors are logged only.
+// ─────────────────────────────────────────────────────────────────────────────
+function buildFfdxXml(referenceNumber: string): string {
+    const entityId   = process.env.FFDX_ENTITY_ID   || '';
+    const entityPin  = process.env.FFDX_ENTITY_PIN  || '';
+    const updateId   = process.env.FFDX_UPDATE_ENTITY_ID || 'LK7171';
+    const now = new Date();
+    // Format: YYYY/MM/DD HH:MM:SS AM/PM  (matches Python strftime "%Y/%m/%d %I:%M:%S %p")
+    const pad = (n: number) => String(n).padStart(2, '0');
+    const hours12 = now.getHours() % 12 || 12;
+    const ampm = now.getHours() < 12 ? 'AM' : 'PM';
+    const eventDT = `${now.getFullYear()}/${pad(now.getMonth() + 1)}/${pad(now.getDate())} ${pad(hours12)}:${pad(now.getMinutes())}:${pad(now.getSeconds())} ${ampm}`;
+
+    return `<?xml version='1.0' encoding='ISO-8859-1' ?>
+<WSGET><AccessRequest><WSVersion>WS1.0</WSVersion><FileType>2</FileType><Action>upload</Action><EntityID>${entityId}</EntityID><EntityPIN>${entityPin}</EntityPIN><MessageID>0001</MessageID></AccessRequest><Event><ReferenceNumber>${referenceNumber}</ReferenceNumber><ReferenceType>C</ReferenceType><EventDateTime>${eventDT}</EventDateTime><EventID>1558</EventID><Remarks>Skynet Warehouse</Remarks><OriginByPrefix>0</OriginByPrefix><OriginEntityID></OriginEntityID><UpdateEntityID>${updateId}</UpdateEntityID><UpdateEntityLocationName>Colombo</UpdateEntityLocationName></Event></WSGET>`;
+}
+
+async function uploadToFfdx(
+    referenceNumber: string,
+    supabaseUrl: string,
+    supabaseHeaders: Record<string, string>,
+    allocationId?: number | null
+): Promise<void> {
+    const apiUrl   = `https://ws05.ffdx.net/ffdx_ws/v12/service_ffdx.asmx/WSDataTransfer`;
+    const username = process.env.FFDX_USERNAME || '';
+    const password = process.env.FFDX_PASSWORD || '';
+
+    try {
+        const xmlStream = buildFfdxXml(referenceNumber);
+        const body = new URLSearchParams({
+            Username:     username,
+            Password:     password,
+            xmlStream:    xmlStream,
+            LevelConfirm: '0'
+        });
+
+        console.log(`[FFDX] Uploading tracking event for parcel: ${referenceNumber}`);
+        const res = await fetch(apiUrl, {
+            method:  'POST',
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+            body:    body.toString(),
+            signal:  AbortSignal.timeout(15000)   // 15 s timeout
+        });
+
+        const rawText = (await res.text()).trim();
+        console.log(`[FFDX] HTTP ${res.status} for ${referenceNumber}: ${rawText.slice(0, 200)}`);
+
+        // Determine success: FFDX returns XML; a successful upload contains <Status>1</Status>
+        const success = res.ok && rawText.includes('<Status>1</Status>');
+        const trackStatus = success ? 'UPLOADED' : 'FAILED';
+
+        // Update track_status in Supabase (best-effort)
+        if (allocationId) {
+            await fetch(
+                `${supabaseUrl}/rest/v1/service_provider_allocation?id=eq.${allocationId}`,
+                {
+                    method:  'PATCH',
+                    headers: { ...supabaseHeaders, 'Content-Type': 'application/json' },
+                    body:    JSON.stringify({ track_status: trackStatus })
+                }
+            ).catch(e => console.error('[FFDX] Failed to update track_status in Supabase:', e));
+        }
+
+        if (!success) {
+            console.warn(`[FFDX] Upload may have failed for ${referenceNumber}. Raw: ${rawText.slice(0, 400)}`);
+        } else {
+            console.log(`[FFDX] ✅ Successfully uploaded tracking event for ${referenceNumber}`);
+        }
+    } catch (err: any) {
+        console.error(`[FFDX] ❌ Connection error for ${referenceNumber}:`, err?.message || err);
+        // Still try to mark as FAILED in Supabase
+        if (allocationId) {
+            fetch(
+                `${supabaseUrl}/rest/v1/service_provider_allocation?id=eq.${allocationId}`,
+                {
+                    method:  'PATCH',
+                    headers: { ...supabaseHeaders, 'Content-Type': 'application/json' },
+                    body:    JSON.stringify({ track_status: 'FAILED' })
+                }
+            ).catch(() => {});
+        }
+    }
+}
+
 export async function POST(request: Request) {
     try {
         const { 
@@ -285,7 +373,8 @@ export async function POST(request: Request) {
             if (bagNumber) {
                 // Quick guard: if this bag has already been unsealed, block further first-scan attempts
                 try {
-                    const checkUnsealRes = await fetch(`${supabaseUrl}/rest/v1/bag_unsealing?bag_number=eq.${encodeURIComponent(bagNumber)}`, { headers });
+                    const mawbFilter = mawbRef ? `mawb_ref=eq.${encodeURIComponent(mawbRef)}&` : '';
+                    const checkUnsealRes = await fetch(`${supabaseUrl}/rest/v1/bag_unsealing?${mawbFilter}bag_number=eq.${encodeURIComponent(bagNumber)}`, { headers });
                     if (checkUnsealRes.ok) {
                         const unsealList = await checkUnsealRes.json();
                         const unsealRec = unsealList && unsealList[0];
@@ -358,6 +447,9 @@ export async function POST(request: Request) {
                     headers: { ...headers, "Content-Type": "application/json" },
                     body: JSON.stringify({ unsealed: true, scan_status: '1ST_SCAN_DONE', updated_at: new Date().toISOString() })
                 }).catch(e => console.error("Failed to set 1ST_SCAN_DONE on allocation:", e));
+
+                // Fire-and-forget: push "Collected by Courier Provider" event to FFDX GetonLine
+                uploadToFfdx(shipmentRef, supabaseUrl, headers, finalAllocation.id);
             } else {
                 // Parcel has no allocation row yet — create a minimal one to record scan status
                 fetch(`${supabaseUrl}/rest/v1/service_provider_allocation`, {
@@ -371,6 +463,10 @@ export async function POST(request: Request) {
                         updated_at: new Date().toISOString()
                     })
                 }).catch(e => console.error("Failed to create minimal allocation for 1ST_SCAN_DONE:", e));
+
+                // Fire-and-forget: push "Collected by Courier Provider" event to FFDX GetonLine
+                // (no allocationId yet since row was just created — track_status will be set via allocationId=null)
+                uploadToFfdx(shipmentRef, supabaseUrl, headers, null);
             }
 
             // Resolve zone and partner using helper
@@ -753,9 +849,10 @@ export async function GET(request: Request) {
                 }
             }
 
-            // For every bag found in bagCountsMap, verify count directly against shipments table
+            // For every bag found in bagCountsMap, verify count directly against shipments table specifically for this MAWB
             for (const bNum of Object.keys(bagCountsMap)) {
-                const checkShipRes = await fetch(`${supabaseUrl}/rest/v1/shipments?bag_number=ilike.${encodeURIComponent(bNum)}&select=reference_number`, { headers });
+                if (bNum.includes('-UNASSIGNED') || bNum.includes('-BAG-')) continue;
+                const checkShipRes = await fetch(`${supabaseUrl}/rest/v1/shipments?mawb_reference=ilike.${cleanSearchMawb}&bag_number=ilike.${encodeURIComponent(bNum)}&select=reference_number`, { headers });
                 if (checkShipRes.ok) {
                     const shipRows = await checkShipRes.json();
                     if (Array.isArray(shipRows) && shipRows.length > 0) {
@@ -783,49 +880,100 @@ export async function GET(request: Request) {
         if (getBagParcels && bagNumberParam) {
             const rawBagNum = bagNumberParam.trim();
             const cleanBagNum = encodeURIComponent(rawBagNum);
+            const searchMawb = mawbRefParam ? mawbRefParam.trim() : '';
+            const cleanSearchMawb = searchMawb ? encodeURIComponent(searchMawb) : '';
 
             let shipments: any[] = [];
 
-            // 1. Try direct exact match on bag_number in shipments table
-            let res = await fetch(`${supabaseUrl}/rest/v1/shipments?bag_number=eq.${cleanBagNum}&select=*`, { headers });
-            if (res.ok) {
-                const found = await res.json();
-                if (Array.isArray(found) && found.length > 0) shipments = found;
-            }
-
-            // 2. Try case-insensitive ilike match on bag_number
-            if (!Array.isArray(shipments) || shipments.length === 0) {
-                res = await fetch(`${supabaseUrl}/rest/v1/shipments?bag_number=ilike.${cleanBagNum}&select=*`, { headers });
+            // If MAWB reference is provided, scope search to BOTH MAWB and Bag Number
+            if (cleanSearchMawb) {
+                // 1. Try direct exact match on bag_number AND mawb_reference in shipments table
+                let res = await fetch(`${supabaseUrl}/rest/v1/shipments?mawb_reference=ilike.${cleanSearchMawb}&bag_number=eq.${cleanBagNum}&select=*`, { headers });
                 if (res.ok) {
                     const found = await res.json();
                     if (Array.isArray(found) && found.length > 0) shipments = found;
                 }
+
+                // 2. Try case-insensitive ilike match on bag_number AND mawb_reference
+                if (!Array.isArray(shipments) || shipments.length === 0) {
+                    res = await fetch(`${supabaseUrl}/rest/v1/shipments?mawb_reference=ilike.${cleanSearchMawb}&bag_number=ilike.${cleanBagNum}&select=*`, { headers });
+                    if (res.ok) {
+                        const found = await res.json();
+                        if (Array.isArray(found) && found.length > 0) shipments = found;
+                    }
+                }
+
+                // 3. Try wildcard ilike match on bag_number AND mawb_reference
+                if (!Array.isArray(shipments) || shipments.length === 0) {
+                    res = await fetch(`${supabaseUrl}/rest/v1/shipments?mawb_reference=ilike.${cleanSearchMawb}&bag_number=ilike.*${cleanBagNum}*&select=*`, { headers });
+                    if (res.ok) {
+                        const found = await res.json();
+                        if (Array.isArray(found) && found.length > 0) shipments = found;
+                    }
+                }
+
+                // 4. Fallback search on shipments_duplicate table by exact bag_number AND mawb_reference
+                if (!Array.isArray(shipments) || shipments.length === 0) {
+                    res = await fetch(`${supabaseUrl}/rest/v1/shipments_duplicate?mawb_reference=ilike.${cleanSearchMawb}&bag_number=eq.${cleanBagNum}&select=*`, { headers });
+                    if (res.ok) {
+                        const found = await res.json();
+                        if (Array.isArray(found) && found.length > 0) shipments = found;
+                    }
+                }
+
+                // 5. Fallback search on shipments_duplicate table by ilike bag_number AND mawb_reference
+                if (!Array.isArray(shipments) || shipments.length === 0) {
+                    res = await fetch(`${supabaseUrl}/rest/v1/shipments_duplicate?mawb_reference=ilike.${cleanSearchMawb}&bag_number=ilike.${cleanBagNum}&select=*`, { headers });
+                    if (res.ok) {
+                        const found = await res.json();
+                        if (Array.isArray(found) && found.length > 0) shipments = found;
+                    }
+                }
             }
 
-            // 3. Try wildcard ilike match on bag_number
+            // Fallback search without MAWB if no shipments were found matching the MAWB (or if no MAWB provided)
             if (!Array.isArray(shipments) || shipments.length === 0) {
-                res = await fetch(`${supabaseUrl}/rest/v1/shipments?bag_number=ilike.*${cleanBagNum}*&select=*`, { headers });
+                // 1. Try direct exact match on bag_number in shipments table
+                let res = await fetch(`${supabaseUrl}/rest/v1/shipments?bag_number=eq.${cleanBagNum}&select=*`, { headers });
                 if (res.ok) {
                     const found = await res.json();
                     if (Array.isArray(found) && found.length > 0) shipments = found;
                 }
-            }
 
-            // 4. Fallback search on shipments_duplicate table by exact bag_number
-            if (!Array.isArray(shipments) || shipments.length === 0) {
-                res = await fetch(`${supabaseUrl}/rest/v1/shipments_duplicate?bag_number=eq.${cleanBagNum}&select=*`, { headers });
-                if (res.ok) {
-                    const found = await res.json();
-                    if (Array.isArray(found) && found.length > 0) shipments = found;
+                // 2. Try case-insensitive ilike match on bag_number
+                if (!Array.isArray(shipments) || shipments.length === 0) {
+                    res = await fetch(`${supabaseUrl}/rest/v1/shipments?bag_number=ilike.${cleanBagNum}&select=*`, { headers });
+                    if (res.ok) {
+                        const found = await res.json();
+                        if (Array.isArray(found) && found.length > 0) shipments = found;
+                    }
                 }
-            }
 
-            // 5. Fallback search on shipments_duplicate table by ilike bag_number
-            if (!Array.isArray(shipments) || shipments.length === 0) {
-                res = await fetch(`${supabaseUrl}/rest/v1/shipments_duplicate?bag_number=ilike.${cleanBagNum}&select=*`, { headers });
-                if (res.ok) {
-                    const found = await res.json();
-                    if (Array.isArray(found) && found.length > 0) shipments = found;
+                // 3. Try wildcard ilike match on bag_number
+                if (!Array.isArray(shipments) || shipments.length === 0) {
+                    res = await fetch(`${supabaseUrl}/rest/v1/shipments?bag_number=ilike.*${cleanBagNum}*&select=*`, { headers });
+                    if (res.ok) {
+                        const found = await res.json();
+                        if (Array.isArray(found) && found.length > 0) shipments = found;
+                    }
+                }
+
+                // 4. Fallback search on shipments_duplicate table by exact bag_number
+                if (!Array.isArray(shipments) || shipments.length === 0) {
+                    res = await fetch(`${supabaseUrl}/rest/v1/shipments_duplicate?bag_number=eq.${cleanBagNum}&select=*`, { headers });
+                    if (res.ok) {
+                        const found = await res.json();
+                        if (Array.isArray(found) && found.length > 0) shipments = found;
+                    }
+                }
+
+                // 5. Fallback search on shipments_duplicate table by ilike bag_number
+                if (!Array.isArray(shipments) || shipments.length === 0) {
+                    res = await fetch(`${supabaseUrl}/rest/v1/shipments_duplicate?bag_number=ilike.${cleanBagNum}&select=*`, { headers });
+                    if (res.ok) {
+                        const found = await res.json();
+                        if (Array.isArray(found) && found.length > 0) shipments = found;
+                    }
                 }
             }
 
@@ -835,9 +983,9 @@ export async function GET(request: Request) {
                 const mawbRefToSearch = mawbMatch ? mawbMatch[1] : (mawbRefParam || '');
 
                 if (mawbRefToSearch) {
-                    res = await fetch(`${supabaseUrl}/rest/v1/shipments?mawb_reference=ilike.${encodeURIComponent(mawbRefToSearch.trim())}&or=(bag_number.is.null,bag_number.eq."")&select=*`, { headers });
-                    if (res.ok) {
-                        const found = await res.json();
+                    const synthRes = await fetch(`${supabaseUrl}/rest/v1/shipments?mawb_reference=ilike.${encodeURIComponent(mawbRefToSearch.trim())}&or=(bag_number.is.null,bag_number.eq."")&select=*`, { headers });
+                    if (synthRes.ok) {
+                        const found = await synthRes.json();
                         if (Array.isArray(found) && found.length > 0) shipments = found;
                     }
                 }

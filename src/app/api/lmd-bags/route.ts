@@ -390,24 +390,9 @@ export async function POST(request: Request) {
                         })
                     });
 
-                    // Save all parcels in bag items table
-                    if (bag.parcels && Array.isArray(bag.parcels)) {
-                        for (const item of bag.parcels) {
-                            const tracking = item.trackingNumber || item.reference_number;
-                            if (tracking) {
-                                await fetch(`${sb.url}/rest/v1/outbound_lmd_bag_items`, {
-                                    method: 'POST',
-                                    headers: { ...sb.headers, "Prefer": "resolution=merge-duplicates" },
-                                    body: JSON.stringify({
-                                        bag_number: bagNumber,
-                                        shipment_ref: tracking,
-                                        weight: Number(item.weight) || 0.1,
-                                        scanned_by: sealingOperator
-                                    })
-                                }).catch(e => console.error("Error inserting bag item:", e));
-                            }
-                        }
-                    }
+                    // Note: bag items are already recorded row-by-row during 'add-parcel'.
+                    // Do NOT re-insert them here to avoid duplicate scanned_by entries.
+
                 } catch (err) {
                     console.error("Supabase seal bag update error:", err);
                 }

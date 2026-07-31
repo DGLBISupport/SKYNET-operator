@@ -1056,7 +1056,7 @@ export default function WorkstationDashboard() {
         if (firstScanSelectedBag === bagNumber) {
             return firstScanHistory.length;
         }
-        const unsealed = unsealedBoxes.find(ub => ub.mawb === firstScanMawb && ub.bagNumber === bagNumber);
+        const unsealed = unsealedBoxes.find(ub => ub.mawb?.toLowerCase() === firstScanMawb?.toLowerCase() && ub.bagNumber?.toLowerCase() === bagNumber?.toLowerCase());
         if (unsealed) {
             return unsealed.scanned;
         }
@@ -1064,7 +1064,7 @@ export default function WorkstationDashboard() {
     };
 
     const getBagStatus = (bagNumber: string, expected: number) => {
-        const unsealed = unsealedBoxes.find(ub => ub.mawb === firstScanMawb && ub.bagNumber === bagNumber);
+        const unsealed = unsealedBoxes.find(ub => ub.mawb?.toLowerCase() === firstScanMawb?.toLowerCase() && ub.bagNumber?.toLowerCase() === bagNumber?.toLowerCase());
         if (unsealed) {
             return 'COMPLETED';
         }
@@ -1084,8 +1084,8 @@ export default function WorkstationDashboard() {
             if (aIsActive && !bIsActive) return -1;
             if (!aIsActive && bIsActive) return 1;
 
-            const aUnsealedIndex = unsealedBoxes.findIndex(ub => ub.mawb === firstScanMawb && ub.bagNumber === a.bagNumber);
-            const bUnsealedIndex = unsealedBoxes.findIndex(ub => ub.mawb === firstScanMawb && ub.bagNumber === b.bagNumber);
+            const aUnsealedIndex = unsealedBoxes.findIndex(ub => ub.mawb?.toLowerCase() === firstScanMawb?.toLowerCase() && ub.bagNumber?.toLowerCase() === a.bagNumber?.toLowerCase());
+            const bUnsealedIndex = unsealedBoxes.findIndex(ub => ub.mawb?.toLowerCase() === firstScanMawb?.toLowerCase() && ub.bagNumber?.toLowerCase() === b.bagNumber?.toLowerCase());
 
             const aIsCompleted = aUnsealedIndex !== -1;
             const bIsCompleted = bUnsealedIndex !== -1;
@@ -1994,7 +1994,10 @@ export default function WorkstationDashboard() {
                             action: 'add-parcel',
                             mawbRef: selectedSecondScanMawb,
                             bagNumber: activeOutboundBag.bagNumber,
-                            parcel: parcelToStore
+                            parcel: parcelToStore,
+                            operator: currentUser
+                                ? (`${currentUser.firstName || ''} ${currentUser.lastName || ''}`.trim() || currentUser.username || currentUser.email)
+                                : undefined
                         })
                     });
                 }
@@ -2935,7 +2938,7 @@ export default function WorkstationDashboard() {
                                                     const selectedBagNum = e.target.value;
                                                     const matchedBag = firstScanBags.find(b => b.bagNumber === selectedBagNum);
                                                     if (matchedBag) {
-                                                        const alreadyUnsealed = unsealedBoxes.find(ub => ub.mawb === firstScanMawb && ub.bagNumber === matchedBag.bagNumber);
+                                                        const alreadyUnsealed = unsealedBoxes.find(ub => ub.mawb?.toLowerCase() === firstScanMawb?.toLowerCase() && ub.bagNumber?.toLowerCase() === matchedBag.bagNumber?.toLowerCase());
                                                         if (alreadyUnsealed) {
                                                             setInvalidBagParcelModal({
                                                                 barcode: alreadyUnsealed.bagNumber,
@@ -3329,7 +3332,7 @@ export default function WorkstationDashboard() {
                                                     const scanned = getBagScannedCount(bag.bagNumber);
                                                     const status = getBagStatus(bag.bagNumber, expected);
                                                     const remaining = expected - scanned;
-                                                    const unsealed = unsealedBoxes.find(ub => ub.mawb === firstScanMawb && ub.bagNumber === bag.bagNumber);
+                                                    const unsealed = unsealedBoxes.find(ub => ub.mawb?.toLowerCase() === firstScanMawb?.toLowerCase() && ub.bagNumber?.toLowerCase() === bag.bagNumber?.toLowerCase());
 
                                                     let bgColor = '#ffffff';
                                                     let borderColor = '#e5e7eb';
