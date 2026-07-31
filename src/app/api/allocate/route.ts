@@ -272,27 +272,53 @@ export async function POST(request: Request) {
         const cleanBar = trackingNumber.trim();
         let shipmentRef: string = cleanBar;
         const isNumeric = /^\d+$/.test(cleanBar);
+        const activeMawb = mawbRef || targetMawb || '';
 
         if (isNumeric) {
-            // First search both reference_number and sender_reference
-            const searchRes = await fetch(`${supabaseUrl}/rest/v1/shipments?or=(reference_number.eq.${encodeURIComponent(cleanBar)},sender_reference.eq.${encodeURIComponent(cleanBar)})`, { headers });
-            if (searchRes.ok) {
-                const shipments = await searchRes.json();
-                if (shipments && shipments[0]) {
-                    resolvedShipment = shipments[0];
-                    shipmentRef = String(resolvedShipment.reference_number);
+            // First try matching in activeMawb if provided
+            if (activeMawb) {
+                const mawbSearchRes = await fetch(`${supabaseUrl}/rest/v1/shipments?mawb_reference=ilike.${encodeURIComponent(activeMawb.trim())}&or=(reference_number.eq.${encodeURIComponent(cleanBar)},sender_reference.eq.${encodeURIComponent(cleanBar)})`, { headers });
+                if (mawbSearchRes.ok) {
+                    const shipments = await mawbSearchRes.json();
+                    if (shipments && shipments[0]) {
+                        resolvedShipment = shipments[0];
+                        shipmentRef = String(resolvedShipment.reference_number);
+                    }
+                }
+            }
+            if (!resolvedShipment) {
+                // Search across all MAWBs
+                const searchRes = await fetch(`${supabaseUrl}/rest/v1/shipments?or=(reference_number.eq.${encodeURIComponent(cleanBar)},sender_reference.eq.${encodeURIComponent(cleanBar)})`, { headers });
+                if (searchRes.ok) {
+                    const shipments = await searchRes.json();
+                    if (shipments && shipments[0]) {
+                        resolvedShipment = shipments[0];
+                        shipmentRef = String(resolvedShipment.reference_number);
+                    }
                 }
             }
         }
 
         if (!resolvedShipment) {
             // Find by sender_reference (Temu barcode)
-            const temuRes = await fetch(`${supabaseUrl}/rest/v1/shipments?sender_reference=eq.${encodeURIComponent(cleanBar)}`, { headers });
-            if (temuRes.ok) {
-                const shipments = await temuRes.json();
-                if (shipments && shipments[0]) {
-                    resolvedShipment = shipments[0];
-                    shipmentRef = String(resolvedShipment.reference_number);
+            if (activeMawb) {
+                const mawbTemuRes = await fetch(`${supabaseUrl}/rest/v1/shipments?mawb_reference=ilike.${encodeURIComponent(activeMawb.trim())}&sender_reference=eq.${encodeURIComponent(cleanBar)}`, { headers });
+                if (mawbTemuRes.ok) {
+                    const shipments = await mawbTemuRes.json();
+                    if (shipments && shipments[0]) {
+                        resolvedShipment = shipments[0];
+                        shipmentRef = String(resolvedShipment.reference_number);
+                    }
+                }
+            }
+            if (!resolvedShipment) {
+                const temuRes = await fetch(`${supabaseUrl}/rest/v1/shipments?sender_reference=eq.${encodeURIComponent(cleanBar)}`, { headers });
+                if (temuRes.ok) {
+                    const shipments = await temuRes.json();
+                    if (shipments && shipments[0]) {
+                        resolvedShipment = shipments[0];
+                        shipmentRef = String(resolvedShipment.reference_number);
+                    }
                 }
             }
         }
@@ -368,9 +394,15 @@ export async function POST(request: Request) {
                 }, { status: 404 });
             }
 
-            // Handle overrideBag if shipment is found but bag number doesn't match
+            // Handle overrideBag if shipment is found but bag number or MAWB doesn't match
             let overridePerformed = false;
-            if (bagNumber) {
+            const shipmentBag = shipment.bag_number || '';
+            const shipmentMawb = shipment.mawb_reference || shipment.mawb_ref || '';
+
+            const isMawbMismatch = Boolean(mawbRef && shipmentMawb && shipmentMawb.trim().toLowerCase() !== mawbRef.trim().toLowerCase());
+            const isBagMismatch = Boolean(bagNumber && shipmentBag.trim().toLowerCase() !== bagNumber.trim().toLowerCase());
+
+            if (bagNumber || mawbRef) {
                 // Quick guard: if this bag has already been unsealed, block further first-scan attempts
                 try {
                     const mawbFilter = mawbRef ? `mawb_ref=eq.${encodeURIComponent(mawbRef)}&` : '';
@@ -394,35 +426,45 @@ export async function POST(request: Request) {
                 } catch (e) {
                     console.error('Failed to check bag_unsealing before first-scan:', e);
                 }
-                const shipmentBag = shipment.bag_number || '';
-                if (shipmentBag.toLowerCase() !== bagNumber.toLowerCase()) {
+
+                if (isMawbMismatch || isBagMismatch) {
                     if (overrideBag) {
-                        // Update bag_number in database (scan status is tracked in service_provider_allocation)
+                        // Update bag_number and mawb_reference in database
+                        const patchBody: any = {
+                            goods_description: extraNote ? `Overage: ${extraNote}` : (shipment.goods_description || '')
+                        };
+                        if (bagNumber) patchBody.bag_number = bagNumber;
+                        if (mawbRef) patchBody.mawb_reference = mawbRef;
+
                         const updateShipRes = await fetch(`${supabaseUrl}/rest/v1/shipments?reference_number=eq.${shipmentRef}`, {
                             method: 'PATCH',
                             headers: {
                                 ...headers,
                                 "Content-Type": "application/json"
                             },
-                            body: JSON.stringify({
-                                bag_number: bagNumber,
-                                goods_description: extraNote ? `Overage: ${extraNote}` : (shipment.goods_description || '')
-                            })
+                            body: JSON.stringify(patchBody)
                         });
                         if (updateShipRes.ok) {
-                            shipment.bag_number = bagNumber;
+                            if (bagNumber) shipment.bag_number = bagNumber;
+                            if (mawbRef) shipment.mawb_reference = mawbRef;
                             overridePerformed = true;
                         } else {
                             const errText = await updateShipRes.text();
-                            return NextResponse.json({ success: false, error: `Failed to update shipment bag: ${errText}` }, { status: 500 });
+                            return NextResponse.json({ success: false, error: `Failed to update shipment bag/MAWB: ${errText}` }, { status: 500 });
                         }
                     } else {
+                        const mismatchMsg = isMawbMismatch
+                            ? `This parcel belongs to MAWB "${shipmentMawb}" (Bag "${shipmentBag || 'Unknown'}"), not the currently selected MAWB "${mawbRef}".`
+                            : `This parcel belongs to Bag "${shipmentBag || 'Unknown'}", not the currently selected Bag "${bagNumber}".`;
+
                         return NextResponse.json({
                             success: false,
                             error: 'NOT_IN_BAG',
-                            message: `This parcel belongs to Bag "${shipment.bag_number || 'Unknown'}", not the currently selected Bag "${bagNumber}".`,
-                            actualBag: shipment.bag_number || null,
-                            expectedBag: bagNumber
+                            message: mismatchMsg,
+                            actualBag: shipmentBag || null,
+                            actualMawb: shipmentMawb || null,
+                            expectedBag: bagNumber,
+                            expectedMawb: mawbRef
                         }, { status: 400 });
                     }
                 }
@@ -680,7 +722,7 @@ export async function POST(request: Request) {
 
         // 1. Manifest Mismatch Check
         if (validationStatus === 'CORRECT') {
-            const parcelMawb = allocation?.mawb_ref || shipment?.mawb_ref;
+            const parcelMawb = allocation?.mawb_ref || shipment?.mawb_reference || shipment?.mawb_ref;
             if (targetMawb && parcelMawb && parcelMawb.trim().toLowerCase() !== targetMawb.trim().toLowerCase()) {
                 validationStatus = 'INCORRECT';
                 validationReason = 'MANIFEST_MISMATCH';

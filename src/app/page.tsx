@@ -329,7 +329,7 @@ export default function WorkstationDashboard() {
     const [invalidBagParcelModal, setInvalidBagParcelModal] = useState<{ barcode: string; expectedBag: string; actualBag: string | null; reason: 'WRONG_BAG' | 'NOT_FOUND' | 'BAG_ALREADY_COMPLETED' | 'INVALID_BAG' | 'NO_BAG_SELECTED' } | null>(null);
     const [customConfirmModal, setCustomConfirmModal] = useState<{ title: string; message: string; onConfirm: () => void } | null>(null);
     const [overageCheckModal, setOverageCheckModal] = useState<{ bagNumber: string; expected: number; history: any[] } | null>(null);
-    const [extraParcelModal, setExtraParcelModal] = useState<{ barcode: string; reason: 'WRONG_BAG' | 'UNASSIGNED' | 'NOT_FOUND'; actualBag: string | null; expectedBag: string; } | null>(null);
+    const [extraParcelModal, setExtraParcelModal] = useState<{ barcode: string; reason: 'WRONG_BAG' | 'UNASSIGNED' | 'NOT_FOUND'; actualBag: string | null; actualMawb?: string | null; expectedBag: string; } | null>(null);
     const [extraParcelNote, setExtraParcelNote] = useState('');
     const [printLabelModal, setPrintLabelModal] = useState<{
         trackingNumber: string;
@@ -1441,11 +1441,12 @@ export default function WorkstationDashboard() {
                 }
             } else {
                 if (data.error === 'NOT_IN_BAG') {
-                    if (data.actualBag) {
+                    if (data.actualBag || data.actualMawb) {
                         setExtraParcelModal({
                             barcode: barcode,
                             reason: 'WRONG_BAG',
                             actualBag: data.actualBag,
+                            actualMawb: data.actualMawb,
                             expectedBag: firstScanSelectedBag
                         });
                     } else {
@@ -1453,10 +1454,11 @@ export default function WorkstationDashboard() {
                             barcode: barcode,
                             reason: 'UNASSIGNED',
                             actualBag: null,
+                            actualMawb: null,
                             expectedBag: firstScanSelectedBag
                         });
                     }
-                    setFirstScanError(data.message || 'Parcel belongs to a different bag or is unassigned.');
+                    setFirstScanError(data.message || 'Parcel belongs to a different bag/MAWB or is unassigned.');
                     setFirstScanStatus('ERROR');
                 } else if (data.error === 'NOT_FOUND') {
                     setExtraParcelModal({
@@ -6755,8 +6757,11 @@ export default function WorkstationDashboard() {
                 let actionText = 'Proceed';
 
                 if (isWrongBag) {
-                    modalTitle = 'Wrong Bag Detected';
-                    message = `Parcel "${extraParcelModal.barcode}" belongs to Bag "${extraParcelModal.actualBag || 'Unknown'}", not "${extraParcelModal.expectedBag}".`;
+                    const isMawbDiff = extraParcelModal.actualMawb && extraParcelModal.actualMawb.toLowerCase() !== firstScanMawb.toLowerCase();
+                    modalTitle = isMawbDiff ? 'MAWB / Bag Mismatch Detected' : 'Wrong Bag Detected';
+                    message = isMawbDiff
+                        ? `Parcel "${extraParcelModal.barcode}" belongs to MAWB "${extraParcelModal.actualMawb}" (Bag "${extraParcelModal.actualBag || 'Unknown'}"), not selected MAWB "${firstScanMawb}".`
+                        : `Parcel "${extraParcelModal.barcode}" belongs to Bag "${extraParcelModal.actualBag || 'Unknown'}", not "${extraParcelModal.expectedBag}".`;
                     actionText = `Move to Bag "${extraParcelModal.expectedBag}"`;
                 } else if (isUnassigned) {
                     modalTitle = 'ℹ Unassigned Parcel';
