@@ -196,6 +196,7 @@ export default function WorkstationDashboard() {
     const [scannedToday, setScannedToday] = useState<number>(0);
     const [timeString, setTimeString] = useState<string>('');
     const [scannerConnected, setScannerConnected] = useState<boolean | null>(null); // null = unknown, true = connected, false = no scanner
+    const [operatorMenuOpen, setOperatorMenuOpen] = useState<boolean>(false);
 
     // Device Manager states
     const [isDeviceManagerOpen, setIsDeviceManagerOpen] = useState(false);
@@ -2554,7 +2555,10 @@ export default function WorkstationDashboard() {
                     boxSizing: 'border-box'
                 }}>
                     {isSidebarExpanded && (
-                        <img src="/logo.png" alt="SKYNET logo" style={{ height: '24px', width: 'auto' }} />
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                            <img src="/logo.png" alt="SKYNET logo" style={{ height: '24px', width: 'auto' }} />
+                            <img src="/skynet_logi_logo.png" alt="LOGICENTRIX logo" style={{ height: '25px', width: 'auto' }} />
+                        </div>
                     )}
                     <button
                         onClick={() => setIsSidebarExpanded(!isSidebarExpanded)}
@@ -2578,161 +2582,329 @@ export default function WorkstationDashboard() {
                     </button>
                 </div>
 
-                {/* Sidebar Menu Items Category 1: Parcel Logistics */}
-                {isSidebarExpanded ? (
-                    <div style={{
-                        fontSize: '11px',
-                        fontWeight: '700',
-                        color: '#8c98a5',
-                        letterSpacing: '0.8px',
-                        padding: '20px 16px 8px 16px',
-                        textTransform: 'uppercase'
-                    }}>
-                        Parcel Logistics
-                    </div>
-                ) : (
-                    <div style={{ height: '16px' }} />
-                )}
-
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                    {([
-                        {
-                            id: 'first-scan',
-                            label: 'Box Unsealing',
-                            icon: (
-                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                                    <path d="M21 8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16Z" />
-                                    <path d="M12 22V12" />
-                                    <path d="m12 12 8.73-5M12 12 3.27 7" />
-                                    <path d="M3.27 7 12 12l8.73-5" />
-                                </svg>
-                            )
-                        },
-                        {
-                            id: 'second-scan',
-                            label: 'LMD Verification',
-                            icon: (
-                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                                    <path d="M3.85 8.62a4 4 0 0 1 4.78-4.77 4 4 0 0 1 6.74 0 4 4 0 0 1 4.78 4.78 4 4 0 0 1 0 6.74 4 4 0 0 1-4.77 4.78 4 4 0 0 1-6.75 0 4 4 0 0 1-4.78-4.77 4 4 0 0 1 0-6.76Z" />
-                                    <path d="m9 12 2 2 4-4" />
-                                </svg>
-                            )
-                        },
-                        {
-                            id: 'damaged-barcode',
-                            label: 'Damaged Labels',
-                            icon: (
-                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                                    <path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z" />
-                                    <line x1="12" y1="9" x2="12" y2="13" />
-                                    <line x1="12" y1="17" x2="12.01" y2="17" />
-                                </svg>
-                            )
-                        },
-                        {
-                            id: 'verify',
-                            label: 'Dispatch Verify',
-                            icon: (
-                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                                    <rect x="1" y="3" width="15" height="13" rx="2" ry="2" />
-                                    <polygon points="16 8 20 8 23 11 23 16 16 16 16 8" />
-                                    <circle cx="5.5" cy="18.5" r="2.5" />
-                                    <circle cx="18.5" cy="18.5" r="2.5" />
-                                </svg>
-                            )
-                        }
-                    ] as const).map((item) => (
-                        <button
-                            key={item.id}
-                            onClick={() => setActiveTab(item.id)}
-                            className={`sidebar-item ${activeTab === item.id ? 'active' : ''} ${!isSidebarExpanded ? 'sidebar-item-collapsed' : ''}`}
-                            title={!isSidebarExpanded ? item.label : ''}
-                        >
-                            {item.icon}
-                            {isSidebarExpanded && (
-                                <span style={{ whiteSpace: 'nowrap' }}>{item.label}</span>
-                            )}
-                        </button>
-                    ))}
-                </div>
-
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
-                    {/* Parent label: Operational Real-Time Dashboard */}
-                    {isSidebarExpanded && (
+                {/* Sidebar Navigation Items Container — flex 1 to push operator card to absolute bottom */}
+                <div style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column' }}>
+                    {/* Sidebar Menu Items Category 1: Parcel Logistics */}
+                    {isSidebarExpanded ? (
                         <div style={{
                             fontSize: '11px',
                             fontWeight: '700',
                             color: '#8c98a5',
                             letterSpacing: '0.8px',
-                            padding: '24px 16px 6px 16px',
+                            padding: '20px 16px 8px 16px',
                             textTransform: 'uppercase'
                         }}>
-                            Operational Dashboard
+                            Parcel Logistics
                         </div>
+                    ) : (
+                        <div style={{ height: '16px' }} />
                     )}
-                    {!isSidebarExpanded && (
-                        <div style={{ borderTop: '1px solid #e5e7eb', margin: '16px 12px 0 12px', paddingTop: '16px' }} />
-                    )}
 
-                    {/* Sub-item: Parcel Operations */}
-                    <button
-                        onClick={() => {
-                            setActiveTab('dashboard');
-                            setDashboardSubTab('total_received');
-                        }}
-                        className={`sidebar-item ${activeTab === 'dashboard' && dashboardSubTab !== 'productivity' ? 'active' : ''} ${!isSidebarExpanded ? 'sidebar-item-collapsed' : ''}`}
-                        title={!isSidebarExpanded ? 'Parcel Operations' : ''}
-                        style={{ marginLeft: isSidebarExpanded ? '8px' : '0' }}
-                    >
-                        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                            <path d="M21 8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16Z" />
-                            <path d="M12 22V12" />
-                            <path d="m12 12 8.73-5M12 12 3.27 7" />
-                        </svg>
-                        {isSidebarExpanded && (
-                            <span style={{ whiteSpace: 'nowrap', fontSize: '13px' }}>Parcel Operations</span>
-                        )}
-                    </button>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                        {([
+                            {
+                                id: 'first-scan',
+                                label: 'Box Unsealing',
+                                icon: (
+                                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                        <path d="M21 8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16Z" />
+                                        <path d="M12 22V12" />
+                                        <path d="m12 12 8.73-5M12 12 3.27 7" />
+                                        <path d="M3.27 7 12 12l8.73-5" />
+                                    </svg>
+                                )
+                            },
+                            {
+                                id: 'second-scan',
+                                label: 'LMD Verification',
+                                icon: (
+                                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                        <path d="M3.85 8.62a4 4 0 0 1 4.78-4.77 4 4 0 0 1 6.74 0 4 4 0 0 1 4.78 4.78 4 4 0 0 1 0 6.74 4 4 0 0 1-4.77 4.78 4 4 0 0 1-6.75 0 4 4 0 0 1-4.78-4.77 4 4 0 0 1 0-6.76Z" />
+                                        <path d="m9 12 2 2 4-4" />
+                                    </svg>
+                                )
+                            },
+                            {
+                                id: 'damaged-barcode',
+                                label: 'Damaged Labels',
+                                icon: (
+                                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                                        <path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z" />
+                                        <line x1="12" y1="9" x2="12" y2="13" />
+                                        <line x1="12" y1="17" x2="12.01" y2="17" />
+                                    </svg>
+                                )
+                            },
+                            {
+                                id: 'verify',
+                                label: 'Dispatch Verify',
+                                icon: (
+                                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                        <rect x="1" y="3" width="15" height="13" rx="2" ry="2" />
+                                        <polygon points="16 8 20 8 23 11 23 16 16 16 16 8" />
+                                        <circle cx="5.5" cy="18.5" r="2.5" />
+                                        <circle cx="18.5" cy="18.5" r="2.5" />
+                                    </svg>
+                                )
+                            }
+                        ] as const).map((item) => (
+                            <button
+                                key={item.id}
+                                onClick={() => setActiveTab(item.id)}
+                                className={`sidebar-item ${activeTab === item.id ? 'active' : ''} ${!isSidebarExpanded ? 'sidebar-item-collapsed' : ''}`}
+                                title={!isSidebarExpanded ? item.label : ''}
+                            >
+                                {item.icon}
+                                {isSidebarExpanded && (
+                                    <span style={{ whiteSpace: 'nowrap' }}>{item.label}</span>
+                                )}
+                            </button>
+                        ))}
+                    </div>
 
-                    {/* Sub-item: User Productivity */}
-                    <button
-                        onClick={() => {
-                            setActiveTab('dashboard');
-                            setDashboardSubTab('productivity');
-                        }}
-                        className={`sidebar-item ${activeTab === 'dashboard' && dashboardSubTab === 'productivity' ? 'active' : ''} ${!isSidebarExpanded ? 'sidebar-item-collapsed' : ''}`}
-                        title={!isSidebarExpanded ? 'User Productivity' : ''}
-                        style={{ marginLeft: isSidebarExpanded ? '8px' : '0' }}
-                    >
-                        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                            <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
-                            <circle cx="9" cy="7" r="4" />
-                            <path d="M23 21v-2a4 4 0 0 0-3-3.87" />
-                            <path d="M16 3.13a4 4 0 0 1 0 7.75" />
-                        </svg>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
+                        {/* Parent label: Operational Real-Time Dashboard */}
                         {isSidebarExpanded && (
-                            <span style={{ whiteSpace: 'nowrap', fontSize: '13px' }}>User Productivity</span>
+                            <div style={{
+                                fontSize: '11px',
+                                fontWeight: '700',
+                                color: '#8c98a5',
+                                letterSpacing: '0.8px',
+                                padding: '24px 16px 6px 16px',
+                                textTransform: 'uppercase'
+                            }}>
+                                Operational Dashboard
+                            </div>
                         )}
-                    </button>
+                        {!isSidebarExpanded && (
+                            <div style={{ borderTop: '1px solid #e5e7eb', margin: '16px 12px 0 12px', paddingTop: '16px' }} />
+                        )}
 
-                    {/* Reports */}
-                    <button
-                        onClick={() => setActiveTab('reports' as any)}
-                        className={`sidebar-item ${activeTab === 'reports' ? 'active' : ''} ${!isSidebarExpanded ? 'sidebar-item-collapsed' : ''}`}
-                        title={!isSidebarExpanded ? 'Reports' : ''}
-                    >
-                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                            <path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z" />
-                            <polyline points="14 2 14 8 20 8" />
-                            <line x1="16" y1="13" x2="8" y2="13" />
-                            <line x1="16" y1="17" x2="8" y2="17" />
-                            <line x1="10" y1="9" x2="8" y2="9" />
-                        </svg>
-                        {isSidebarExpanded && (
-                            <span style={{ whiteSpace: 'nowrap' }}>Reports</span>
-                        )}
-                    </button>
+                        {/* Sub-item: Parcel Operations */}
+                        <button
+                            onClick={() => {
+                                setActiveTab('dashboard');
+                                setDashboardSubTab('total_received');
+                            }}
+                            className={`sidebar-item ${activeTab === 'dashboard' && dashboardSubTab !== 'productivity' ? 'active' : ''} ${!isSidebarExpanded ? 'sidebar-item-collapsed' : ''}`}
+                            title={!isSidebarExpanded ? 'Parcel Operations' : ''}
+                            style={{ marginLeft: isSidebarExpanded ? '8px' : '0' }}
+                        >
+                            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                <path d="M21 8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16Z" />
+                                <path d="M12 22V12" />
+                                <path d="m12 12 8.73-5M12 12 3.27 7" />
+                            </svg>
+                            {isSidebarExpanded && (
+                                <span style={{ whiteSpace: 'nowrap', fontSize: '13px' }}>Parcel Operations</span>
+                            )}
+                        </button>
+
+                        {/* Sub-item: User Productivity */}
+                        <button
+                            onClick={() => {
+                                setActiveTab('dashboard');
+                                setDashboardSubTab('productivity');
+                            }}
+                            className={`sidebar-item ${activeTab === 'dashboard' && dashboardSubTab === 'productivity' ? 'active' : ''} ${!isSidebarExpanded ? 'sidebar-item-collapsed' : ''}`}
+                            title={!isSidebarExpanded ? 'User Productivity' : ''}
+                            style={{ marginLeft: isSidebarExpanded ? '8px' : '0' }}
+                        >
+                            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
+                                <circle cx="9" cy="7" r="4" />
+                                <path d="M23 21v-2a4 4 0 0 0-3-3.87" />
+                                <path d="M16 3.13a4 4 0 0 1 0 7.75" />
+                            </svg>
+                            {isSidebarExpanded && (
+                                <span style={{ whiteSpace: 'nowrap', fontSize: '13px' }}>User Productivity</span>
+                            )}
+                        </button>
+
+                        {/* Reports */}
+                        <button
+                            onClick={() => setActiveTab('reports' as any)}
+                            className={`sidebar-item ${activeTab === 'reports' ? 'active' : ''} ${!isSidebarExpanded ? 'sidebar-item-collapsed' : ''}`}
+                            title={!isSidebarExpanded ? 'Reports' : ''}
+                        >
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                <path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z" />
+                                <polyline points="14 2 14 8 20 8" />
+                                <line x1="16" y1="13" x2="8" y2="13" />
+                                <line x1="16" y1="17" x2="8" y2="17" />
+                                <line x1="10" y1="9" x2="8" y2="9" />
+                            </svg>
+                            {isSidebarExpanded && (
+                                <span style={{ whiteSpace: 'nowrap' }}>Reports</span>
+                            )}
+                        </button>
+                    </div>
                 </div>
+
+                {/* Sidebar Footer — Logged-In Operator Card matching reference design */}
+                {currentUser && (
+                    <div
+                        onClick={() => setOperatorMenuOpen(!operatorMenuOpen)}
+                        title={!isSidebarExpanded ? `${currentUser.firstName || ''} ${currentUser.lastName || ''}` : ''}
+                        style={{
+                            marginTop: 'auto',
+                            borderTop: '1px solid #e5e7eb',
+                            padding: '12px 14px',
+                            backgroundColor: '#ffffff',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: isSidebarExpanded ? 'space-between' : 'center',
+                            cursor: 'pointer',
+                            position: 'relative',
+                            userSelect: 'none'
+                        }}
+                    >
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '10px', minWidth: 0 }}>
+                            {/* Initials Circle Badge */}
+                            <div style={{
+                                width: '34px',
+                                height: '34px',
+                                borderRadius: '50%',
+                                backgroundColor: '#fee2e2',
+                                color: '#e21b22',
+                                fontWeight: '700',
+                                fontSize: '13px',
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                flexShrink: 0
+                            }}>
+                                {((currentUser.firstName?.[0] || 'S') + (currentUser.lastName?.[0] || 'L')).toUpperCase()}
+                            </div>
+                            {isSidebarExpanded && (
+                                <div style={{ display: 'flex', flexDirection: 'column', minWidth: 0 }}>
+                                    <span style={{ fontSize: '13px', fontWeight: '600', color: '#111827', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                                        {currentUser.firstName} {currentUser.lastName}
+                                    </span>
+                                    <span style={{ fontSize: '10px', color: '#6b7280', fontWeight: '500' }}>
+                                        {currentUser.role || 'Operator'}
+                                    </span>
+                                </div>
+                            )}
+                        </div>
+
+                        {isSidebarExpanded && (
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ color: '#9ca3af', flexShrink: 0 }}>
+                                <polyline points="9 18 15 12 9 6" />
+                            </svg>
+                        )}
+
+                        {/* Operator Quick Switch & Logout Menu */}
+                        {operatorMenuOpen && (
+                            <div
+                                onClick={(e) => e.stopPropagation()}
+                                style={{
+                                    position: 'absolute',
+                                    bottom: '56px',
+                                    left: '10px',
+                                    right: '10px',
+                                    backgroundColor: '#ffffff',
+                                    border: '1px solid #e5e7eb',
+                                    borderRadius: '10px',
+                                    boxShadow: '0 10px 20px rgba(0, 0, 0, 0.12)',
+                                    zIndex: 1000,
+                                    padding: '8px',
+                                    display: 'flex',
+                                    flexDirection: 'column',
+                                    gap: '6px'
+                                }}
+                            >
+                                <div style={{ padding: '4px 6px', fontSize: '10px', fontWeight: '700', color: '#6b7280', textTransform: 'uppercase', borderBottom: '1px solid #f3f4f6' }}>
+                                    Switch Operator
+                                </div>
+                                <select
+                                    value={currentUser.email}
+                                    onChange={(e) => {
+                                        const selectedEmail = e.target.value;
+                                        if (selectedEmail === currentUser.email) return;
+                                        const targetUser = usersList.find(u => u.email === selectedEmail);
+                                        if (targetUser) {
+                                            setOperatorMenuOpen(false);
+                                            setSwitchUserModal(targetUser);
+                                            setSwitchUserPassword('');
+                                        }
+                                    }}
+                                    style={{
+                                        padding: '6px 8px',
+                                        borderRadius: '6px',
+                                        border: '1px solid #d1d5db',
+                                        fontSize: '12px',
+                                        fontWeight: '600',
+                                        color: '#111827',
+                                        outline: 'none',
+                                        cursor: 'pointer',
+                                        backgroundColor: '#f9fafb'
+                                    }}
+                                >
+                                    <option value={currentUser.email}>
+                                        {currentUser.firstName} {currentUser.lastName} ({currentUser.role})
+                                    </option>
+                                    {usersList
+                                        .filter(u => u.email !== currentUser.email)
+                                        .map(u => (
+                                            <option key={u.id} value={u.email}>
+                                                {u.first_name} {u.last_name} ({u.role})
+                                            </option>
+                                        ))
+                                    }
+                                </select>
+                                <button
+                                    onClick={() => {
+                                        setOperatorMenuOpen(false);
+                                        setRenewPinModal(true);
+                                    }}
+                                    style={{
+                                        display: 'flex',
+                                        alignItems: 'center',
+                                        gap: '6px',
+                                        padding: '6px 8px',
+                                        fontSize: '12px',
+                                        fontWeight: '600',
+                                        color: '#374151',
+                                        backgroundColor: '#f9fafb',
+                                        border: '1px solid #e5e7eb',
+                                        borderRadius: '6px',
+                                        cursor: 'pointer'
+                                    }}
+                                >
+                                    🔑 Change PIN / Password
+                                </button>
+                                <button
+                                    onClick={() => {
+                                        setOperatorMenuOpen(false);
+                                        handleLogout();
+                                    }}
+                                    style={{
+                                        display: 'flex',
+                                        alignItems: 'center',
+                                        justifyContent: 'center',
+                                        gap: '6px',
+                                        padding: '7px 8px',
+                                        fontSize: '12px',
+                                        fontWeight: '700',
+                                        color: '#ffffff',
+                                        backgroundColor: '#dc2626',
+                                        border: 'none',
+                                        borderRadius: '6px',
+                                        cursor: 'pointer'
+                                    }}
+                                >
+                                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                                        <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
+                                        <polyline points="16 17 21 12 16 7" />
+                                        <line x1="21" y1="12" x2="9" y2="12" />
+                                    </svg>
+                                    Sign Out / Exit
+                                </button>
+                            </div>
+                        )}
+                    </div>
+                )}
             </aside>
 
             {/* Right Column Layout Wrapper */}
@@ -2832,78 +3004,6 @@ export default function WorkstationDashboard() {
                                 <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
                             </svg>
                         </button>
-                        {currentUser && (
-                            <div style={{ display: 'flex', alignItems: 'center', gap: '12px', borderLeft: '1px solid #e5e7eb', paddingLeft: '16px' }}>
-                                {/* Active User Dropdown Switcher */}
-                                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                                    <label style={{ fontSize: '11px', fontWeight: '700', color: '#6b7280', textTransform: 'uppercase' }}>Operator:</label>
-                                    <select
-                                        value={currentUser.email}
-                                        onChange={(e) => {
-                                            const selectedEmail = e.target.value;
-                                            if (selectedEmail === currentUser.email) return;
-                                            const targetUser = usersList.find(u => u.email === selectedEmail);
-                                            if (targetUser) {
-                                                setSwitchUserModal(targetUser);
-                                                setSwitchUserPassword('');
-                                            }
-                                        }}
-                                        style={{
-                                            padding: '4px 8px',
-                                            borderRadius: '6px',
-                                            border: '1px solid #d1d5db',
-                                            fontSize: '13px',
-                                            fontWeight: '600',
-                                            color: '#111827',
-                                            outline: 'none',
-                                            cursor: 'pointer',
-                                            backgroundColor: '#f9fafb'
-                                        }}
-                                    >
-                                        <option value={currentUser.email}>
-                                            {currentUser.firstName} {currentUser.lastName} ({currentUser.role})
-                                        </option>
-                                        {usersList
-                                            .filter(u => u.email !== currentUser.email)
-                                            .map(u => (
-                                                <option key={u.id} value={u.email}>
-                                                    {u.first_name} {u.last_name} ({u.role})
-                                                </option>
-                                            ))
-                                        }
-                                    </select>
-                                </div>
-
-                                {/* Exit Button */}
-                                <button
-                                    onClick={handleLogout}
-                                    style={{
-                                        backgroundColor: '#fee2e2',
-                                        color: '#dc2626',
-                                        border: 'none',
-                                        borderRadius: '6px',
-                                        padding: '6px 10px',
-                                        fontSize: '11px',
-                                        fontWeight: '700',
-                                        cursor: 'pointer',
-                                        transition: 'all 0.15s ease',
-                                        display: 'inline-flex',
-                                        alignItems: 'center',
-                                        gap: '4px'
-                                    }}
-                                    onMouseOver={(e) => { e.currentTarget.style.backgroundColor = '#fecaca'; }}
-                                    onMouseOut={(e) => { e.currentTarget.style.backgroundColor = '#fee2e2'; }}
-                                    title="Sign Out"
-                                >
-                                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                                        <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
-                                        <polyline points="16 17 21 12 16 7" />
-                                        <line x1="21" y1="12" x2="9" y2="12" />
-                                    </svg>
-                                    Exit
-                                </button>
-                            </div>
-                        )}
                         <span style={{ color: '#374151', fontWeight: '600', borderLeft: '1px solid #e5e7eb', paddingLeft: '16px' }}>{timeString}</span>
                     </div>
                 </header>
@@ -3172,7 +3272,7 @@ export default function WorkstationDashboard() {
                                                 }}
                                             >
                                                 {firstScanHistory.length === Number(firstScanExpected)
-                                                    ? '✓ Finish Box (Save & Close)'
+                                                    ? ' Finish Box (Save & Close)'
                                                     : firstScanHistory.length < Number(firstScanExpected)
                                                         ? `⚠ Finish with Shortage (${Number(firstScanExpected) - firstScanHistory.length} Missing)`
                                                         : `⚠ Finish with Overage (+${firstScanHistory.length - Number(firstScanExpected)} Extra)`
@@ -4986,934 +5086,871 @@ export default function WorkstationDashboard() {
                     {activeTab === 'dashboard' && (
                         <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
 
-                                {/* 6 Top KPI Metrics Cards Grid — shown only for Parcel Operations */}
-                                {isLoadingDashboard && !dashboardData ? (
-                                    <div style={{ textAlign: 'center', padding: '60px 20px', color: '#6b7280', fontSize: '14px', fontWeight: '500' }}>
-                                        <div style={{ display: 'inline-block', width: '24px', height: '24px', border: '3px solid #e5e7eb', borderTopColor: '#111827', borderRadius: '50%', animation: 'spin 0.8s linear infinite', marginBottom: '12px' }} />
-                                        <div>Loading Real-Time Operational Metrics...</div>
-                                    </div>
-                                ) : dashboardData ? (
-                                    <>
-                                        {/* KPI Cards — only for Parcel Operations view */}
-                                        {dashboardSubTab !== 'productivity' && (
-                                            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(6, 1fr)', gap: '12px' }}>
-                                                {/* Card 1: Total Received */}
-                                                <div
-                                                    onClick={() => setDashboardSubTab('total_received')}
-                                                    onMouseOver={(e) => { e.currentTarget.style.outline = '2px solid #e21b22'; e.currentTarget.style.outlineOffset = '-2px'; }}
-                                                    onMouseOut={(e) => { e.currentTarget.style.outline = 'none'; }}
-                                                    style={{
-                                                        backgroundColor: '#ffffff',
-                                                        border: dashboardSubTab === 'total_received' ? '2px solid #e21b22' : '1px solid #e5e7eb',
-                                                        borderRadius: '10px',
-                                                        padding: '14px 10px',
-                                                        textAlign: 'center',
-                                                        boxShadow: dashboardSubTab === 'total_received' ? '0 4px 12px rgba(226, 27, 34, 0.15)' : '0 1px 3px rgba(0,0,0,0.05)',
-                                                        cursor: 'pointer',
-                                                        transition: 'all 0.15s ease-in-out',
-                                                        transform: dashboardSubTab === 'total_received' ? 'translateY(-2px)' : 'none'
-                                                    }}
-                                                >
-                                                    <div style={{ fontSize: '10px', fontWeight: '700', color: dashboardSubTab === 'total_received' ? '#e21b22' : '#6b7280', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Total Received</div>
-                                                    <div style={{ fontSize: '26px', fontWeight: '800', color: '#111827', marginTop: '4px' }}>{dashboardData.totalReceived}</div>
-                                                    <div style={{ fontSize: '11px', color: '#6b7280', marginTop: '4px' }}>Parcels Inbound</div>
-                                                </div>
+                            {/* 6 Top KPI Metrics Cards Grid — shown only for Parcel Operations */}
+                            {isLoadingDashboard && !dashboardData ? (
+                                <div style={{ textAlign: 'center', padding: '60px 20px', color: '#6b7280', fontSize: '14px', fontWeight: '500' }}>
+                                    <div style={{ display: 'inline-block', width: '24px', height: '24px', border: '3px solid #e5e7eb', borderTopColor: '#111827', borderRadius: '50%', animation: 'spin 0.8s linear infinite', marginBottom: '12px' }} />
+                                    <div>Loading Real-Time Operational Metrics...</div>
+                                </div>
+                            ) : dashboardData ? (
+                                <>
+                                    {/* KPI Cards — only for Parcel Operations view */}
+                                    {dashboardSubTab !== 'productivity' && (
+                                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(6, 1fr)', gap: '12px' }}>
+                                            {/* Card 1: Total Received */}
+                                            <div
+                                                onClick={() => setDashboardSubTab('total_received')}
+                                                onMouseOver={(e) => { e.currentTarget.style.outline = '2px solid #e21b22'; e.currentTarget.style.outlineOffset = '-2px'; }}
+                                                onMouseOut={(e) => { e.currentTarget.style.outline = 'none'; }}
+                                                style={{
+                                                    backgroundColor: '#ffffff',
+                                                    border: dashboardSubTab === 'total_received' ? '2px solid #e21b22' : '1px solid #e5e7eb',
+                                                    borderRadius: '10px',
+                                                    padding: '14px 10px',
+                                                    textAlign: 'center',
+                                                    boxShadow: dashboardSubTab === 'total_received' ? '0 4px 12px rgba(226, 27, 34, 0.15)' : '0 1px 3px rgba(0,0,0,0.05)',
+                                                    cursor: 'pointer',
+                                                    transition: 'all 0.15s ease-in-out',
+                                                    transform: dashboardSubTab === 'total_received' ? 'translateY(-2px)' : 'none'
+                                                }}
+                                            >
+                                                <div style={{ fontSize: '10px', fontWeight: '700', color: dashboardSubTab === 'total_received' ? '#e21b22' : '#6b7280', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Total Received</div>
+                                                <div style={{ fontSize: '26px', fontWeight: '800', color: '#111827', marginTop: '4px' }}>{dashboardData.totalReceived}</div>
+                                                <div style={{ fontSize: '11px', color: '#6b7280', marginTop: '4px' }}>Parcels Inbound</div>
+                                            </div>
 
-                                                {/* Card 2: Parcels Sorted */}
-                                                <div
-                                                    onClick={() => setDashboardSubTab('parcels_sorted')}
-                                                    onMouseOver={(e) => { e.currentTarget.style.outline = '2px solid #e21b22'; e.currentTarget.style.outlineOffset = '-2px'; }}
-                                                    onMouseOut={(e) => { e.currentTarget.style.outline = 'none'; }}
-                                                    style={{
-                                                        backgroundColor: '#ffffff',
-                                                        border: dashboardSubTab === 'parcels_sorted' ? '2px solid #e21b22' : '1px solid #e5e7eb',
-                                                        borderRadius: '10px',
-                                                        padding: '14px 10px',
-                                                        textAlign: 'center',
-                                                        boxShadow: dashboardSubTab === 'parcels_sorted' ? '0 4px 12px rgba(226, 27, 34, 0.15)' : '0 1px 3px rgba(0,0,0,0.05)',
-                                                        cursor: 'pointer',
-                                                        transition: 'all 0.15s ease-in-out',
-                                                        transform: dashboardSubTab === 'parcels_sorted' ? 'translateY(-2px)' : 'none'
-                                                    }}
-                                                >
-                                                    <div style={{ fontSize: '10px', fontWeight: '700', color: dashboardSubTab === 'parcels_sorted' ? '#e21b22' : '#6b7280', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Parcels Sorted</div>
-                                                    <div style={{ fontSize: '26px', fontWeight: '800', color: '#111827', marginTop: '4px' }}>{dashboardData.totalSorted}</div>
-                                                    <div style={{ fontSize: '11px', color: '#6b7280', marginTop: '4px' }}>Allocated in Bags</div>
-                                                </div>
+                                            {/* Card 2: Parcels Sorted */}
+                                            <div
+                                                onClick={() => setDashboardSubTab('parcels_sorted')}
+                                                onMouseOver={(e) => { e.currentTarget.style.outline = '2px solid #e21b22'; e.currentTarget.style.outlineOffset = '-2px'; }}
+                                                onMouseOut={(e) => { e.currentTarget.style.outline = 'none'; }}
+                                                style={{
+                                                    backgroundColor: '#ffffff',
+                                                    border: dashboardSubTab === 'parcels_sorted' ? '2px solid #e21b22' : '1px solid #e5e7eb',
+                                                    borderRadius: '10px',
+                                                    padding: '14px 10px',
+                                                    textAlign: 'center',
+                                                    boxShadow: dashboardSubTab === 'parcels_sorted' ? '0 4px 12px rgba(226, 27, 34, 0.15)' : '0 1px 3px rgba(0,0,0,0.05)',
+                                                    cursor: 'pointer',
+                                                    transition: 'all 0.15s ease-in-out',
+                                                    transform: dashboardSubTab === 'parcels_sorted' ? 'translateY(-2px)' : 'none'
+                                                }}
+                                            >
+                                                <div style={{ fontSize: '10px', fontWeight: '700', color: dashboardSubTab === 'parcels_sorted' ? '#e21b22' : '#6b7280', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Parcels Sorted</div>
+                                                <div style={{ fontSize: '26px', fontWeight: '800', color: '#111827', marginTop: '4px' }}>{dashboardData.totalSorted}</div>
+                                                <div style={{ fontSize: '11px', color: '#6b7280', marginTop: '4px' }}>Allocated in Bags</div>
+                                            </div>
 
-                                                {/* Card 3: Pending Parcels */}
-                                                <div
-                                                    onClick={() => setDashboardSubTab('pending_parcels')}
-                                                    onMouseOver={(e) => { e.currentTarget.style.outline = '2px solid #e21b22'; e.currentTarget.style.outlineOffset = '-2px'; }}
-                                                    onMouseOut={(e) => { e.currentTarget.style.outline = 'none'; }}
-                                                    style={{
-                                                        backgroundColor: '#ffffff',
-                                                        border: dashboardSubTab === 'pending_parcels' ? '2px solid #e21b22' : '1px solid #e5e7eb',
-                                                        borderRadius: '10px',
-                                                        padding: '14px 10px',
-                                                        textAlign: 'center',
-                                                        boxShadow: dashboardSubTab === 'pending_parcels' ? '0 4px 12px rgba(226, 27, 34, 0.15)' : '0 1px 3px rgba(0,0,0,0.05)',
-                                                        cursor: 'pointer',
-                                                        transition: 'all 0.15s ease-in-out',
-                                                        transform: dashboardSubTab === 'pending_parcels' ? 'translateY(-2px)' : 'none'
-                                                    }}
-                                                >
-                                                    <div style={{ fontSize: '10px', fontWeight: '700', color: dashboardSubTab === 'pending_parcels' ? '#e21b22' : '#6b7280', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Pending Parcels</div>
-                                                    <div style={{ fontSize: '26px', fontWeight: '800', color: '#111827', marginTop: '4px' }}>{dashboardData.pendingParcels}</div>
-                                                    <div style={{ fontSize: '11px', color: '#6b7280', marginTop: '4px' }}>Awaiting Sorting</div>
-                                                </div>
+                                            {/* Card 3: Pending Parcels */}
+                                            <div
+                                                onClick={() => setDashboardSubTab('pending_parcels')}
+                                                onMouseOver={(e) => { e.currentTarget.style.outline = '2px solid #e21b22'; e.currentTarget.style.outlineOffset = '-2px'; }}
+                                                onMouseOut={(e) => { e.currentTarget.style.outline = 'none'; }}
+                                                style={{
+                                                    backgroundColor: '#ffffff',
+                                                    border: dashboardSubTab === 'pending_parcels' ? '2px solid #e21b22' : '1px solid #e5e7eb',
+                                                    borderRadius: '10px',
+                                                    padding: '14px 10px',
+                                                    textAlign: 'center',
+                                                    boxShadow: dashboardSubTab === 'pending_parcels' ? '0 4px 12px rgba(226, 27, 34, 0.15)' : '0 1px 3px rgba(0,0,0,0.05)',
+                                                    cursor: 'pointer',
+                                                    transition: 'all 0.15s ease-in-out',
+                                                    transform: dashboardSubTab === 'pending_parcels' ? 'translateY(-2px)' : 'none'
+                                                }}
+                                            >
+                                                <div style={{ fontSize: '10px', fontWeight: '700', color: dashboardSubTab === 'pending_parcels' ? '#e21b22' : '#6b7280', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Pending Parcels</div>
+                                                <div style={{ fontSize: '26px', fontWeight: '800', color: '#111827', marginTop: '4px' }}>{dashboardData.pendingParcels}</div>
+                                                <div style={{ fontSize: '11px', color: '#6b7280', marginTop: '4px' }}>Awaiting Sorting</div>
+                                            </div>
 
-                                                {/* Card 4: Total Bags */}
-                                                <div
-                                                    onClick={() => setDashboardSubTab('total_bags')}
-                                                    onMouseOver={(e) => { e.currentTarget.style.outline = '2px solid #e21b22'; e.currentTarget.style.outlineOffset = '-2px'; }}
-                                                    onMouseOut={(e) => { e.currentTarget.style.outline = 'none'; }}
-                                                    style={{
-                                                        backgroundColor: '#ffffff',
-                                                        border: dashboardSubTab === 'total_bags' ? '2px solid #e21b22' : '1px solid #e5e7eb',
-                                                        borderRadius: '10px',
-                                                        padding: '14px 10px',
-                                                        textAlign: 'center',
-                                                        boxShadow: dashboardSubTab === 'total_bags' ? '0 4px 12px rgba(226, 27, 34, 0.15)' : '0 1px 3px rgba(0,0,0,0.05)',
-                                                        cursor: 'pointer',
-                                                        transition: 'all 0.15s ease-in-out',
-                                                        transform: dashboardSubTab === 'total_bags' ? 'translateY(-2px)' : 'none'
-                                                    }}
-                                                >
-                                                    <div style={{ fontSize: '10px', fontWeight: '700', color: dashboardSubTab === 'total_bags' ? '#e21b22' : '#6b7280', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Total Bags</div>
-                                                    <div style={{ fontSize: '26px', fontWeight: '800', color: '#111827', marginTop: '4px' }}>{dashboardData.totalBagsCreated}</div>
-                                                    <div style={{ fontSize: '10px', color: '#4b5563', marginTop: '4px', display: 'flex', justifyContent: 'center', gap: '4px' }}>
-                                                        <span style={{ color: '#166534', fontWeight: '700' }}>{dashboardData.openBags} Open</span> •
-                                                        <span style={{ color: '#dc2626', fontWeight: '700' }}>{dashboardData.sealedBags} Sealed</span>
-                                                    </div>
-                                                </div>
-
-                                                {/* Card 5: Manifests */}
-                                                <div
-                                                    onClick={() => setDashboardSubTab('manifests')}
-                                                    onMouseOver={(e) => { e.currentTarget.style.outline = '2px solid #e21b22'; e.currentTarget.style.outlineOffset = '-2px'; }}
-                                                    onMouseOut={(e) => { e.currentTarget.style.outline = 'none'; }}
-                                                    style={{
-                                                        backgroundColor: '#ffffff',
-                                                        border: dashboardSubTab === 'manifests' ? '2px solid #e21b22' : '1px solid #e5e7eb',
-                                                        borderRadius: '10px',
-                                                        padding: '14px 10px',
-                                                        textAlign: 'center',
-                                                        boxShadow: dashboardSubTab === 'manifests' ? '0 4px 12px rgba(226, 27, 34, 0.15)' : '0 1px 3px rgba(0,0,0,0.05)',
-                                                        cursor: 'pointer',
-                                                        transition: 'all 0.15s ease-in-out',
-                                                        transform: dashboardSubTab === 'manifests' ? 'translateY(-2px)' : 'none'
-                                                    }}
-                                                >
-                                                    <div style={{ fontSize: '10px', fontWeight: '700', color: dashboardSubTab === 'manifests' ? '#e21b22' : '#6b7280', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Manifests</div>
-                                                    <div style={{ fontSize: '26px', fontWeight: '800', color: '#111827', marginTop: '4px' }}>{dashboardData.totalManifests}</div>
-                                                    <div style={{ fontSize: '10px', color: '#4b5563', marginTop: '4px', display: 'flex', justifyContent: 'center', gap: '4px' }}>
-                                                        <span style={{ color: '#166534', fontWeight: '700' }}>{dashboardData.openManifests} Open</span> •
-                                                        <span style={{ color: '#dc2626', fontWeight: '700' }}>{dashboardData.closedManifests} Closed</span>
-                                                    </div>
-                                                </div>
-
-                                                {/* Card 6: Exceptions */}
-                                                <div
-                                                    onClick={() => setDashboardSubTab('exceptions')}
-                                                    onMouseOver={(e) => { e.currentTarget.style.outline = '2px solid #e21b22'; e.currentTarget.style.outlineOffset = '-2px'; }}
-                                                    onMouseOut={(e) => { e.currentTarget.style.outline = 'none'; }}
-                                                    style={{
-                                                        backgroundColor: '#ffffff',
-                                                        border: dashboardSubTab === 'exceptions' ? '2px solid #e21b22' : '1px solid #e5e7eb',
-                                                        borderRadius: '10px',
-                                                        padding: '14px 10px',
-                                                        textAlign: 'center',
-                                                        boxShadow: dashboardSubTab === 'exceptions' ? '0 4px 12px rgba(226, 27, 34, 0.15)' : '0 1px 3px rgba(0,0,0,0.05)',
-                                                        cursor: 'pointer',
-                                                        transition: 'all 0.15s ease-in-out',
-                                                        transform: dashboardSubTab === 'exceptions' ? 'translateY(-2px)' : 'none'
-                                                    }}
-                                                >
-                                                    <div style={{ fontSize: '10px', fontWeight: '700', color: dashboardSubTab === 'exceptions' ? '#e21b22' : '#6b7280', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Exceptions</div>
-                                                    <div style={{ fontSize: '26px', fontWeight: '800', color: '#111827', marginTop: '4px' }}>
-                                                        {dashboardData.exceptions ? (dashboardData.exceptions.damagedLabelsCount + dashboardData.exceptions.discrepancyCount) : 0}
-                                                    </div>
-                                                    <div style={{ fontSize: '10px', color: '#6b7280', marginTop: '4px' }}>
-                                                        {dashboardData.exceptions?.damagedLabelsCount || 0} Damaged / {dashboardData.exceptions?.discrepancyCount || 0} Shortage
-                                                    </div>
+                                            {/* Card 4: Total Bags */}
+                                            <div
+                                                onClick={() => setDashboardSubTab('total_bags')}
+                                                onMouseOver={(e) => { e.currentTarget.style.outline = '2px solid #e21b22'; e.currentTarget.style.outlineOffset = '-2px'; }}
+                                                onMouseOut={(e) => { e.currentTarget.style.outline = 'none'; }}
+                                                style={{
+                                                    backgroundColor: '#ffffff',
+                                                    border: dashboardSubTab === 'total_bags' ? '2px solid #e21b22' : '1px solid #e5e7eb',
+                                                    borderRadius: '10px',
+                                                    padding: '14px 10px',
+                                                    textAlign: 'center',
+                                                    boxShadow: dashboardSubTab === 'total_bags' ? '0 4px 12px rgba(226, 27, 34, 0.15)' : '0 1px 3px rgba(0,0,0,0.05)',
+                                                    cursor: 'pointer',
+                                                    transition: 'all 0.15s ease-in-out',
+                                                    transform: dashboardSubTab === 'total_bags' ? 'translateY(-2px)' : 'none'
+                                                }}
+                                            >
+                                                <div style={{ fontSize: '10px', fontWeight: '700', color: dashboardSubTab === 'total_bags' ? '#e21b22' : '#6b7280', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Total Bags</div>
+                                                <div style={{ fontSize: '26px', fontWeight: '800', color: '#111827', marginTop: '4px' }}>{dashboardData.totalBagsCreated}</div>
+                                                <div style={{ fontSize: '10px', color: '#4b5563', marginTop: '4px', display: 'flex', justifyContent: 'center', gap: '4px' }}>
+                                                    <span style={{ color: '#166534', fontWeight: '700' }}>{dashboardData.openBags} Open</span> •
+                                                    <span style={{ color: '#dc2626', fontWeight: '700' }}>{dashboardData.sealedBags} Sealed</span>
                                                 </div>
                                             </div>
-                                        )}
 
-                                        {/* Parcel Operations Sub-Tabs Navigation Bar — hidden on User Productivity */}
-                                        {dashboardSubTab !== 'productivity' && (
-                                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '2px solid #e5e7eb', marginTop: '8px', gap: '12px' }}>
-                                                <div style={{ display: 'flex', gap: '12px', overflowX: 'auto', paddingBottom: '2px' }}>
-                                                    {[
-                                                        { id: 'total_received', label: 'Total Received' },
-                                                        { id: 'parcels_sorted', label: 'Parcels Sorted' },
-                                                        { id: 'pending_parcels', label: 'Pending Parcels' },
-                                                        { id: 'total_bags', label: 'Bags & Sealed' },
-                                                        { id: 'manifests', label: 'Manifests' },
-                                                        { id: 'exceptions', label: 'Exceptions' },
-                                                        { id: 'partner', label: 'Courier Distribution' }
-                                                    ].map(tab => (
-                                                        <button
-                                                            key={tab.id}
-                                                            onClick={() => setDashboardSubTab(tab.id as any)}
-                                                            style={{
-                                                                padding: '10px 12px',
-                                                                fontSize: '12px',
-                                                                fontWeight: '700',
-                                                                border: 'none',
-                                                                borderBottom: dashboardSubTab === tab.id ? '3px solid #e21b22' : '3px solid transparent',
-                                                                marginBottom: '-2px',
-                                                                cursor: 'pointer',
-                                                                backgroundColor: 'transparent',
-                                                                color: dashboardSubTab === tab.id ? '#e21b22' : '#4b5563',
-                                                                whiteSpace: 'nowrap',
-                                                                transition: 'all 0.15s ease'
-                                                            }}
-                                                        >
-                                                            {tab.label}
-                                                        </button>
-                                                    ))}
+                                            {/* Card 5: Manifests */}
+                                            <div
+                                                onClick={() => setDashboardSubTab('manifests')}
+                                                onMouseOver={(e) => { e.currentTarget.style.outline = '2px solid #e21b22'; e.currentTarget.style.outlineOffset = '-2px'; }}
+                                                onMouseOut={(e) => { e.currentTarget.style.outline = 'none'; }}
+                                                style={{
+                                                    backgroundColor: '#ffffff',
+                                                    border: dashboardSubTab === 'manifests' ? '2px solid #e21b22' : '1px solid #e5e7eb',
+                                                    borderRadius: '10px',
+                                                    padding: '14px 10px',
+                                                    textAlign: 'center',
+                                                    boxShadow: dashboardSubTab === 'manifests' ? '0 4px 12px rgba(226, 27, 34, 0.15)' : '0 1px 3px rgba(0,0,0,0.05)',
+                                                    cursor: 'pointer',
+                                                    transition: 'all 0.15s ease-in-out',
+                                                    transform: dashboardSubTab === 'manifests' ? 'translateY(-2px)' : 'none'
+                                                }}
+                                            >
+                                                <div style={{ fontSize: '10px', fontWeight: '700', color: dashboardSubTab === 'manifests' ? '#e21b22' : '#6b7280', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Manifests</div>
+                                                <div style={{ fontSize: '26px', fontWeight: '800', color: '#111827', marginTop: '4px' }}>{dashboardData.totalManifests}</div>
+                                                <div style={{ fontSize: '10px', color: '#4b5563', marginTop: '4px', display: 'flex', justifyContent: 'center', gap: '4px' }}>
+                                                    <span style={{ color: '#166534', fontWeight: '700' }}>{dashboardData.openManifests} Open</span> •
+                                                    <span style={{ color: '#dc2626', fontWeight: '700' }}>{dashboardData.closedManifests} Closed</span>
                                                 </div>
-                                                <button
-                                                    onClick={fetchDashboard}
-                                                    disabled={isLoadingDashboard}
-                                                    title="Refresh Metrics"
-                                                    style={{
-                                                        display: 'inline-flex',
-                                                        alignItems: 'center',
-                                                        gap: '6px',
-                                                        backgroundColor: '#ffffff',
-                                                        border: '1px solid #d1d5db',
-                                                        borderRadius: '6px',
-                                                        padding: '6px 12px',
-                                                        fontSize: '12px',
-                                                        fontWeight: '600',
-                                                        color: '#374151',
-                                                        cursor: 'pointer',
-                                                        whiteSpace: 'nowrap',
-                                                        marginBottom: '4px',
-                                                        transition: 'all 0.15s ease'
-                                                    }}
-                                                    onMouseOver={(e) => { e.currentTarget.style.backgroundColor = '#f9fafb'; }}
-                                                    onMouseOut={(e) => { e.currentTarget.style.backgroundColor = '#ffffff'; }}
-                                                >
-                                                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ animation: isLoadingDashboard ? 'spin 1s linear infinite' : 'none' }}>
-                                                        <polyline points="23 4 23 10 17 10" />
-                                                        <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10" />
-                                                    </svg>
-                                                    {isLoadingDashboard ? 'Refreshing...' : 'Refresh'}
-                                                </button>
                                             </div>
-                                        )}
 
-                                        {/* Universal Search & Filter Control Bar for Detail Views */}
-                                        {['total_received', 'parcels_sorted', 'pending_parcels', 'total_bags', 'exceptions'].includes(dashboardSubTab) && (
-                                            <div style={{ display: 'flex', gap: '16px', alignItems: 'center', backgroundColor: '#f9fafb', padding: '12px 16px', borderRadius: '8px', border: '1px solid #e5e7eb' }}>
-                                                <div style={{ flex: 1, minWidth: 0, position: 'relative' }}>
-                                                    <input
-                                                        type="text"
-                                                        placeholder="Search by tracking number, barcode, bag #, MAWB, or location..."
-                                                        value={dashSearchQuery}
-                                                        onChange={e => setDashSearchQuery(e.target.value)}
-                                                        style={{ width: '100%', boxSizing: 'border-box', padding: '8px 12px', fontSize: '13px', borderRadius: '6px', border: '1px solid #d1d5db', outline: 'none' }}
-                                                    />
+                                            {/* Card 6: Exceptions */}
+                                            <div
+                                                onClick={() => setDashboardSubTab('exceptions')}
+                                                onMouseOver={(e) => { e.currentTarget.style.outline = '2px solid #e21b22'; e.currentTarget.style.outlineOffset = '-2px'; }}
+                                                onMouseOut={(e) => { e.currentTarget.style.outline = 'none'; }}
+                                                style={{
+                                                    backgroundColor: '#ffffff',
+                                                    border: dashboardSubTab === 'exceptions' ? '2px solid #e21b22' : '1px solid #e5e7eb',
+                                                    borderRadius: '10px',
+                                                    padding: '14px 10px',
+                                                    textAlign: 'center',
+                                                    boxShadow: dashboardSubTab === 'exceptions' ? '0 4px 12px rgba(226, 27, 34, 0.15)' : '0 1px 3px rgba(0,0,0,0.05)',
+                                                    cursor: 'pointer',
+                                                    transition: 'all 0.15s ease-in-out',
+                                                    transform: dashboardSubTab === 'exceptions' ? 'translateY(-2px)' : 'none'
+                                                }}
+                                            >
+                                                <div style={{ fontSize: '10px', fontWeight: '700', color: dashboardSubTab === 'exceptions' ? '#e21b22' : '#6b7280', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Exceptions</div>
+                                                <div style={{ fontSize: '26px', fontWeight: '800', color: '#111827', marginTop: '4px' }}>
+                                                    {dashboardData.exceptions ? (dashboardData.exceptions.damagedLabelsCount + dashboardData.exceptions.discrepancyCount) : 0}
                                                 </div>
-                                                {['total_received', 'parcels_sorted', 'pending_parcels', 'total_bags'].includes(dashboardSubTab) && (
-                                                    <select
-                                                        value={dashPartnerFilter}
-                                                        onChange={e => setDashPartnerFilter(e.target.value)}
-                                                        style={{ flexShrink: 0, boxSizing: 'border-box', padding: '8px 12px', fontSize: '13px', borderRadius: '6px', border: '1px solid #d1d5db', backgroundColor: '#ffffff', minWidth: '150px' }}
-                                                    >
-                                                        <option value="ALL">All Partners</option>
-                                                        <option value="PickMe">PickMe</option>
-                                                        <option value="Domex">Domex</option>
-                                                        <option value="Pronto">Pronto</option>
-                                                        <option value="Other">Other / General</option>
-                                                    </select>
-                                                )}
-                                                {dashSearchQuery || dashPartnerFilter !== 'ALL' ? (
+                                                <div style={{ fontSize: '10px', color: '#6b7280', marginTop: '4px' }}>
+                                                    {dashboardData.exceptions?.damagedLabelsCount || 0} Damaged / {dashboardData.exceptions?.discrepancyCount || 0} Shortage
+                                                </div>
+                                            </div>
+                                        </div>
+                                    )}
+
+                                    {/* Parcel Operations Sub-Tabs Navigation Bar — hidden on User Productivity */}
+                                    {dashboardSubTab !== 'productivity' && (
+                                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '2px solid #e5e7eb', marginTop: '8px', gap: '12px' }}>
+                                            <div style={{ display: 'flex', gap: '12px', overflowX: 'auto', paddingBottom: '2px' }}>
+                                                {[
+                                                    { id: 'total_received', label: 'Total Received' },
+                                                    { id: 'parcels_sorted', label: 'Parcels Sorted' },
+                                                    { id: 'pending_parcels', label: 'Pending Parcels' },
+                                                    { id: 'total_bags', label: 'Bags & Sealed' },
+                                                    { id: 'manifests', label: 'Manifests' },
+                                                    { id: 'exceptions', label: 'Exceptions' },
+                                                    { id: 'partner', label: 'Courier Distribution' }
+                                                ].map(tab => (
                                                     <button
-                                                        onClick={() => { setDashSearchQuery(''); setDashPartnerFilter('ALL'); }}
-                                                        style={{ flexShrink: 0, fontSize: '12px', color: '#dc2626', background: 'none', border: 'none', cursor: 'pointer', fontWeight: '700', whiteSpace: 'nowrap' }}
+                                                        key={tab.id}
+                                                        onClick={() => setDashboardSubTab(tab.id as any)}
+                                                        style={{
+                                                            padding: '10px 12px',
+                                                            fontSize: '12px',
+                                                            fontWeight: '700',
+                                                            border: 'none',
+                                                            borderBottom: dashboardSubTab === tab.id ? '3px solid #e21b22' : '3px solid transparent',
+                                                            marginBottom: '-2px',
+                                                            cursor: 'pointer',
+                                                            backgroundColor: 'transparent',
+                                                            color: dashboardSubTab === tab.id ? '#e21b22' : '#4b5563',
+                                                            whiteSpace: 'nowrap',
+                                                            transition: 'all 0.15s ease'
+                                                        }}
                                                     >
-                                                        Clear Filters
+                                                        {tab.label}
                                                     </button>
-                                                ) : null}
+                                                ))}
                                             </div>
-                                        )}
+                                            <button
+                                                onClick={fetchDashboard}
+                                                disabled={isLoadingDashboard}
+                                                title="Refresh Metrics"
+                                                style={{
+                                                    display: 'inline-flex',
+                                                    alignItems: 'center',
+                                                    gap: '6px',
+                                                    backgroundColor: '#ffffff',
+                                                    border: '1px solid #d1d5db',
+                                                    borderRadius: '6px',
+                                                    padding: '6px 12px',
+                                                    fontSize: '12px',
+                                                    fontWeight: '600',
+                                                    color: '#374151',
+                                                    cursor: 'pointer',
+                                                    whiteSpace: 'nowrap',
+                                                    marginBottom: '4px',
+                                                    transition: 'all 0.15s ease'
+                                                }}
+                                                onMouseOver={(e) => { e.currentTarget.style.backgroundColor = '#f9fafb'; }}
+                                                onMouseOut={(e) => { e.currentTarget.style.backgroundColor = '#ffffff'; }}
+                                            >
+                                                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ animation: isLoadingDashboard ? 'spin 1s linear infinite' : 'none' }}>
+                                                    <polyline points="23 4 23 10 17 10" />
+                                                    <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10" />
+                                                </svg>
+                                                {isLoadingDashboard ? 'Refreshing...' : 'Refresh'}
+                                            </button>
+                                        </div>
+                                    )}
 
-                                        {/* ═══════════════════════════════════════════════════════
+                                    {/* Universal Search & Filter Control Bar for Detail Views */}
+                                    {['total_received', 'parcels_sorted', 'pending_parcels', 'total_bags', 'exceptions'].includes(dashboardSubTab) && (
+                                        <div style={{ display: 'flex', gap: '16px', alignItems: 'center', backgroundColor: '#f9fafb', padding: '12px 16px', borderRadius: '8px', border: '1px solid #e5e7eb' }}>
+                                            <div style={{ flex: 1, minWidth: 0, position: 'relative' }}>
+                                                <input
+                                                    type="text"
+                                                    placeholder="Search by tracking number, barcode, bag #, MAWB, or location..."
+                                                    value={dashSearchQuery}
+                                                    onChange={e => setDashSearchQuery(e.target.value)}
+                                                    style={{ width: '100%', boxSizing: 'border-box', padding: '8px 12px', fontSize: '13px', borderRadius: '6px', border: '1px solid #d1d5db', outline: 'none' }}
+                                                />
+                                            </div>
+                                            {['total_received', 'parcels_sorted', 'pending_parcels', 'total_bags'].includes(dashboardSubTab) && (
+                                                <select
+                                                    value={dashPartnerFilter}
+                                                    onChange={e => setDashPartnerFilter(e.target.value)}
+                                                    style={{ flexShrink: 0, boxSizing: 'border-box', padding: '8px 12px', fontSize: '13px', borderRadius: '6px', border: '1px solid #d1d5db', backgroundColor: '#ffffff', minWidth: '150px' }}
+                                                >
+                                                    <option value="ALL">All Partners</option>
+                                                    <option value="PickMe">PickMe</option>
+                                                    <option value="Domex">Domex</option>
+                                                    <option value="Pronto">Pronto</option>
+                                                    <option value="Other">Other / General</option>
+                                                </select>
+                                            )}
+                                            {dashSearchQuery || dashPartnerFilter !== 'ALL' ? (
+                                                <button
+                                                    onClick={() => { setDashSearchQuery(''); setDashPartnerFilter('ALL'); }}
+                                                    style={{ flexShrink: 0, fontSize: '12px', color: '#dc2626', background: 'none', border: 'none', cursor: 'pointer', fontWeight: '700', whiteSpace: 'nowrap' }}
+                                                >
+                                                    Clear Filters
+                                                </button>
+                                            ) : null}
+                                        </div>
+                                    )}
+
+                                    {/* ═══════════════════════════════════════════════════════
                                         DETAIL TAB 1: TOTAL RECEIVED (INBOUND PARCELS)
                                     ═══════════════════════════════════════════════════════ */}
-                                        {dashboardSubTab === 'total_received' && (
-                                            <div style={card}>
-                                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
-                                                    <div style={label}>Total Received Inbound Parcels</div>
-                                                    <div style={{ fontSize: '12px', color: '#6b7280' }}>
-                                                        Showing <strong>{(dashboardData.receivedParcels || []).filter((p: any) => {
-                                                            const q = dashSearchQuery.toLowerCase();
-                                                            const matchQ = !q || p.referenceNumber.toLowerCase().includes(q) || p.senderReference.toLowerCase().includes(q) || p.mawbReference.toLowerCase().includes(q) || p.consigneeLocation.toLowerCase().includes(q);
-                                                            const matchP = dashPartnerFilter === 'ALL' || p.deliveryAgentCode === dashPartnerFilter;
-                                                            return matchQ && matchP;
-                                                        }).length}</strong> of {dashboardData.totalReceived} parcels
-                                                    </div>
-                                                </div>
-
-                                                {dashboardData.receivedParcels && dashboardData.receivedParcels.length > 0 ? (
-                                                    <div style={{ overflowX: 'auto' }}>
-                                                        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px', textAlign: 'left' }}>
-                                                            <thead>
-                                                                <tr style={{ borderBottom: '2px solid #e5e7eb', backgroundColor: '#f9fafb' }}>
-                                                                    {['#', 'Parcel Reference', 'Temu Barcode', 'Courier Partner', 'Destination City', 'Weight', 'Allocation Status', 'Received Date'].map(h => (
-                                                                        <th key={h} style={{ padding: '10px 8px', color: '#6b7280', fontWeight: '700', fontSize: '11px', textTransform: 'uppercase' }}>{h}</th>
-                                                                    ))}
-                                                                </tr>
-                                                            </thead>
-                                                            <tbody>
-                                                                {(dashboardData.receivedParcels || []).filter((p: any) => {
-                                                                    const q = dashSearchQuery.toLowerCase();
-                                                                    const matchQ = !q || p.referenceNumber.toLowerCase().includes(q) || p.senderReference.toLowerCase().includes(q) || p.mawbReference.toLowerCase().includes(q) || p.consigneeLocation.toLowerCase().includes(q);
-                                                                    const matchP = dashPartnerFilter === 'ALL' || p.deliveryAgentCode === dashPartnerFilter;
-                                                                    return matchQ && matchP;
-                                                                }).slice(0, 100).map((p: any, idx: number) => (
-                                                                    <tr key={`rec-${idx}`} style={{ borderBottom: '1px solid #f3f4f6' }}>
-                                                                        <td style={{ padding: '10px 8px', color: '#9ca3af', fontSize: '11px' }}>{idx + 1}</td>
-                                                                        <td style={{ padding: '10px 8px', fontWeight: '700', color: '#111827' }}>{p.referenceNumber}</td>
-                                                                        <td style={{ padding: '10px 8px', color: '#4b5563', fontFamily: 'monospace', fontSize: '12px' }}>{p.senderReference}</td>
-                                                                        <td style={{ padding: '10px 8px' }}>
-                                                                            <span style={{ padding: '2px 8px', borderRadius: '4px', fontSize: '11px', fontWeight: '700', backgroundColor: p.deliveryAgentCode === 'PickMe' ? '#fef3c7' : p.deliveryAgentCode === 'Domex' ? '#dbeafe' : p.deliveryAgentCode === 'Pronto' ? '#e0e7ff' : '#f3f4f6', color: p.deliveryAgentCode === 'PickMe' ? '#b45309' : p.deliveryAgentCode === 'Domex' ? '#1d4ed8' : p.deliveryAgentCode === 'Pronto' ? '#4338ca' : '#374151' }}>
-                                                                                {p.deliveryAgentCode}
-                                                                            </span>
-                                                                        </td>
-                                                                        <td style={{ padding: '10px 8px', color: '#374151' }}>{p.consigneeLocation || 'N/A'}</td>
-                                                                        <td style={{ padding: '10px 8px', color: '#6b7280' }}>{p.weight}</td>
-                                                                        <td style={{ padding: '10px 8px' }}>
-                                                                            <span style={{ padding: '2px 8px', borderRadius: '4px', fontSize: '11px', fontWeight: '700', backgroundColor: p.isSorted ? '#dcfce7' : '#fef3c7', color: p.isSorted ? '#15803d' : '#b45309' }}>
-                                                                                {p.isSorted ? `Sorted (${p.bagNumber})` : 'Awaiting Sort'}
-                                                                            </span>
-                                                                        </td>
-                                                                        <td style={{ padding: '10px 8px', color: '#6b7280', fontSize: '11px' }}>{p.createdAt ? new Date(p.createdAt).toLocaleDateString() : '-'}</td>
-                                                                    </tr>
-                                                                ))}
-                                                            </tbody>
-                                                        </table>
-                                                    </div>
-                                                ) : (
-                                                    <div style={{ textAlign: 'center', padding: '30px', color: '#9ca3af', fontSize: '13px' }}>No received parcels found matching your criteria.</div>
-                                                )}
-                                            </div>
-                                        )}
-
-                                        {/* ═══════════════════════════════════════════════════════
-                                        DETAIL TAB 2: PARCELS SORTED (ALLOCATED IN BAGS)
-                                    ═══════════════════════════════════════════════════════ */}
-                                        {dashboardSubTab === 'parcels_sorted' && (
-                                            <div style={card}>
-                                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
-                                                    <div style={label}>Parcels Sorted & Allocated in Outbound Bags</div>
-                                                    <div style={{ fontSize: '12px', color: '#6b7280' }}>
-                                                        Total Allocated: <strong>{dashboardData.totalSorted} parcels</strong>
-                                                    </div>
-                                                </div>
-
-                                                {dashboardData.receivedParcels && dashboardData.receivedParcels.filter((p: any) => p.isSorted).length > 0 ? (
-                                                    <div style={{ overflowX: 'auto' }}>
-                                                        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px', textAlign: 'left' }}>
-                                                            <thead>
-                                                                <tr style={{ borderBottom: '2px solid #e5e7eb', backgroundColor: '#f9fafb' }}>
-                                                                    {['#', 'Parcel Reference', 'Assigned Bag #', 'Courier Partner', 'Destination City', 'Weight', 'Status'].map(h => (
-                                                                        <th key={h} style={{ padding: '10px 8px', color: '#6b7280', fontWeight: '700', fontSize: '11px', textTransform: 'uppercase' }}>{h}</th>
-                                                                    ))}
-                                                                </tr>
-                                                            </thead>
-                                                            <tbody>
-                                                                {(dashboardData.receivedParcels || []).filter((p: any) => p.isSorted).filter((p: any) => {
-                                                                    const q = dashSearchQuery.toLowerCase();
-                                                                    const matchQ = !q || p.referenceNumber.toLowerCase().includes(q) || p.bagNumber.toLowerCase().includes(q) || p.consigneeLocation.toLowerCase().includes(q);
-                                                                    const matchP = dashPartnerFilter === 'ALL' || p.deliveryAgentCode === dashPartnerFilter;
-                                                                    return matchQ && matchP;
-                                                                }).slice(0, 100).map((p: any, idx: number) => (
-                                                                    <tr key={`sorted-${idx}`} style={{ borderBottom: '1px solid #f3f4f6' }}>
-                                                                        <td style={{ padding: '10px 8px', color: '#9ca3af', fontSize: '11px' }}>{idx + 1}</td>
-                                                                        <td style={{ padding: '10px 8px', fontWeight: '700', color: '#111827' }}>{p.referenceNumber}</td>
-                                                                        <td style={{ padding: '10px 8px' }}>
-                                                                            <span style={{ padding: '3px 8px', borderRadius: '4px', fontSize: '12px', fontWeight: '700', backgroundColor: '#dcfce7', color: '#15803d', fontFamily: 'monospace' }}>
-                                                                                {p.bagNumber}
-                                                                            </span>
-                                                                        </td>
-                                                                        <td style={{ padding: '10px 8px', fontWeight: '600' }}>{p.deliveryAgentCode}</td>
-                                                                        <td style={{ padding: '10px 8px', color: '#374151' }}>{p.consigneeLocation || 'N/A'}</td>
-                                                                        <td style={{ padding: '10px 8px', color: '#6b7280' }}>{p.weight}</td>
-                                                                        <td style={{ padding: '10px 8px', color: '#166534', fontWeight: '700', fontSize: '12px' }}>✓ Allocated</td>
-                                                                    </tr>
-                                                                ))}
-                                                            </tbody>
-                                                        </table>
-                                                    </div>
-                                                ) : (
-                                                    <div style={{ textAlign: 'center', padding: '30px', color: '#9ca3af', fontSize: '13px' }}>No sorted parcels found.</div>
-                                                )}
-                                            </div>
-                                        )}
-
-                                        {/* ═══════════════════════════════════════════════════════
-                                        DETAIL TAB 3: PENDING PARCELS (AWAITING SORTING)
-                                    ═══════════════════════════════════════════════════════ */}
-                                        {dashboardSubTab === 'pending_parcels' && (
-                                            <div style={card}>
-                                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
-                                                    <div style={label}>Pending Parcels Awaiting Sorting</div>
-                                                    <div style={{ fontSize: '12px', color: '#6b7280' }}>
-                                                        Total Pending: <strong>{dashboardData.pendingParcels} parcels</strong>
-                                                    </div>
-                                                </div>
-
-                                                {dashboardData.receivedParcels && dashboardData.receivedParcels.filter((p: any) => !p.isSorted).length > 0 ? (
-                                                    <div style={{ overflowX: 'auto' }}>
-                                                        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px', textAlign: 'left' }}>
-                                                            <thead>
-                                                                <tr style={{ borderBottom: '2px solid #e5e7eb', backgroundColor: '#f9fafb' }}>
-                                                                    {['#', 'Parcel Reference', 'Temu Barcode', 'Target Partner', 'Destination City', 'Status', 'Received Date'].map(h => (
-                                                                        <th key={h} style={{ padding: '10px 8px', color: '#6b7280', fontWeight: '700', fontSize: '11px', textTransform: 'uppercase' }}>{h}</th>
-                                                                    ))}
-                                                                </tr>
-                                                            </thead>
-                                                            <tbody>
-                                                                {(dashboardData.receivedParcels || []).filter((p: any) => !p.isSorted).filter((p: any) => {
-                                                                    const q = dashSearchQuery.toLowerCase();
-                                                                    const matchQ = !q || p.referenceNumber.toLowerCase().includes(q) || p.senderReference.toLowerCase().includes(q) || p.consigneeLocation.toLowerCase().includes(q);
-                                                                    const matchP = dashPartnerFilter === 'ALL' || p.deliveryAgentCode === dashPartnerFilter;
-                                                                    return matchQ && matchP;
-                                                                }).slice(0, 100).map((p: any, idx: number) => (
-                                                                    <tr key={`pend-${idx}`} style={{ borderBottom: '1px solid #f3f4f6' }}>
-                                                                        <td style={{ padding: '10px 8px', color: '#9ca3af', fontSize: '11px' }}>{idx + 1}</td>
-                                                                        <td style={{ padding: '10px 8px', fontWeight: '700', color: '#111827' }}>{p.referenceNumber}</td>
-                                                                        <td style={{ padding: '10px 8px', color: '#4b5563', fontFamily: 'monospace', fontSize: '12px' }}>{p.senderReference}</td>
-                                                                        <td style={{ padding: '10px 8px', fontWeight: '600' }}>{p.deliveryAgentCode}</td>
-                                                                        <td style={{ padding: '10px 8px', color: '#374151' }}>{p.consigneeLocation || 'N/A'}</td>
-                                                                        <td style={{ padding: '10px 8px' }}>
-                                                                            <span style={{ padding: '2px 8px', borderRadius: '4px', fontSize: '11px', fontWeight: '700', backgroundColor: '#fef3c7', color: '#b45309' }}>
-                                                                                ⏳ Awaiting Sorting
-                                                                            </span>
-                                                                        </td>
-                                                                        <td style={{ padding: '10px 8px', color: '#6b7280', fontSize: '11px' }}>{p.createdAt ? new Date(p.createdAt).toLocaleDateString() : '-'}</td>
-                                                                    </tr>
-                                                                ))}
-                                                            </tbody>
-                                                        </table>
-                                                    </div>
-                                                ) : (
-                                                    <div style={{ textAlign: 'center', padding: '30px', color: '#9ca3af', fontSize: '13px' }}>No pending parcels awaiting sorting.</div>
-                                                )}
-                                            </div>
-                                        )}
-
-                                        {/* ═══════════════════════════════════════════════════════
-                                        DETAIL TAB 4: TOTAL BAGS & SEALED BAGS
-                                    ═══════════════════════════════════════════════════════ */}
-                                        {dashboardSubTab === 'total_bags' && (
-                                            <div style={card}>
-                                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
-                                                    <div style={label}>Outbound LMD Bags Overview</div>
-                                                    <div style={{ fontSize: '12px', color: '#6b7280' }}>
-                                                        Total Bags: <strong>{dashboardData.totalBagsCreated}</strong> ({dashboardData.openBags} Open / {dashboardData.sealedBags} Sealed)
-                                                    </div>
-                                                </div>
-
-                                                {dashboardData.bagsList && dashboardData.bagsList.length > 0 ? (
-                                                    <div style={{ overflowX: 'auto' }}>
-                                                        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px', textAlign: 'left' }}>
-                                                            <thead>
-                                                                <tr style={{ borderBottom: '2px solid #e5e7eb', backgroundColor: '#f9fafb' }}>
-                                                                    {['#', 'Bag Number', 'Target Partner', 'Status', 'Parcels Inside', 'Created By', 'Sealed By', 'Created Date'].map(h => (
-                                                                        <th key={h} style={{ padding: '10px 8px', color: '#6b7280', fontWeight: '700', fontSize: '11px', textTransform: 'uppercase' }}>{h}</th>
-                                                                    ))}
-                                                                </tr>
-                                                            </thead>
-                                                            <tbody>
-                                                                {(dashboardData.bagsList || []).filter((b: any) => {
-                                                                    const q = dashSearchQuery.toLowerCase();
-                                                                    const matchQ = !q || b.bagNumber.toLowerCase().includes(q) || (b.createdBy && b.createdBy.toLowerCase().includes(q));
-                                                                    const matchP = dashPartnerFilter === 'ALL' || b.targetPartner === dashPartnerFilter;
-                                                                    return matchQ && matchP;
-                                                                }).map((b: any, idx: number) => (
-                                                                    <tr key={`bag-${idx}`} style={{ borderBottom: '1px solid #f3f4f6' }}>
-                                                                        <td style={{ padding: '10px 8px', color: '#9ca3af', fontSize: '11px' }}>{idx + 1}</td>
-                                                                        <td style={{ padding: '10px 8px', fontWeight: '800', color: '#111827', fontFamily: 'monospace' }}>{b.bagNumber}</td>
-                                                                        <td style={{ padding: '10px 8px', fontWeight: '600' }}>{b.targetPartner}</td>
-                                                                        <td style={{ padding: '10px 8px' }}>
-                                                                            <span style={{ padding: '2px 8px', borderRadius: '4px', fontSize: '11px', fontWeight: '700', color: b.status === 'SEALED' ? '#dc2626' : '#15803d' }}>
-                                                                                {b.status === 'SEALED' ? 'SEALED' : 'OPEN'}
-                                                                            </span>
-                                                                        </td>
-                                                                        <td style={{ padding: '10px 8px', fontWeight: '700', color: '#111827' }}>{b.parcelCount} parcels</td>
-                                                                        <td style={{ padding: '10px 8px', color: '#374151' }}>{b.createdBy}</td>
-                                                                        <td style={{ padding: '10px 8px', color: '#6b7280' }}>{b.sealedBy}</td>
-                                                                        <td style={{ padding: '10px 8px', color: '#6b7280', fontSize: '11px' }}>{b.createdAt ? new Date(b.createdAt).toLocaleDateString() : '-'}</td>
-                                                                    </tr>
-                                                                ))}
-                                                            </tbody>
-                                                        </table>
-                                                    </div>
-                                                ) : (
-                                                    <div style={{ textAlign: 'center', padding: '30px', color: '#9ca3af', fontSize: '13px' }}>No bags created yet today.</div>
-                                                )}
-                                            </div>
-                                        )}
-
-                                        {/* ═══════════════════════════════════════════════════════
-                                        DETAIL TAB 5: MANIFESTS & MAWB SESSIONS
-                                    ═══════════════════════════════════════════════════════ */}
-                                        {dashboardSubTab === 'manifests' && (
-                                            <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
-                                                {/* Manifest Header & Select Bar */}
-                                                <div style={card}>
-                                                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
-                                                        <div>
-                                                            <div style={label}>Manifest & MAWB Session Inspector</div>
-                                                            <p style={{ fontSize: '12px', color: '#6b7280', margin: '4px 0 0 0' }}>Comprehensive breakdown of Manifest Sessions, LMD Bags, Box Unsealings, and Allocated Parcels by MAWB Ref.</p>
-                                                        </div>
-                                                        <div style={{ fontSize: '12px', color: '#6b7280' }}>
-                                                            Total Manifests: <strong>{dashboardData.totalManifests}</strong> ({dashboardData.openManifests} Open / {dashboardData.closedManifests} Closed)
-                                                        </div>
-                                                    </div>
-
-                                                    {/* MAWB Selector & Search Input */}
-                                                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: '12px', gap: '16px' }}>
-                                                        <div style={{ flex: '1 1 360px', maxWidth: '480px', minWidth: 0, position: 'relative' }}>
-                                                            <input
-                                                                type="text"
-                                                                placeholder="Type MAWB Ref (e.g. 603-70659761)..."
-                                                                value={dashSearchQuery}
-                                                                onChange={(e) => setDashSearchQuery(e.target.value)}
-                                                                style={{ width: '100%', boxSizing: 'border-box', padding: '9px 14px', fontSize: '13px', borderRadius: '8px', border: '1px solid #d1d5db', outline: 'none' }}
-                                                            />
-                                                            {dashSearchQuery && (
-                                                                <button
-                                                                    onClick={() => setDashSearchQuery('')}
-                                                                    style={{ position: 'absolute', right: '12px', top: '50%', transform: 'translateY(-50%)', border: 'none', background: 'none', color: '#9ca3af', cursor: 'pointer', fontWeight: 'bold' }}
-                                                                >
-                                                                    ✕
-                                                                </button>
-                                                            )}
-                                                        </div>
-                                                        {(mawbsList && mawbsList.length > 0) && (
-                                                            <select
-                                                                value={dashSearchQuery}
-                                                                onChange={(e) => setDashSearchQuery(e.target.value)}
-                                                                style={{ padding: '9px 14px', fontSize: '13px', borderRadius: '8px', border: '1px solid #d1d5db', backgroundColor: '#ffffff', width: '220px', flexShrink: 0, boxSizing: 'border-box' }}
-                                                            >
-                                                                <option value="">Select MAWB Ref...</option>
-                                                                {mawbsList.map((m: any) => (
-                                                                    <option key={m.mawb_reference} value={m.mawb_reference}>{m.mawb_reference}</option>
-                                                                ))}
-                                                            </select>
-                                                        )}
-                                                    </div>
-                                                </div>
-
-                                                {/* 1. MATCHED MANIFEST SESSIONS */}
-                                                <div style={card}>
-                                                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
-                                                        <div style={label}>Matched Manifest Sessions ({
-                                                            (dashboardData.manifestsList || []).filter((m: any) => {
-                                                                const q = dashSearchQuery.trim().toLowerCase();
-                                                                return !q || (m.mawbRef && m.mawbRef.toLowerCase().includes(q)) || (m.manifestId && m.manifestId.toLowerCase().includes(q));
-                                                            }).length
-                                                        })</div>
-                                                    </div>
-                                                    <div style={{ overflowX: 'auto' }}>
-                                                        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px', textAlign: 'left' }}>
-                                                            <thead>
-                                                                <tr style={{ borderBottom: '2px solid #e5e7eb', backgroundColor: '#f9fafb' }}>
-                                                                    {['MAWB / Manifest Ref', 'Status', 'Closed By', 'Total Bags', 'Total Parcels', 'Date'].map(h => (
-                                                                        <th key={h} style={{ padding: '10px 8px', color: '#6b7280', fontWeight: '700', fontSize: '11px', textTransform: 'uppercase' }}>{h}</th>
-                                                                    ))}
-                                                                </tr>
-                                                            </thead>
-                                                            <tbody>
-                                                                {(dashboardData.manifestsList || []).filter((m: any) => {
-                                                                    const q = dashSearchQuery.trim().toLowerCase();
-                                                                    return !q || (m.mawbRef && m.mawbRef.toLowerCase().includes(q)) || (m.manifestId && m.manifestId.toLowerCase().includes(q));
-                                                                }).map((m: any, idx: number) => (
-                                                                    <tr key={`m-${idx}`} style={{ borderBottom: '1px solid #f3f4f6' }}>
-                                                                        <td style={{ padding: '10px 8px', fontWeight: '800', color: '#111827', fontFamily: 'monospace' }}>{m.mawbRef || m.manifestId}</td>
-                                                                        <td style={{ padding: '10px 8px' }}>
-                                                                            <span style={{ padding: '2px 8px', borderRadius: '4px', fontSize: '11px', fontWeight: '700', backgroundColor: m.status === 'CLOSED' ? '#e0e7ff' : '#dcfce7', color: m.status === 'CLOSED' ? '#4338ca' : '#15803d' }}>
-                                                                                {m.status === 'CLOSED' ? '✔ CLOSED' : '⚡ OPEN'}
-                                                                            </span>
-                                                                        </td>
-                                                                        <td style={{ padding: '10px 8px', color: '#374151' }}>{m.closedBy || '—'}</td>
-                                                                        <td style={{ padding: '10px 8px', fontWeight: '700' }}>{m.totalBags} bags</td>
-                                                                        <td style={{ padding: '10px 8px', fontWeight: '700', color: '#166534' }}>{m.totalParcels} parcels</td>
-                                                                        <td style={{ padding: '10px 8px', color: '#6b7280', fontSize: '11px' }}>{m.createdAt ? new Date(m.createdAt).toLocaleDateString() : '-'}</td>
-                                                                    </tr>
-                                                                ))}
-                                                                {(dashboardData.manifestsList || []).filter((m: any) => {
-                                                                    const q = dashSearchQuery.trim().toLowerCase();
-                                                                    return !q || (m.mawbRef && m.mawbRef.toLowerCase().includes(q)) || (m.manifestId && m.manifestId.toLowerCase().includes(q));
-                                                                }).length === 0 && (
-                                                                        <tr>
-                                                                            <td colSpan={6} style={{ padding: '20px', textAlign: 'center', color: '#9ca3af', fontSize: '13px' }}>
-                                                                                No manifest sessions matched query "{dashSearchQuery}"
-                                                                            </td>
-                                                                        </tr>
-                                                                    )}
-                                                            </tbody>
-                                                        </table>
-                                                    </div>
-                                                </div>
-
-                                                {/* 2. MATCHED LMD BAGS */}
-                                                <div style={card}>
-                                                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
-                                                        <div style={label}>Matched LMD Bags ({
-                                                            (dashboardData.bagsList || []).filter((b: any) => {
-                                                                const q = dashSearchQuery.trim().toLowerCase();
-                                                                return !q || (b.mawbRef && b.mawbRef.toLowerCase().includes(q)) || (b.bagNumber && b.bagNumber.toLowerCase().includes(q));
-                                                            }).length
-                                                        })</div>
-                                                    </div>
-                                                    <div style={{ overflowX: 'auto' }}>
-                                                        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px', textAlign: 'left' }}>
-                                                            <thead>
-                                                                <tr style={{ borderBottom: '2px solid #e5e7eb', backgroundColor: '#f9fafb' }}>
-                                                                    {['Bag Number', 'MAWB Ref', 'Target Partner', 'Destination Hub', 'Parcels', 'Total Weight', 'Status', 'Created / Sealed By & Timestamp'].map(h => (
-                                                                        <th key={h} style={{ padding: '10px 8px', color: '#6b7280', fontWeight: '700', fontSize: '11px', textTransform: 'uppercase' }}>{h}</th>
-                                                                    ))}
-                                                                </tr>
-                                                            </thead>
-                                                            <tbody>
-                                                                {(dashboardData.bagsList || []).filter((b: any) => {
-                                                                    const q = dashSearchQuery.trim().toLowerCase();
-                                                                    return !q || (b.mawbRef && b.mawbRef.toLowerCase().includes(q)) || (b.bagNumber && b.bagNumber.toLowerCase().includes(q));
-                                                                }).map((b: any, idx: number) => (
-                                                                    <tr key={`b-${idx}`} style={{ borderBottom: '1px solid #f3f4f6' }}>
-                                                                        <td style={{ padding: '10px 8px', fontWeight: '800', color: '#111827', fontFamily: 'monospace' }}>{b.bagNumber}</td>
-                                                                        <td style={{ padding: '10px 8px', color: '#374151', fontSize: '12px' }}>{b.mawbRef || '—'}</td>
-                                                                        <td style={{ padding: '10px 8px' }}>
-                                                                            <span style={{ padding: '2px 8px', borderRadius: '4px', fontSize: '11px', fontWeight: '700', backgroundColor: b.targetPartner === 'PickMe' ? '#fef3c7' : b.targetPartner === 'Domex' ? '#dbeafe' : b.targetPartner === 'Pronto' ? '#e0e7ff' : '#f3f4f6', color: b.targetPartner === 'PickMe' ? '#b45309' : b.targetPartner === 'Domex' ? '#1d4ed8' : b.targetPartner === 'Pronto' ? '#4338ca' : '#374151' }}>
-                                                                                {b.targetPartner}
-                                                                            </span>
-                                                                        </td>
-                                                                        <td style={{ padding: '10px 8px', color: '#374151' }}>{b.destinationHub || b.targetPartner}</td>
-                                                                        <td style={{ padding: '10px 8px', fontWeight: '700' }}>{b.parcelCount} items</td>
-                                                                        <td style={{ padding: '10px 8px', color: '#4b5563' }}>{b.totalWeight ? `${b.totalWeight} kg` : '-'}</td>
-                                                                        <td style={{ padding: '10px 8px' }}>
-                                                                            <span style={{ padding: '2px 8px', borderRadius: '4px', fontSize: '11px', fontWeight: '700', backgroundColor: b.status === 'SEALED' ? '#fee2e2' : '#dcfce7', color: b.status === 'SEALED' ? '#dc2626' : '#15803d' }}>
-                                                                                {b.status === 'SEALED' ? 'SEALED' : 'OPEN'}
-                                                                            </span>
-                                                                        </td>
-                                                                        <td style={{ padding: '10px 8px', color: '#4b5563', fontSize: '11px' }}>
-                                                                            <div style={{ fontWeight: '600', color: '#111827' }}>{b.sealedBy && b.sealedBy !== '-' ? b.sealedBy : b.createdBy}</div>
-                                                                            <div style={{ color: '#6b7280', fontSize: '10px' }}>{b.sealedAt && b.sealedAt !== '-' ? new Date(b.sealedAt).toLocaleString() : b.createdAt ? new Date(b.createdAt).toLocaleString() : '-'}</div>
-                                                                        </td>
-                                                                    </tr>
-                                                                ))}
-                                                                {(dashboardData.bagsList || []).filter((b: any) => {
-                                                                    const q = dashSearchQuery.trim().toLowerCase();
-                                                                    return !q || (b.mawbRef && b.mawbRef.toLowerCase().includes(q)) || (b.bagNumber && b.bagNumber.toLowerCase().includes(q));
-                                                                }).length === 0 && (
-                                                                        <tr>
-                                                                            <td colSpan={8} style={{ padding: '20px', textAlign: 'center', color: '#9ca3af', fontSize: '13px' }}>
-                                                                                No LMD bags matched query "{dashSearchQuery}"
-                                                                            </td>
-                                                                        </tr>
-                                                                    )}
-                                                            </tbody>
-                                                        </table>
-                                                    </div>
-                                                </div>
-
-                                                {/* 3. MATCHED BOX UNSEALINGS */}
-                                                <div style={card}>
-                                                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
-                                                        <div style={label}>Matched Box Unsealings ({
-                                                            (dashboardData.unsealedBoxesList || []).filter((u: any) => {
-                                                                const q = dashSearchQuery.trim().toLowerCase();
-                                                                return !q || (u.mawbRef && u.mawbRef.toLowerCase().includes(q)) || (u.bagNumber && u.bagNumber.toLowerCase().includes(q));
-                                                            }).length
-                                                        })</div>
-                                                    </div>
-                                                    <div style={{ overflowX: 'auto' }}>
-                                                        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px', textAlign: 'left' }}>
-                                                            <thead>
-                                                                <tr style={{ borderBottom: '2px solid #e5e7eb', backgroundColor: '#f9fafb' }}>
-                                                                    {['Box Bag No', 'MAWB Ref', 'Scanned / Expected Count', 'Unsealed By', 'Timestamp'].map(h => (
-                                                                        <th key={h} style={{ padding: '10px 8px', color: '#6b7280', fontWeight: '700', fontSize: '11px', textTransform: 'uppercase' }}>{h}</th>
-                                                                    ))}
-                                                                </tr>
-                                                            </thead>
-                                                            <tbody>
-                                                                {(dashboardData.unsealedBoxesList || []).filter((u: any) => {
-                                                                    const q = dashSearchQuery.trim().toLowerCase();
-                                                                    return !q || (u.mawbRef && u.mawbRef.toLowerCase().includes(q)) || (u.bagNumber && u.bagNumber.toLowerCase().includes(q));
-                                                                }).map((u: any, idx: number) => (
-                                                                    <tr key={`ub-${idx}`} style={{ borderBottom: '1px solid #f3f4f6' }}>
-                                                                        <td style={{ padding: '10px 8px', fontWeight: '800', color: '#111827', fontFamily: 'monospace' }}>{u.bagNumber}</td>
-                                                                        <td style={{ padding: '10px 8px', color: '#374151' }}>{u.mawbRef || '—'}</td>
-                                                                        <td style={{ padding: '10px 8px', fontWeight: '700', color: u.scannedCount === u.expectedCount ? '#166534' : '#dc2626' }}>
-                                                                            {u.scannedCount} / {u.expectedCount}
-                                                                        </td>
-                                                                        <td style={{ padding: '10px 8px', color: '#4b5563' }}>{u.unsealedBy}</td>
-                                                                        <td style={{ padding: '10px 8px', color: '#6b7280', fontSize: '11px' }}>{u.createdAt ? new Date(u.createdAt).toLocaleString() : '-'}</td>
-                                                                    </tr>
-                                                                ))}
-                                                                {(dashboardData.unsealedBoxesList || []).filter((u: any) => {
-                                                                    const q = dashSearchQuery.trim().toLowerCase();
-                                                                    return !q || (u.mawbRef && u.mawbRef.toLowerCase().includes(q)) || (u.bagNumber && u.bagNumber.toLowerCase().includes(q));
-                                                                }).length === 0 && (
-                                                                        <tr>
-                                                                            <td colSpan={5} style={{ padding: '20px', textAlign: 'center', color: '#9ca3af', fontSize: '13px' }}>
-                                                                                No box unsealings matched query "{dashSearchQuery}"
-                                                                            </td>
-                                                                        </tr>
-                                                                    )}
-                                                            </tbody>
-                                                        </table>
-                                                    </div>
-                                                </div>
-
-                                                {/* 4. MATCHED PARCELS */}
-                                                <div style={card}>
-                                                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
-                                                        <div style={label}>Matched Parcels ({
-                                                            (dashboardData.receivedParcels || []).filter((p: any) => {
-                                                                const q = dashSearchQuery.trim().toLowerCase();
-                                                                return !q || (p.mawbReference && p.mawbReference.toLowerCase().includes(q)) || (p.referenceNumber && p.referenceNumber.toLowerCase().includes(q)) || (p.bagNumber && p.bagNumber.toLowerCase().includes(q));
-                                                            }).length
-                                                        })</div>
-                                                    </div>
-                                                    <div style={{ overflowX: 'auto' }}>
-                                                        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px', textAlign: 'left' }}>
-                                                            <thead>
-                                                                <tr style={{ borderBottom: '2px solid #e5e7eb', backgroundColor: '#f9fafb' }}>
-                                                                    {['Waybill / Ref', 'Temu Barcode', 'MAWB Ref', 'Assigned Bag #', 'Courier Partner', 'Destination City', 'Status'].map(h => (
-                                                                        <th key={h} style={{ padding: '10px 8px', color: '#6b7280', fontWeight: '700', fontSize: '11px', textTransform: 'uppercase' }}>{h}</th>
-                                                                    ))}
-                                                                </tr>
-                                                            </thead>
-                                                            <tbody>
-                                                                {(dashboardData.receivedParcels || []).filter((p: any) => {
-                                                                    const q = dashSearchQuery.trim().toLowerCase();
-                                                                    return !q || (p.mawbReference && p.mawbReference.toLowerCase().includes(q)) || (p.referenceNumber && p.referenceNumber.toLowerCase().includes(q)) || (p.bagNumber && p.bagNumber.toLowerCase().includes(q));
-                                                                }).slice(0, 100).map((p: any, idx: number) => (
-                                                                    <tr key={`mp-${idx}`} style={{ borderBottom: '1px solid #f3f4f6' }}>
-                                                                        <td style={{ padding: '10px 8px', fontWeight: '700', color: '#111827' }}>{p.referenceNumber}</td>
-                                                                        <td style={{ padding: '10px 8px', color: '#4b5563', fontFamily: 'monospace', fontSize: '12px' }}>{p.senderReference}</td>
-                                                                        <td style={{ padding: '10px 8px', color: '#374151', fontSize: '12px' }}>{p.mawbReference}</td>
-                                                                        <td style={{ padding: '10px 8px' }}>
-                                                                            {p.bagNumber ? (
-                                                                                <span style={{ padding: '2px 8px', borderRadius: '4px', fontSize: '11px', fontWeight: '700', backgroundColor: '#dcfce7', color: '#15803d', fontFamily: 'monospace' }}>
-                                                                                    {p.bagNumber}
-                                                                                </span>
-                                                                            ) : (
-                                                                                <span style={{ color: '#9ca3af', fontSize: '12px' }}>Unassigned</span>
-                                                                            )}
-                                                                        </td>
-                                                                        <td style={{ padding: '10px 8px', fontWeight: '600' }}>{p.deliveryAgentCode}</td>
-                                                                        <td style={{ padding: '10px 8px', color: '#374151' }}>{p.consigneeLocation || 'N/A'}</td>
-                                                                        <td style={{ padding: '10px 8px' }}>
-                                                                            <span style={{ padding: '2px 8px', borderRadius: '4px', fontSize: '11px', fontWeight: '700', backgroundColor: p.isSorted ? '#dcfce7' : '#fef3c7', color: p.isSorted ? '#15803d' : '#b45309' }}>
-                                                                                {p.isSorted ? 'LMD ALLOCATED' : 'RECEIVED'}
-                                                                            </span>
-                                                                        </td>
-                                                                    </tr>
-                                                                ))}
-                                                                {(dashboardData.receivedParcels || []).filter((p: any) => {
-                                                                    const q = dashSearchQuery.trim().toLowerCase();
-                                                                    return !q || (p.mawbReference && p.mawbReference.toLowerCase().includes(q)) || (p.referenceNumber && p.referenceNumber.toLowerCase().includes(q)) || (p.bagNumber && p.bagNumber.toLowerCase().includes(q));
-                                                                }).length === 0 && (
-                                                                        <tr>
-                                                                            <td colSpan={7} style={{ padding: '20px', textAlign: 'center', color: '#9ca3af', fontSize: '13px' }}>
-                                                                                No parcels matched query "{dashSearchQuery}"
-                                                                            </td>
-                                                                        </tr>
-                                                                    )}
-                                                            </tbody>
-                                                        </table>
-                                                    </div>
+                                    {dashboardSubTab === 'total_received' && (
+                                        <div style={card}>
+                                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+                                                <div style={label}>Total Received Inbound Parcels</div>
+                                                <div style={{ fontSize: '12px', color: '#6b7280' }}>
+                                                    Showing <strong>{(dashboardData.receivedParcels || []).filter((p: any) => {
+                                                        const q = dashSearchQuery.toLowerCase();
+                                                        const matchQ = !q || p.referenceNumber.toLowerCase().includes(q) || p.senderReference.toLowerCase().includes(q) || p.mawbReference.toLowerCase().includes(q) || p.consigneeLocation.toLowerCase().includes(q);
+                                                        const matchP = dashPartnerFilter === 'ALL' || p.deliveryAgentCode === dashPartnerFilter;
+                                                        return matchQ && matchP;
+                                                    }).length}</strong> of {dashboardData.totalReceived} parcels
                                                 </div>
                                             </div>
-                                        )}
 
-                                        {/* ═══════════════════════════════════════════════════════
-                                        DETAIL TAB 6: EXCEPTIONS & DISCREPANCIES
-                                    ═══════════════════════════════════════════════════════ */}
-                                        {dashboardSubTab === 'exceptions' && (
-                                            <div style={card}>
-                                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
-                                                    <div style={label}>Operational Exceptions & Discrepancies Log</div>
-                                                    <div style={{ fontSize: '12px', color: '#6b7280' }}>
-                                                        Total Exceptions: <strong>{(dashboardData.exceptionsList || []).length}</strong>
-                                                    </div>
-                                                </div>
-
-                                                {dashboardData.exceptionsList && dashboardData.exceptionsList.length > 0 ? (
-                                                    <div style={{ overflowX: 'auto' }}>
-                                                        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px', textAlign: 'left' }}>
-                                                            <thead>
-                                                                <tr style={{ borderBottom: '2px solid #e5e7eb', backgroundColor: '#f9fafb' }}>
-                                                                    {['#', 'Exception Type', 'Ref / Barcode / Bag #', 'Details', 'Scanned / Expected', 'Reported By', 'Timestamp'].map(h => (
-                                                                        <th key={h} style={{ padding: '10px 8px', color: '#6b7280', fontWeight: '700', fontSize: '11px', textTransform: 'uppercase' }}>{h}</th>
-                                                                    ))}
-                                                                </tr>
-                                                            </thead>
-                                                            <tbody>
-                                                                {(dashboardData.exceptionsList || []).filter((ex: any) => {
-                                                                    const q = dashSearchQuery.toLowerCase();
-                                                                    return !q || ex.type.toLowerCase().includes(q) || ex.refNumber.toLowerCase().includes(q) || ex.details.toLowerCase().includes(q);
-                                                                }).map((ex: any, idx: number) => (
-                                                                    <tr key={`ex-${idx}`} style={{ borderBottom: '1px solid #f3f4f6' }}>
-                                                                        <td style={{ padding: '10px 8px', color: '#9ca3af', fontSize: '11px' }}>{idx + 1}</td>
-                                                                        <td style={{ padding: '10px 8px' }}>
-                                                                            <span style={{ padding: '2px 8px', borderRadius: '4px', fontSize: '11px', fontWeight: '700', backgroundColor: ex.type.includes('Damaged') ? '#fee2e2' : '#fef3c7', color: ex.type.includes('Damaged') ? '#dc2626' : '#b45309' }}>
-                                                                                {ex.type}
-                                                                            </span>
-                                                                        </td>
-                                                                        <td style={{ padding: '10px 8px', fontWeight: '700', color: '#111827', fontFamily: 'monospace' }}>{ex.refNumber}</td>
-                                                                        <td style={{ padding: '10px 8px', color: '#374151' }}>{ex.details}</td>
-                                                                        <td style={{ padding: '10px 8px', fontWeight: '700', color: '#111827' }}>{ex.scannedVsExpected}</td>
-                                                                        <td style={{ padding: '10px 8px', color: '#4b5563' }}>{ex.reportedBy}</td>
-                                                                        <td style={{ padding: '10px 8px', color: '#6b7280', fontSize: '11px' }}>{ex.createdAt ? new Date(ex.createdAt).toLocaleString() : '-'}</td>
-                                                                    </tr>
-                                                                ))}
-                                                            </tbody>
-                                                        </table>
-                                                    </div>
-                                                ) : (
-                                                    <div style={{ textAlign: 'center', padding: '30px', color: '#9ca3af', fontSize: '13px' }}>No exception logs found.</div>
-                                                )}
-                                            </div>
-                                        )}
-
-                                        {/* ═══════════════════════════════════════════════════════
-                                        DETAIL TAB 7: USER PRODUCTIVITY PERFORMANCE
-                                    ═══════════════════════════════════════════════════════ */}
-                                        {dashboardSubTab === 'productivity' && (
-                                            <div style={card}>
-                                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
-                                                    <div>
-                                                        <div style={label}>User Productivity Performance Overview</div>
-                                                        <p style={{ fontSize: '12px', color: '#6b7280', margin: '4px 0 0 0' }}>Real-time parcel sorting, bag sealing, and operational activity across all system operators.</p>
-                                                    </div>
-                                                    <div style={{ fontSize: '12px', color: '#6b7280' }}>
-                                                        Total System Operators: <strong>{(usersList || []).length || (dashboardData.userProductivity || []).length}</strong>
-                                                    </div>
-                                                </div>
-
+                                            {dashboardData.receivedParcels && dashboardData.receivedParcels.length > 0 ? (
                                                 <div style={{ overflowX: 'auto' }}>
                                                     <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px', textAlign: 'left' }}>
                                                         <thead>
                                                             <tr style={{ borderBottom: '2px solid #e5e7eb', backgroundColor: '#f9fafb' }}>
-                                                                {['#', 'Operator / User Name', 'Email Address', 'Role', 'Inbound Parcels Scanned', 'Outbound Bags Sealed', 'Manifest Sessions Closed', 'System Duty Status'].map(h => (
-                                                                    <th key={h} style={{ padding: '10px 12px', color: '#6b7280', fontWeight: '700', fontSize: '11px', textTransform: 'uppercase' }}>{h}</th>
+                                                                {['#', 'Parcel Reference', 'Temu Barcode', 'Courier Partner', 'Destination City', 'Weight', 'Allocation Status', 'Received Date'].map(h => (
+                                                                    <th key={h} style={{ padding: '10px 8px', color: '#6b7280', fontWeight: '700', fontSize: '11px', textTransform: 'uppercase' }}>{h}</th>
                                                                 ))}
                                                             </tr>
                                                         </thead>
                                                         <tbody>
-                                                            {(usersList && usersList.length > 0
-                                                                ? usersList
-                                                                : (dashboardData.userProductivity || []).map((p: any) => ({ first_name: p.operator, last_name: '', email: `${p.operator.toLowerCase().replace(/\s+/g, '.')}@skynet.lk`, role: 'Operator', is_active: true }))
-                                                            ).map((user: any, idx: number) => {
-                                                                const fullName = `${user.first_name || ''} ${user.last_name || ''}`.trim() || user.name || user.email || 'Operator';
-                                                                const prod = (dashboardData.userProductivity || []).find((p: any) =>
-                                                                    p.operator?.toLowerCase().includes(fullName.toLowerCase()) ||
-                                                                    p.operator?.toLowerCase().includes((user.first_name || '').toLowerCase())
-                                                                );
+                                                            {(dashboardData.receivedParcels || []).filter((p: any) => {
+                                                                const q = dashSearchQuery.toLowerCase();
+                                                                const matchQ = !q || p.referenceNumber.toLowerCase().includes(q) || p.senderReference.toLowerCase().includes(q) || p.mawbReference.toLowerCase().includes(q) || p.consigneeLocation.toLowerCase().includes(q);
+                                                                const matchP = dashPartnerFilter === 'ALL' || p.deliveryAgentCode === dashPartnerFilter;
+                                                                return matchQ && matchP;
+                                                            }).slice(0, 100).map((p: any, idx: number) => (
+                                                                <tr key={`rec-${idx}`} style={{ borderBottom: '1px solid #f3f4f6' }}>
+                                                                    <td style={{ padding: '10px 8px', color: '#9ca3af', fontSize: '11px' }}>{idx + 1}</td>
+                                                                    <td style={{ padding: '10px 8px', fontWeight: '700', color: '#111827' }}>{p.referenceNumber}</td>
+                                                                    <td style={{ padding: '10px 8px', color: '#4b5563', fontFamily: 'monospace', fontSize: '12px' }}>{p.senderReference}</td>
+                                                                    <td style={{ padding: '10px 8px' }}>
+                                                                        <span style={{ padding: '2px 8px', borderRadius: '4px', fontSize: '11px', fontWeight: '700', backgroundColor: p.deliveryAgentCode === 'PickMe' ? '#fef3c7' : p.deliveryAgentCode === 'Domex' ? '#dbeafe' : p.deliveryAgentCode === 'Pronto' ? '#e0e7ff' : '#f3f4f6', color: p.deliveryAgentCode === 'PickMe' ? '#b45309' : p.deliveryAgentCode === 'Domex' ? '#1d4ed8' : p.deliveryAgentCode === 'Pronto' ? '#4338ca' : '#374151' }}>
+                                                                            {p.deliveryAgentCode}
+                                                                        </span>
+                                                                    </td>
+                                                                    <td style={{ padding: '10px 8px', color: '#374151' }}>{p.consigneeLocation || 'N/A'}</td>
+                                                                    <td style={{ padding: '10px 8px', color: '#6b7280' }}>{p.weight}</td>
+                                                                    <td style={{ padding: '10px 8px' }}>
+                                                                        <span style={{ padding: '2px 8px', borderRadius: '4px', fontSize: '11px', fontWeight: '700', backgroundColor: p.isSorted ? '#dcfce7' : '#fef3c7', color: p.isSorted ? '#15803d' : '#b45309' }}>
+                                                                            {p.isSorted ? `Sorted (${p.bagNumber})` : 'Awaiting Sort'}
+                                                                        </span>
+                                                                    </td>
+                                                                    <td style={{ padding: '10px 8px', color: '#6b7280', fontSize: '11px' }}>{p.createdAt ? new Date(p.createdAt).toLocaleDateString() : '-'}</td>
+                                                                </tr>
+                                                            ))}
+                                                        </tbody>
+                                                    </table>
+                                                </div>
+                                            ) : (
+                                                <div style={{ textAlign: 'center', padding: '30px', color: '#9ca3af', fontSize: '13px' }}>No received parcels found matching your criteria.</div>
+                                            )}
+                                        </div>
+                                    )}
 
-                                                                const scanned = prod ? prod.scanned : 0;
-                                                                const bagsSealed = prod ? prod.bagsSealed : 0;
-                                                                const manifestsClosed = prod ? prod.manifestsClosed : 0;
+                                    {/* ═══════════════════════════════════════════════════════
+                                        DETAIL TAB 2: PARCELS SORTED (ALLOCATED IN BAGS)
+                                    ═══════════════════════════════════════════════════════ */}
+                                    {dashboardSubTab === 'parcels_sorted' && (
+                                        <div style={card}>
+                                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+                                                <div style={label}>Parcels Sorted & Allocated in Outbound Bags</div>
+                                                <div style={{ fontSize: '12px', color: '#6b7280' }}>
+                                                    Total Allocated: <strong>{dashboardData.totalSorted} parcels</strong>
+                                                </div>
+                                            </div>
 
-                                                                return (
-                                                                    <tr key={`u-prod-${user.id || idx}`} style={{ borderBottom: '1px solid #f3f4f6' }}>
-                                                                        <td style={{ padding: '10px 12px', color: '#9ca3af', fontSize: '11px' }}>{idx + 1}</td>
-                                                                        <td style={{ padding: '10px 12px', fontWeight: '700', color: '#111827' }}>
-                                                                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                                                                                <div style={{ width: '28px', height: '28px', borderRadius: '50%', backgroundColor: '#f3f4f6', border: '1px solid #d1d5db', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: '700', fontSize: '11px', color: '#374151' }}>
-                                                                                    {(user.first_name || user.name || user.email || 'O')[0].toUpperCase()}
-                                                                                </div>
-                                                                                <span>{fullName}</span>
-                                                                            </div>
-                                                                        </td>
-                                                                        <td style={{ padding: '10px 12px', color: '#4b5563', fontSize: '12px', fontFamily: 'monospace' }}>{user.email || '—'}</td>
-                                                                        <td style={{ padding: '10px 12px' }}>
-                                                                            <span style={{ padding: '2px 8px', borderRadius: '4px', fontSize: '11px', fontWeight: '700', backgroundColor: '#eff6ff', color: '#1d4ed8' }}>
-                                                                                {user.role || 'Operator'}
-                                                                            </span>
-                                                                        </td>
-                                                                        <td style={{ padding: '10px 12px', fontWeight: '800', color: '#166534' }}>{scanned} parcels</td>
-                                                                        <td style={{ padding: '10px 12px', fontWeight: '700', color: '#111827' }}>{bagsSealed} bags</td>
-                                                                        <td style={{ padding: '10px 12px', fontWeight: '700', color: '#374151' }}>{manifestsClosed} manifests</td>
-                                                                        <td style={{ padding: '10px 12px' }}>
-                                                                            <span style={{ padding: '2px 8px', borderRadius: '4px', fontSize: '11px', fontWeight: '700', backgroundColor: '#dcfce7', color: '#15803d' }}>
-                                                                                ● Active On-Duty
-                                                                            </span>
+                                            {dashboardData.receivedParcels && dashboardData.receivedParcels.filter((p: any) => p.isSorted).length > 0 ? (
+                                                <div style={{ overflowX: 'auto' }}>
+                                                    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px', textAlign: 'left' }}>
+                                                        <thead>
+                                                            <tr style={{ borderBottom: '2px solid #e5e7eb', backgroundColor: '#f9fafb' }}>
+                                                                {['#', 'Parcel Reference', 'Assigned Bag #', 'Courier Partner', 'Destination City', 'Weight', 'Status'].map(h => (
+                                                                    <th key={h} style={{ padding: '10px 8px', color: '#6b7280', fontWeight: '700', fontSize: '11px', textTransform: 'uppercase' }}>{h}</th>
+                                                                ))}
+                                                            </tr>
+                                                        </thead>
+                                                        <tbody>
+                                                            {(dashboardData.receivedParcels || []).filter((p: any) => p.isSorted).filter((p: any) => {
+                                                                const q = dashSearchQuery.toLowerCase();
+                                                                const matchQ = !q || p.referenceNumber.toLowerCase().includes(q) || p.bagNumber.toLowerCase().includes(q) || p.consigneeLocation.toLowerCase().includes(q);
+                                                                const matchP = dashPartnerFilter === 'ALL' || p.deliveryAgentCode === dashPartnerFilter;
+                                                                return matchQ && matchP;
+                                                            }).slice(0, 100).map((p: any, idx: number) => (
+                                                                <tr key={`sorted-${idx}`} style={{ borderBottom: '1px solid #f3f4f6' }}>
+                                                                    <td style={{ padding: '10px 8px', color: '#9ca3af', fontSize: '11px' }}>{idx + 1}</td>
+                                                                    <td style={{ padding: '10px 8px', fontWeight: '700', color: '#111827' }}>{p.referenceNumber}</td>
+                                                                    <td style={{ padding: '10px 8px' }}>
+                                                                        <span style={{ padding: '3px 8px', borderRadius: '4px', fontSize: '12px', fontWeight: '700', backgroundColor: '#dcfce7', color: '#15803d', fontFamily: 'monospace' }}>
+                                                                            {p.bagNumber}
+                                                                        </span>
+                                                                    </td>
+                                                                    <td style={{ padding: '10px 8px', fontWeight: '600' }}>{p.deliveryAgentCode}</td>
+                                                                    <td style={{ padding: '10px 8px', color: '#374151' }}>{p.consigneeLocation || 'N/A'}</td>
+                                                                    <td style={{ padding: '10px 8px', color: '#6b7280' }}>{p.weight}</td>
+                                                                    <td style={{ padding: '10px 8px', color: '#166534', fontWeight: '700', fontSize: '12px' }}>✓ Allocated</td>
+                                                                </tr>
+                                                            ))}
+                                                        </tbody>
+                                                    </table>
+                                                </div>
+                                            ) : (
+                                                <div style={{ textAlign: 'center', padding: '30px', color: '#9ca3af', fontSize: '13px' }}>No sorted parcels found.</div>
+                                            )}
+                                        </div>
+                                    )}
+
+                                    {/* ═══════════════════════════════════════════════════════
+                                        DETAIL TAB 3: PENDING PARCELS (AWAITING SORTING)
+                                    ═══════════════════════════════════════════════════════ */}
+                                    {dashboardSubTab === 'pending_parcels' && (
+                                        <div style={card}>
+                                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+                                                <div style={label}>Pending Parcels Awaiting Sorting</div>
+                                                <div style={{ fontSize: '12px', color: '#6b7280' }}>
+                                                    Total Pending: <strong>{dashboardData.pendingParcels} parcels</strong>
+                                                </div>
+                                            </div>
+
+                                            {dashboardData.receivedParcels && dashboardData.receivedParcels.filter((p: any) => !p.isSorted).length > 0 ? (
+                                                <div style={{ overflowX: 'auto' }}>
+                                                    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px', textAlign: 'left' }}>
+                                                        <thead>
+                                                            <tr style={{ borderBottom: '2px solid #e5e7eb', backgroundColor: '#f9fafb' }}>
+                                                                {['#', 'Parcel Reference', 'Temu Barcode', 'Target Partner', 'Destination City', 'Status', 'Received Date'].map(h => (
+                                                                    <th key={h} style={{ padding: '10px 8px', color: '#6b7280', fontWeight: '700', fontSize: '11px', textTransform: 'uppercase' }}>{h}</th>
+                                                                ))}
+                                                            </tr>
+                                                        </thead>
+                                                        <tbody>
+                                                            {(dashboardData.receivedParcels || []).filter((p: any) => !p.isSorted).filter((p: any) => {
+                                                                const q = dashSearchQuery.toLowerCase();
+                                                                const matchQ = !q || p.referenceNumber.toLowerCase().includes(q) || p.senderReference.toLowerCase().includes(q) || p.consigneeLocation.toLowerCase().includes(q);
+                                                                const matchP = dashPartnerFilter === 'ALL' || p.deliveryAgentCode === dashPartnerFilter;
+                                                                return matchQ && matchP;
+                                                            }).slice(0, 100).map((p: any, idx: number) => (
+                                                                <tr key={`pend-${idx}`} style={{ borderBottom: '1px solid #f3f4f6' }}>
+                                                                    <td style={{ padding: '10px 8px', color: '#9ca3af', fontSize: '11px' }}>{idx + 1}</td>
+                                                                    <td style={{ padding: '10px 8px', fontWeight: '700', color: '#111827' }}>{p.referenceNumber}</td>
+                                                                    <td style={{ padding: '10px 8px', color: '#4b5563', fontFamily: 'monospace', fontSize: '12px' }}>{p.senderReference}</td>
+                                                                    <td style={{ padding: '10px 8px', fontWeight: '600' }}>{p.deliveryAgentCode}</td>
+                                                                    <td style={{ padding: '10px 8px', color: '#374151' }}>{p.consigneeLocation || 'N/A'}</td>
+                                                                    <td style={{ padding: '10px 8px' }}>
+                                                                        <span style={{ padding: '2px 8px', borderRadius: '4px', fontSize: '11px', fontWeight: '700', backgroundColor: '#fef3c7', color: '#b45309' }}>
+                                                                            ⏳ Awaiting Sorting
+                                                                        </span>
+                                                                    </td>
+                                                                    <td style={{ padding: '10px 8px', color: '#6b7280', fontSize: '11px' }}>{p.createdAt ? new Date(p.createdAt).toLocaleDateString() : '-'}</td>
+                                                                </tr>
+                                                            ))}
+                                                        </tbody>
+                                                    </table>
+                                                </div>
+                                            ) : (
+                                                <div style={{ textAlign: 'center', padding: '30px', color: '#9ca3af', fontSize: '13px' }}>No pending parcels awaiting sorting.</div>
+                                            )}
+                                        </div>
+                                    )}
+
+                                    {/* ═══════════════════════════════════════════════════════
+                                        DETAIL TAB 4: TOTAL BAGS & SEALED BAGS
+                                    ═══════════════════════════════════════════════════════ */}
+                                    {dashboardSubTab === 'total_bags' && (
+                                        <div style={card}>
+                                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+                                                <div style={label}>Outbound LMD Bags Overview</div>
+                                                <div style={{ fontSize: '12px', color: '#6b7280' }}>
+                                                    Total Bags: <strong>{dashboardData.totalBagsCreated}</strong> ({dashboardData.openBags} Open / {dashboardData.sealedBags} Sealed)
+                                                </div>
+                                            </div>
+
+                                            {dashboardData.bagsList && dashboardData.bagsList.length > 0 ? (
+                                                <div style={{ overflowX: 'auto' }}>
+                                                    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px', textAlign: 'left' }}>
+                                                        <thead>
+                                                            <tr style={{ borderBottom: '2px solid #e5e7eb', backgroundColor: '#f9fafb' }}>
+                                                                {['#', 'Bag Number', 'Target Partner', 'Status', 'Parcels Inside', 'Created By', 'Sealed By', 'Created Date'].map(h => (
+                                                                    <th key={h} style={{ padding: '10px 8px', color: '#6b7280', fontWeight: '700', fontSize: '11px', textTransform: 'uppercase' }}>{h}</th>
+                                                                ))}
+                                                            </tr>
+                                                        </thead>
+                                                        <tbody>
+                                                            {(dashboardData.bagsList || []).filter((b: any) => {
+                                                                const q = dashSearchQuery.toLowerCase();
+                                                                const matchQ = !q || b.bagNumber.toLowerCase().includes(q) || (b.createdBy && b.createdBy.toLowerCase().includes(q));
+                                                                const matchP = dashPartnerFilter === 'ALL' || b.targetPartner === dashPartnerFilter;
+                                                                return matchQ && matchP;
+                                                            }).map((b: any, idx: number) => (
+                                                                <tr key={`bag-${idx}`} style={{ borderBottom: '1px solid #f3f4f6' }}>
+                                                                    <td style={{ padding: '10px 8px', color: '#9ca3af', fontSize: '11px' }}>{idx + 1}</td>
+                                                                    <td style={{ padding: '10px 8px', fontWeight: '800', color: '#111827', fontFamily: 'monospace' }}>{b.bagNumber}</td>
+                                                                    <td style={{ padding: '10px 8px', fontWeight: '600' }}>{b.targetPartner}</td>
+                                                                    <td style={{ padding: '10px 8px' }}>
+                                                                        <span style={{ padding: '2px 8px', borderRadius: '4px', fontSize: '11px', fontWeight: '700', color: b.status === 'SEALED' ? '#dc2626' : '#15803d' }}>
+                                                                            {b.status === 'SEALED' ? 'SEALED' : 'OPEN'}
+                                                                        </span>
+                                                                    </td>
+                                                                    <td style={{ padding: '10px 8px', fontWeight: '700', color: '#111827' }}>{b.parcelCount} parcels</td>
+                                                                    <td style={{ padding: '10px 8px', color: '#374151' }}>{b.createdBy}</td>
+                                                                    <td style={{ padding: '10px 8px', color: '#6b7280' }}>{b.sealedBy}</td>
+                                                                    <td style={{ padding: '10px 8px', color: '#6b7280', fontSize: '11px' }}>{b.createdAt ? new Date(b.createdAt).toLocaleDateString() : '-'}</td>
+                                                                </tr>
+                                                            ))}
+                                                        </tbody>
+                                                    </table>
+                                                </div>
+                                            ) : (
+                                                <div style={{ textAlign: 'center', padding: '30px', color: '#9ca3af', fontSize: '13px' }}>No bags created yet today.</div>
+                                            )}
+                                        </div>
+                                    )}
+
+                                    {/* ═══════════════════════════════════════════════════════
+                                        DETAIL TAB 5: MANIFESTS & MAWB SESSIONS
+                                    ═══════════════════════════════════════════════════════ */}
+                                    {dashboardSubTab === 'manifests' && (
+                                        <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+                                            {/* Manifest Header & Select Bar */}
+                                            <div style={card}>
+                                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
+                                                    <div>
+                                                        <div style={label}>Manifest & MAWB Session Inspector</div>
+                                                        <p style={{ fontSize: '12px', color: '#6b7280', margin: '4px 0 0 0' }}>Comprehensive breakdown of Manifest Sessions, LMD Bags, Box Unsealings, and Allocated Parcels by MAWB Ref.</p>
+                                                    </div>
+                                                    <div style={{ fontSize: '12px', color: '#6b7280' }}>
+                                                        Total Manifests: <strong>{dashboardData.totalManifests}</strong> ({dashboardData.openManifests} Open / {dashboardData.closedManifests} Closed)
+                                                    </div>
+                                                </div>
+
+                                                {/* MAWB Selector & Search Input */}
+                                                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: '12px', gap: '16px' }}>
+                                                    <div style={{ flex: '1 1 360px', maxWidth: '480px', minWidth: 0, position: 'relative' }}>
+                                                        <input
+                                                            type="text"
+                                                            placeholder="Type MAWB Ref (e.g. 603-70659761)..."
+                                                            value={dashSearchQuery}
+                                                            onChange={(e) => setDashSearchQuery(e.target.value)}
+                                                            style={{ width: '100%', boxSizing: 'border-box', padding: '9px 14px', fontSize: '13px', borderRadius: '8px', border: '1px solid #d1d5db', outline: 'none' }}
+                                                        />
+                                                        {dashSearchQuery && (
+                                                            <button
+                                                                onClick={() => setDashSearchQuery('')}
+                                                                style={{ position: 'absolute', right: '12px', top: '50%', transform: 'translateY(-50%)', border: 'none', background: 'none', color: '#9ca3af', cursor: 'pointer', fontWeight: 'bold' }}
+                                                            >
+                                                                ✕
+                                                            </button>
+                                                        )}
+                                                    </div>
+                                                    {(mawbsList && mawbsList.length > 0) && (
+                                                        <select
+                                                            value={dashSearchQuery}
+                                                            onChange={(e) => setDashSearchQuery(e.target.value)}
+                                                            style={{ padding: '9px 14px', fontSize: '13px', borderRadius: '8px', border: '1px solid #d1d5db', backgroundColor: '#ffffff', width: '220px', flexShrink: 0, boxSizing: 'border-box' }}
+                                                        >
+                                                            <option value="">Select MAWB Ref...</option>
+                                                            {mawbsList.map((m: any) => (
+                                                                <option key={m.mawb_reference} value={m.mawb_reference}>{m.mawb_reference}</option>
+                                                            ))}
+                                                        </select>
+                                                    )}
+                                                </div>
+                                            </div>
+
+                                            {/* 1. MATCHED MANIFEST SESSIONS */}
+                                            <div style={card}>
+                                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
+                                                    <div style={label}>Matched Manifest Sessions ({
+                                                        (dashboardData.manifestsList || []).filter((m: any) => {
+                                                            const q = dashSearchQuery.trim().toLowerCase();
+                                                            return !q || (m.mawbRef && m.mawbRef.toLowerCase().includes(q)) || (m.manifestId && m.manifestId.toLowerCase().includes(q));
+                                                        }).length
+                                                    })</div>
+                                                </div>
+                                                <div style={{ overflowX: 'auto' }}>
+                                                    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px', textAlign: 'left' }}>
+                                                        <thead>
+                                                            <tr style={{ borderBottom: '2px solid #e5e7eb', backgroundColor: '#f9fafb' }}>
+                                                                {['MAWB / Manifest Ref', 'Status', 'Closed By', 'Total Bags', 'Total Parcels', 'Date'].map(h => (
+                                                                    <th key={h} style={{ padding: '10px 8px', color: '#6b7280', fontWeight: '700', fontSize: '11px', textTransform: 'uppercase' }}>{h}</th>
+                                                                ))}
+                                                            </tr>
+                                                        </thead>
+                                                        <tbody>
+                                                            {(dashboardData.manifestsList || []).filter((m: any) => {
+                                                                const q = dashSearchQuery.trim().toLowerCase();
+                                                                return !q || (m.mawbRef && m.mawbRef.toLowerCase().includes(q)) || (m.manifestId && m.manifestId.toLowerCase().includes(q));
+                                                            }).map((m: any, idx: number) => (
+                                                                <tr key={`m-${idx}`} style={{ borderBottom: '1px solid #f3f4f6' }}>
+                                                                    <td style={{ padding: '10px 8px', fontWeight: '800', color: '#111827', fontFamily: 'monospace' }}>{m.mawbRef || m.manifestId}</td>
+                                                                    <td style={{ padding: '10px 8px' }}>
+                                                                        <span style={{ padding: '2px 8px', borderRadius: '4px', fontSize: '11px', fontWeight: '700', backgroundColor: m.status === 'CLOSED' ? '#e0e7ff' : '#dcfce7', color: m.status === 'CLOSED' ? '#4338ca' : '#15803d' }}>
+                                                                            {m.status === 'CLOSED' ? '✔ CLOSED' : '⚡ OPEN'}
+                                                                        </span>
+                                                                    </td>
+                                                                    <td style={{ padding: '10px 8px', color: '#374151' }}>{m.closedBy || '—'}</td>
+                                                                    <td style={{ padding: '10px 8px', fontWeight: '700' }}>{m.totalBags} bags</td>
+                                                                    <td style={{ padding: '10px 8px', fontWeight: '700', color: '#166534' }}>{m.totalParcels} parcels</td>
+                                                                    <td style={{ padding: '10px 8px', color: '#6b7280', fontSize: '11px' }}>{m.createdAt ? new Date(m.createdAt).toLocaleDateString() : '-'}</td>
+                                                                </tr>
+                                                            ))}
+                                                            {(dashboardData.manifestsList || []).filter((m: any) => {
+                                                                const q = dashSearchQuery.trim().toLowerCase();
+                                                                return !q || (m.mawbRef && m.mawbRef.toLowerCase().includes(q)) || (m.manifestId && m.manifestId.toLowerCase().includes(q));
+                                                            }).length === 0 && (
+                                                                    <tr>
+                                                                        <td colSpan={6} style={{ padding: '20px', textAlign: 'center', color: '#9ca3af', fontSize: '13px' }}>
+                                                                            No manifest sessions matched query "{dashSearchQuery}"
                                                                         </td>
                                                                     </tr>
-                                                                );
-                                                            })}
+                                                                )}
                                                         </tbody>
                                                     </table>
                                                 </div>
                                             </div>
-                                        )}
 
-                                        {/* ═══════════════════════════════════════════════════════
-                                        DETAIL TAB 8: COURIER PARTNER DISTRIBUTION
-                                    ═══════════════════════════════════════════════════════ */}
-                                        {dashboardSubTab === 'partner' && (
+                                            {/* 2. MATCHED LMD BAGS */}
                                             <div style={card}>
-                                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
-                                                    <div style={label}>Courier Partner Allocation Distribution</div>
-                                                    <div style={{ fontSize: '12px', color: '#6b7280' }}>Total Inbound: <strong>{dashboardData.totalReceived} parcels</strong></div>
+                                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
+                                                    <div style={label}>Matched LMD Bags ({
+                                                        (dashboardData.bagsList || []).filter((b: any) => {
+                                                            const q = dashSearchQuery.trim().toLowerCase();
+                                                            return !q || (b.mawbRef && b.mawbRef.toLowerCase().includes(q)) || (b.bagNumber && b.bagNumber.toLowerCase().includes(q));
+                                                        }).length
+                                                    })</div>
                                                 </div>
+                                                <div style={{ overflowX: 'auto' }}>
+                                                    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px', textAlign: 'left' }}>
+                                                        <thead>
+                                                            <tr style={{ borderBottom: '2px solid #e5e7eb', backgroundColor: '#f9fafb' }}>
+                                                                {['Bag Number', 'MAWB Ref', 'Target Partner', 'Destination Hub', 'Parcels', 'Total Weight', 'Status', 'Created / Sealed By & Timestamp'].map(h => (
+                                                                    <th key={h} style={{ padding: '10px 8px', color: '#6b7280', fontWeight: '700', fontSize: '11px', textTransform: 'uppercase' }}>{h}</th>
+                                                                ))}
+                                                            </tr>
+                                                        </thead>
+                                                        <tbody>
+                                                            {(dashboardData.bagsList || []).filter((b: any) => {
+                                                                const q = dashSearchQuery.trim().toLowerCase();
+                                                                return !q || (b.mawbRef && b.mawbRef.toLowerCase().includes(q)) || (b.bagNumber && b.bagNumber.toLowerCase().includes(q));
+                                                            }).map((b: any, idx: number) => (
+                                                                <tr key={`b-${idx}`} style={{ borderBottom: '1px solid #f3f4f6' }}>
+                                                                    <td style={{ padding: '10px 8px', fontWeight: '800', color: '#111827', fontFamily: 'monospace' }}>{b.bagNumber}</td>
+                                                                    <td style={{ padding: '10px 8px', color: '#374151', fontSize: '12px' }}>{b.mawbRef || '—'}</td>
+                                                                    <td style={{ padding: '10px 8px' }}>
+                                                                        <span style={{ padding: '2px 8px', borderRadius: '4px', fontSize: '11px', fontWeight: '700', backgroundColor: b.targetPartner === 'PickMe' ? '#fef3c7' : b.targetPartner === 'Domex' ? '#dbeafe' : b.targetPartner === 'Pronto' ? '#e0e7ff' : '#f3f4f6', color: b.targetPartner === 'PickMe' ? '#b45309' : b.targetPartner === 'Domex' ? '#1d4ed8' : b.targetPartner === 'Pronto' ? '#4338ca' : '#374151' }}>
+                                                                            {b.targetPartner}
+                                                                        </span>
+                                                                    </td>
+                                                                    <td style={{ padding: '10px 8px', color: '#374151' }}>{b.destinationHub || b.targetPartner}</td>
+                                                                    <td style={{ padding: '10px 8px', fontWeight: '700' }}>{b.parcelCount} items</td>
+                                                                    <td style={{ padding: '10px 8px', color: '#4b5563' }}>{b.totalWeight ? `${b.totalWeight} kg` : '-'}</td>
+                                                                    <td style={{ padding: '10px 8px' }}>
+                                                                        <span style={{ padding: '2px 8px', borderRadius: '4px', fontSize: '11px', fontWeight: '700', backgroundColor: b.status === 'SEALED' ? '#fee2e2' : '#dcfce7', color: b.status === 'SEALED' ? '#dc2626' : '#15803d' }}>
+                                                                            {b.status === 'SEALED' ? 'SEALED' : 'OPEN'}
+                                                                        </span>
+                                                                    </td>
+                                                                    <td style={{ padding: '10px 8px', color: '#4b5563', fontSize: '11px' }}>
+                                                                        <div style={{ fontWeight: '600', color: '#111827' }}>{b.sealedBy && b.sealedBy !== '-' ? b.sealedBy : b.createdBy}</div>
+                                                                        <div style={{ color: '#6b7280', fontSize: '10px' }}>{b.sealedAt && b.sealedAt !== '-' ? new Date(b.sealedAt).toLocaleString() : b.createdAt ? new Date(b.createdAt).toLocaleString() : '-'}</div>
+                                                                    </td>
+                                                                </tr>
+                                                            ))}
+                                                            {(dashboardData.bagsList || []).filter((b: any) => {
+                                                                const q = dashSearchQuery.trim().toLowerCase();
+                                                                return !q || (b.mawbRef && b.mawbRef.toLowerCase().includes(q)) || (b.bagNumber && b.bagNumber.toLowerCase().includes(q));
+                                                            }).length === 0 && (
+                                                                    <tr>
+                                                                        <td colSpan={8} style={{ padding: '20px', textAlign: 'center', color: '#9ca3af', fontSize: '13px' }}>
+                                                                            No LMD bags matched query "{dashSearchQuery}"
+                                                                        </td>
+                                                                    </tr>
+                                                                )}
+                                                        </tbody>
+                                                    </table>
+                                                </div>
+                                            </div>
 
+                                            {/* 3. MATCHED BOX UNSEALINGS */}
+                                            <div style={card}>
+                                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
+                                                    <div style={label}>Matched Box Unsealings ({
+                                                        (dashboardData.unsealedBoxesList || []).filter((u: any) => {
+                                                            const q = dashSearchQuery.trim().toLowerCase();
+                                                            return !q || (u.mawbRef && u.mawbRef.toLowerCase().includes(q)) || (u.bagNumber && u.bagNumber.toLowerCase().includes(q));
+                                                        }).length
+                                                    })</div>
+                                                </div>
+                                                <div style={{ overflowX: 'auto' }}>
+                                                    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px', textAlign: 'left' }}>
+                                                        <thead>
+                                                            <tr style={{ borderBottom: '2px solid #e5e7eb', backgroundColor: '#f9fafb' }}>
+                                                                {['Box Bag No', 'MAWB Ref', 'Scanned / Expected Count', 'Unsealed By', 'Timestamp'].map(h => (
+                                                                    <th key={h} style={{ padding: '10px 8px', color: '#6b7280', fontWeight: '700', fontSize: '11px', textTransform: 'uppercase' }}>{h}</th>
+                                                                ))}
+                                                            </tr>
+                                                        </thead>
+                                                        <tbody>
+                                                            {(dashboardData.unsealedBoxesList || []).filter((u: any) => {
+                                                                const q = dashSearchQuery.trim().toLowerCase();
+                                                                return !q || (u.mawbRef && u.mawbRef.toLowerCase().includes(q)) || (u.bagNumber && u.bagNumber.toLowerCase().includes(q));
+                                                            }).map((u: any, idx: number) => (
+                                                                <tr key={`ub-${idx}`} style={{ borderBottom: '1px solid #f3f4f6' }}>
+                                                                    <td style={{ padding: '10px 8px', fontWeight: '800', color: '#111827', fontFamily: 'monospace' }}>{u.bagNumber}</td>
+                                                                    <td style={{ padding: '10px 8px', color: '#374151' }}>{u.mawbRef || '—'}</td>
+                                                                    <td style={{ padding: '10px 8px', fontWeight: '700', color: u.scannedCount === u.expectedCount ? '#166534' : '#dc2626' }}>
+                                                                        {u.scannedCount} / {u.expectedCount}
+                                                                    </td>
+                                                                    <td style={{ padding: '10px 8px', color: '#4b5563' }}>{u.unsealedBy}</td>
+                                                                    <td style={{ padding: '10px 8px', color: '#6b7280', fontSize: '11px' }}>{u.createdAt ? new Date(u.createdAt).toLocaleString() : '-'}</td>
+                                                                </tr>
+                                                            ))}
+                                                            {(dashboardData.unsealedBoxesList || []).filter((u: any) => {
+                                                                const q = dashSearchQuery.trim().toLowerCase();
+                                                                return !q || (u.mawbRef && u.mawbRef.toLowerCase().includes(q)) || (u.bagNumber && u.bagNumber.toLowerCase().includes(q));
+                                                            }).length === 0 && (
+                                                                    <tr>
+                                                                        <td colSpan={5} style={{ padding: '20px', textAlign: 'center', color: '#9ca3af', fontSize: '13px' }}>
+                                                                            No box unsealings matched query "{dashSearchQuery}"
+                                                                        </td>
+                                                                    </tr>
+                                                                )}
+                                                        </tbody>
+                                                    </table>
+                                                </div>
+                                            </div>
+
+                                            {/* 4. MATCHED PARCELS */}
+                                            <div style={card}>
+                                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
+                                                    <div style={label}>Matched Parcels ({
+                                                        (dashboardData.receivedParcels || []).filter((p: any) => {
+                                                            const q = dashSearchQuery.trim().toLowerCase();
+                                                            return !q || (p.mawbReference && p.mawbReference.toLowerCase().includes(q)) || (p.referenceNumber && p.referenceNumber.toLowerCase().includes(q)) || (p.bagNumber && p.bagNumber.toLowerCase().includes(q));
+                                                        }).length
+                                                    })</div>
+                                                </div>
+                                                <div style={{ overflowX: 'auto' }}>
+                                                    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px', textAlign: 'left' }}>
+                                                        <thead>
+                                                            <tr style={{ borderBottom: '2px solid #e5e7eb', backgroundColor: '#f9fafb' }}>
+                                                                {['Waybill / Ref', 'Temu Barcode', 'MAWB Ref', 'Assigned Bag #', 'Courier Partner', 'Destination City', 'Status'].map(h => (
+                                                                    <th key={h} style={{ padding: '10px 8px', color: '#6b7280', fontWeight: '700', fontSize: '11px', textTransform: 'uppercase' }}>{h}</th>
+                                                                ))}
+                                                            </tr>
+                                                        </thead>
+                                                        <tbody>
+                                                            {(dashboardData.receivedParcels || []).filter((p: any) => {
+                                                                const q = dashSearchQuery.trim().toLowerCase();
+                                                                return !q || (p.mawbReference && p.mawbReference.toLowerCase().includes(q)) || (p.referenceNumber && p.referenceNumber.toLowerCase().includes(q)) || (p.bagNumber && p.bagNumber.toLowerCase().includes(q));
+                                                            }).slice(0, 100).map((p: any, idx: number) => (
+                                                                <tr key={`mp-${idx}`} style={{ borderBottom: '1px solid #f3f4f6' }}>
+                                                                    <td style={{ padding: '10px 8px', fontWeight: '700', color: '#111827' }}>{p.referenceNumber}</td>
+                                                                    <td style={{ padding: '10px 8px', color: '#4b5563', fontFamily: 'monospace', fontSize: '12px' }}>{p.senderReference}</td>
+                                                                    <td style={{ padding: '10px 8px', color: '#374151', fontSize: '12px' }}>{p.mawbReference}</td>
+                                                                    <td style={{ padding: '10px 8px' }}>
+                                                                        {p.bagNumber ? (
+                                                                            <span style={{ padding: '2px 8px', borderRadius: '4px', fontSize: '11px', fontWeight: '700', backgroundColor: '#dcfce7', color: '#15803d', fontFamily: 'monospace' }}>
+                                                                                {p.bagNumber}
+                                                                            </span>
+                                                                        ) : (
+                                                                            <span style={{ color: '#9ca3af', fontSize: '12px' }}>Unassigned</span>
+                                                                        )}
+                                                                    </td>
+                                                                    <td style={{ padding: '10px 8px', fontWeight: '600' }}>{p.deliveryAgentCode}</td>
+                                                                    <td style={{ padding: '10px 8px', color: '#374151' }}>{p.consigneeLocation || 'N/A'}</td>
+                                                                    <td style={{ padding: '10px 8px' }}>
+                                                                        <span style={{ padding: '2px 8px', borderRadius: '4px', fontSize: '11px', fontWeight: '700', backgroundColor: p.isSorted ? '#dcfce7' : '#fef3c7', color: p.isSorted ? '#15803d' : '#b45309' }}>
+                                                                            {p.isSorted ? 'LMD ALLOCATED' : 'RECEIVED'}
+                                                                        </span>
+                                                                    </td>
+                                                                </tr>
+                                                            ))}
+                                                            {(dashboardData.receivedParcels || []).filter((p: any) => {
+                                                                const q = dashSearchQuery.trim().toLowerCase();
+                                                                return !q || (p.mawbReference && p.mawbReference.toLowerCase().includes(q)) || (p.referenceNumber && p.referenceNumber.toLowerCase().includes(q)) || (p.bagNumber && p.bagNumber.toLowerCase().includes(q));
+                                                            }).length === 0 && (
+                                                                    <tr>
+                                                                        <td colSpan={7} style={{ padding: '20px', textAlign: 'center', color: '#9ca3af', fontSize: '13px' }}>
+                                                                            No parcels matched query "{dashSearchQuery}"
+                                                                        </td>
+                                                                    </tr>
+                                                                )}
+                                                        </tbody>
+                                                    </table>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    )}
+
+                                    {/* ═══════════════════════════════════════════════════════
+                                        DETAIL TAB 6: EXCEPTIONS & DISCREPANCIES
+                                    ═══════════════════════════════════════════════════════ */}
+                                    {dashboardSubTab === 'exceptions' && (
+                                        <div style={card}>
+                                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+                                                <div style={label}>Operational Exceptions & Discrepancies Log</div>
+                                                <div style={{ fontSize: '12px', color: '#6b7280' }}>
+                                                    Total Exceptions: <strong>{(dashboardData.exceptionsList || []).length}</strong>
+                                                </div>
+                                            </div>
+
+                                            {dashboardData.exceptionsList && dashboardData.exceptionsList.length > 0 ? (
+                                                <div style={{ overflowX: 'auto' }}>
+                                                    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px', textAlign: 'left' }}>
+                                                        <thead>
+                                                            <tr style={{ borderBottom: '2px solid #e5e7eb', backgroundColor: '#f9fafb' }}>
+                                                                {['#', 'Exception Type', 'Ref / Barcode / Bag #', 'Details', 'Scanned / Expected', 'Reported By', 'Timestamp'].map(h => (
+                                                                    <th key={h} style={{ padding: '10px 8px', color: '#6b7280', fontWeight: '700', fontSize: '11px', textTransform: 'uppercase' }}>{h}</th>
+                                                                ))}
+                                                            </tr>
+                                                        </thead>
+                                                        <tbody>
+                                                            {(dashboardData.exceptionsList || []).filter((ex: any) => {
+                                                                const q = dashSearchQuery.toLowerCase();
+                                                                return !q || ex.type.toLowerCase().includes(q) || ex.refNumber.toLowerCase().includes(q) || ex.details.toLowerCase().includes(q);
+                                                            }).map((ex: any, idx: number) => (
+                                                                <tr key={`ex-${idx}`} style={{ borderBottom: '1px solid #f3f4f6' }}>
+                                                                    <td style={{ padding: '10px 8px', color: '#9ca3af', fontSize: '11px' }}>{idx + 1}</td>
+                                                                    <td style={{ padding: '10px 8px' }}>
+                                                                        <span style={{ padding: '2px 8px', borderRadius: '4px', fontSize: '11px', fontWeight: '700', backgroundColor: ex.type.includes('Damaged') ? '#fee2e2' : '#fef3c7', color: ex.type.includes('Damaged') ? '#dc2626' : '#b45309' }}>
+                                                                            {ex.type}
+                                                                        </span>
+                                                                    </td>
+                                                                    <td style={{ padding: '10px 8px', fontWeight: '700', color: '#111827', fontFamily: 'monospace' }}>{ex.refNumber}</td>
+                                                                    <td style={{ padding: '10px 8px', color: '#374151' }}>{ex.details}</td>
+                                                                    <td style={{ padding: '10px 8px', fontWeight: '700', color: '#111827' }}>{ex.scannedVsExpected}</td>
+                                                                    <td style={{ padding: '10px 8px', color: '#4b5563' }}>{ex.reportedBy}</td>
+                                                                    <td style={{ padding: '10px 8px', color: '#6b7280', fontSize: '11px' }}>{ex.createdAt ? new Date(ex.createdAt).toLocaleString() : '-'}</td>
+                                                                </tr>
+                                                            ))}
+                                                        </tbody>
+                                                    </table>
+                                                </div>
+                                            ) : (
+                                                <div style={{ textAlign: 'center', padding: '30px', color: '#9ca3af', fontSize: '13px' }}>No exception logs found.</div>
+                                            )}
+                                        </div>
+                                    )}
+
+                                    {/* ═══════════════════════════════════════════════════════
+                                        DETAIL TAB 7: USER PRODUCTIVITY PERFORMANCE
+                                    ═══════════════════════════════════════════════════════ */}
+                                    {dashboardSubTab === 'productivity' && (
+                                        <div style={card}>
+                                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+                                                <div>
+                                                    <div style={label}>User Productivity Performance Overview</div>
+                                                    <p style={{ fontSize: '12px', color: '#6b7280', margin: '4px 0 0 0' }}>Real-time parcel sorting, bag sealing, and operational activity across all system operators.</p>
+                                                </div>
+                                                <div style={{ fontSize: '12px', color: '#6b7280' }}>
+                                                    Total System Operators: <strong>{(usersList || []).length || (dashboardData.userProductivity || []).length}</strong>
+                                                </div>
+                                            </div>
+
+                                            <div style={{ overflowX: 'auto' }}>
                                                 <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px', textAlign: 'left' }}>
                                                     <thead>
                                                         <tr style={{ borderBottom: '2px solid #e5e7eb', backgroundColor: '#f9fafb' }}>
-                                                            <th style={{ padding: '12px 10px', color: '#6b7280', fontWeight: '700', fontSize: '11px', textTransform: 'uppercase' }}>Partner Name</th>
-                                                            <th style={{ padding: '12px 10px', color: '#6b7280', fontWeight: '700', fontSize: '11px', textTransform: 'uppercase' }}>No. of Parcels</th>
-                                                            <th style={{ padding: '12px 10px', color: '#6b7280', fontWeight: '700', fontSize: '11px', textTransform: 'uppercase' }}>Allocated Parcels</th>
-                                                            <th style={{ padding: '12px 10px', color: '#6b7280', fontWeight: '700', fontSize: '11px', textTransform: 'uppercase' }}>Pending / Search Parcels</th>
-                                                            <th style={{ padding: '12px 10px', color: '#6b7280', fontWeight: '700', fontSize: '11px', textTransform: 'uppercase' }}>No. of Bags</th>
-                                                            <th style={{ padding: '12px 10px', color: '#6b7280', fontWeight: '700', fontSize: '11px', textTransform: 'uppercase', width: '180px' }}>Allocation %</th>
+                                                            {['#', 'Operator / User Name', 'Email Address', 'Role', 'Inbound Parcels Scanned', 'Outbound Bags Sealed', 'Manifest Sessions Closed', 'System Duty Status'].map(h => (
+                                                                <th key={h} style={{ padding: '10px 12px', color: '#6b7280', fontWeight: '700', fontSize: '11px', textTransform: 'uppercase' }}>{h}</th>
+                                                            ))}
                                                         </tr>
                                                     </thead>
                                                     <tbody>
-                                                        {(dashboardData.partnerDetails || [
-                                                            { partnerName: 'PickMe', totalParcels: dashboardData.partnerDistribution?.PickMe || 0, allocatedParcels: dashboardData.partnerDistribution?.PickMe || 0, pendingParcels: 0, totalBags: dashboardData.bagPartnerCounts?.PickMe || 0 },
-                                                            { partnerName: 'Domex', totalParcels: dashboardData.partnerDistribution?.Domex || 0, allocatedParcels: dashboardData.partnerDistribution?.Domex || 0, pendingParcels: 0, totalBags: dashboardData.bagPartnerCounts?.Domex || 0 },
-                                                            { partnerName: 'Pronto', totalParcels: dashboardData.partnerDistribution?.Pronto || 0, allocatedParcels: dashboardData.partnerDistribution?.Pronto || 0, pendingParcels: 0, totalBags: dashboardData.bagPartnerCounts?.Pronto || 0 },
-                                                            { partnerName: 'Other', totalParcels: dashboardData.partnerDistribution?.Other || 0, allocatedParcels: dashboardData.partnerDistribution?.Other || 0, pendingParcels: 0, totalBags: dashboardData.bagPartnerCounts?.General || 0 }
-                                                        ]).map((partner: any) => {
-                                                            const pct = dashboardData.totalReceived > 0 ? Math.round((partner.totalParcels / dashboardData.totalReceived) * 100) : 0;
+                                                        {(usersList && usersList.length > 0
+                                                            ? usersList
+                                                            : (dashboardData.userProductivity || []).map((p: any) => ({ first_name: p.operator, last_name: '', email: `${p.operator.toLowerCase().replace(/\s+/g, '.')}@skynet.lk`, role: 'Operator', is_active: true }))
+                                                        ).map((user: any, idx: number) => {
+                                                            const fullName = `${user.first_name || ''} ${user.last_name || ''}`.trim() || user.name || user.email || 'Operator';
+                                                            const prod = (dashboardData.userProductivity || []).find((p: any) =>
+                                                                p.operator?.toLowerCase().includes(fullName.toLowerCase()) ||
+                                                                p.operator?.toLowerCase().includes((user.first_name || '').toLowerCase())
+                                                            );
+
+                                                            const scanned = prod ? prod.scanned : 0;
+                                                            const bagsSealed = prod ? prod.bagsSealed : 0;
+                                                            const manifestsClosed = prod ? prod.manifestsClosed : 0;
+
                                                             return (
-                                                                <tr key={partner.partnerName} style={{ borderBottom: '1px solid #f3f4f6' }}>
-                                                                    <td style={{ padding: '12px 10px', fontWeight: '700', color: '#111827', fontSize: '13px' }}>
-                                                                        {partner.partnerName}
-                                                                    </td>
-                                                                    <td style={{ padding: '12px 10px', fontWeight: '700', color: '#111827' }}>
-                                                                        {partner.totalParcels} parcels
-                                                                    </td>
-                                                                    <td style={{ padding: '12px 10px', fontWeight: '700', color: '#166534' }}>
-                                                                        {partner.allocatedParcels} allocated
-                                                                    </td>
-                                                                    <td style={{ padding: '12px 10px', fontWeight: '700', color: '#b45309' }}>
-                                                                        {partner.pendingParcels} pending
-                                                                    </td>
-                                                                    <td style={{ padding: '12px 10px', fontWeight: '700', color: '#111827' }}>
-                                                                        {partner.totalBags} bags
-                                                                    </td>
-                                                                    <td style={{ padding: '12px 10px' }}>
+                                                                <tr key={`u-prod-${user.id || idx}`} style={{ borderBottom: '1px solid #f3f4f6' }}>
+                                                                    <td style={{ padding: '10px 12px', color: '#9ca3af', fontSize: '11px' }}>{idx + 1}</td>
+                                                                    <td style={{ padding: '10px 12px', fontWeight: '700', color: '#111827' }}>
                                                                         <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                                                                            <div style={{ flex: 1, height: '8px', backgroundColor: '#f3f4f6', borderRadius: '4px', overflow: 'hidden' }}>
-                                                                                <div style={{ width: `${pct}%`, height: '100%', backgroundColor: '#111827', borderRadius: '4px', transition: 'width 0.5s ease' }} />
+                                                                            <div style={{ width: '28px', height: '28px', borderRadius: '50%', backgroundColor: '#f3f4f6', border: '1px solid #d1d5db', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: '700', fontSize: '11px', color: '#374151' }}>
+                                                                                {(user.first_name || user.name || user.email || 'O')[0].toUpperCase()}
                                                                             </div>
-                                                                            <span style={{ fontWeight: '700', color: '#374151', fontSize: '12px', minWidth: '35px' }}>{pct}%</span>
+                                                                            <span>{fullName}</span>
                                                                         </div>
+                                                                    </td>
+                                                                    <td style={{ padding: '10px 12px', color: '#4b5563', fontSize: '12px', fontFamily: 'monospace' }}>{user.email || '—'}</td>
+                                                                    <td style={{ padding: '10px 12px' }}>
+                                                                        <span style={{ padding: '2px 8px', borderRadius: '4px', fontSize: '11px', fontWeight: '700', backgroundColor: '#eff6ff', color: '#1d4ed8' }}>
+                                                                            {user.role || 'Operator'}
+                                                                        </span>
+                                                                    </td>
+                                                                    <td style={{ padding: '10px 12px', fontWeight: '800', color: '#166534' }}>{scanned} parcels</td>
+                                                                    <td style={{ padding: '10px 12px', fontWeight: '700', color: '#111827' }}>{bagsSealed} bags</td>
+                                                                    <td style={{ padding: '10px 12px', fontWeight: '700', color: '#374151' }}>{manifestsClosed} manifests</td>
+                                                                    <td style={{ padding: '10px 12px' }}>
+                                                                        <span style={{ padding: '2px 8px', borderRadius: '4px', fontSize: '11px', fontWeight: '700', backgroundColor: '#dcfce7', color: '#15803d' }}>
+                                                                            ● Active On-Duty
+                                                                        </span>
                                                                     </td>
                                                                 </tr>
                                                             );
@@ -5921,19 +5958,82 @@ export default function WorkstationDashboard() {
                                                     </tbody>
                                                 </table>
                                             </div>
-                                        )}
-                                    </>
-                                ) : (
-                                    <div style={{ textAlign: 'center', padding: '40px', backgroundColor: '#ffffff', borderRadius: '12px', border: '1px solid #e5e7eb' }}>
-                                        <p style={{ color: '#6b7280', fontSize: '14px', margin: '0 0 16px 0' }}>Metrics have not loaded yet.</p>
-                                        <button onClick={fetchDashboard} style={{ ...btnPrimary, backgroundColor: '#111827', color: '#ffffff' }}>
-                                            Load Operational Real-Time Dashboard
-                                        </button>
-                                    </div>
-                                )}
-                            </div>
+                                        </div>
+                                    )}
+
+                                    {/* ═══════════════════════════════════════════════════════
+                                        DETAIL TAB 8: COURIER PARTNER DISTRIBUTION
+                                    ═══════════════════════════════════════════════════════ */}
+                                    {dashboardSubTab === 'partner' && (
+                                        <div style={card}>
+                                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+                                                <div style={label}>Courier Partner Allocation Distribution</div>
+                                                <div style={{ fontSize: '12px', color: '#6b7280' }}>Total Inbound: <strong>{dashboardData.totalReceived} parcels</strong></div>
+                                            </div>
+
+                                            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px', textAlign: 'left' }}>
+                                                <thead>
+                                                    <tr style={{ borderBottom: '2px solid #e5e7eb', backgroundColor: '#f9fafb' }}>
+                                                        <th style={{ padding: '12px 10px', color: '#6b7280', fontWeight: '700', fontSize: '11px', textTransform: 'uppercase' }}>Partner Name</th>
+                                                        <th style={{ padding: '12px 10px', color: '#6b7280', fontWeight: '700', fontSize: '11px', textTransform: 'uppercase' }}>No. of Parcels</th>
+                                                        <th style={{ padding: '12px 10px', color: '#6b7280', fontWeight: '700', fontSize: '11px', textTransform: 'uppercase' }}>Allocated Parcels</th>
+                                                        <th style={{ padding: '12px 10px', color: '#6b7280', fontWeight: '700', fontSize: '11px', textTransform: 'uppercase' }}>Pending / Search Parcels</th>
+                                                        <th style={{ padding: '12px 10px', color: '#6b7280', fontWeight: '700', fontSize: '11px', textTransform: 'uppercase' }}>No. of Bags</th>
+                                                        <th style={{ padding: '12px 10px', color: '#6b7280', fontWeight: '700', fontSize: '11px', textTransform: 'uppercase', width: '180px' }}>Allocation %</th>
+                                                    </tr>
+                                                </thead>
+                                                <tbody>
+                                                    {(dashboardData.partnerDetails || [
+                                                        { partnerName: 'PickMe', totalParcels: dashboardData.partnerDistribution?.PickMe || 0, allocatedParcels: dashboardData.partnerDistribution?.PickMe || 0, pendingParcels: 0, totalBags: dashboardData.bagPartnerCounts?.PickMe || 0 },
+                                                        { partnerName: 'Domex', totalParcels: dashboardData.partnerDistribution?.Domex || 0, allocatedParcels: dashboardData.partnerDistribution?.Domex || 0, pendingParcels: 0, totalBags: dashboardData.bagPartnerCounts?.Domex || 0 },
+                                                        { partnerName: 'Pronto', totalParcels: dashboardData.partnerDistribution?.Pronto || 0, allocatedParcels: dashboardData.partnerDistribution?.Pronto || 0, pendingParcels: 0, totalBags: dashboardData.bagPartnerCounts?.Pronto || 0 },
+                                                        { partnerName: 'Other', totalParcels: dashboardData.partnerDistribution?.Other || 0, allocatedParcels: dashboardData.partnerDistribution?.Other || 0, pendingParcels: 0, totalBags: dashboardData.bagPartnerCounts?.General || 0 }
+                                                    ]).map((partner: any) => {
+                                                        const pct = dashboardData.totalReceived > 0 ? Math.round((partner.totalParcels / dashboardData.totalReceived) * 100) : 0;
+                                                        return (
+                                                            <tr key={partner.partnerName} style={{ borderBottom: '1px solid #f3f4f6' }}>
+                                                                <td style={{ padding: '12px 10px', fontWeight: '700', color: '#111827', fontSize: '13px' }}>
+                                                                    {partner.partnerName}
+                                                                </td>
+                                                                <td style={{ padding: '12px 10px', fontWeight: '700', color: '#111827' }}>
+                                                                    {partner.totalParcels} parcels
+                                                                </td>
+                                                                <td style={{ padding: '12px 10px', fontWeight: '700', color: '#166534' }}>
+                                                                    {partner.allocatedParcels} allocated
+                                                                </td>
+                                                                <td style={{ padding: '12px 10px', fontWeight: '700', color: '#b45309' }}>
+                                                                    {partner.pendingParcels} pending
+                                                                </td>
+                                                                <td style={{ padding: '12px 10px', fontWeight: '700', color: '#111827' }}>
+                                                                    {partner.totalBags} bags
+                                                                </td>
+                                                                <td style={{ padding: '12px 10px' }}>
+                                                                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                                                        <div style={{ flex: 1, height: '8px', backgroundColor: '#f3f4f6', borderRadius: '4px', overflow: 'hidden' }}>
+                                                                            <div style={{ width: `${pct}%`, height: '100%', backgroundColor: '#111827', borderRadius: '4px', transition: 'width 0.5s ease' }} />
+                                                                        </div>
+                                                                        <span style={{ fontWeight: '700', color: '#374151', fontSize: '12px', minWidth: '35px' }}>{pct}%</span>
+                                                                    </div>
+                                                                </td>
+                                                            </tr>
+                                                        );
+                                                    })}
+                                                </tbody>
+                                            </table>
+                                        </div>
+                                    )}
+                                </>
+                            ) : (
+                                <div style={{ textAlign: 'center', padding: '40px', backgroundColor: '#ffffff', borderRadius: '12px', border: '1px solid #e5e7eb' }}>
+                                    <p style={{ color: '#6b7280', fontSize: '14px', margin: '0 0 16px 0' }}>Metrics have not loaded yet.</p>
+                                    <button onClick={fetchDashboard} style={{ ...btnPrimary, backgroundColor: '#111827', color: '#ffffff' }}>
+                                        Load Operational Real-Time Dashboard
+                                    </button>
+                                </div>
+                            )}
+                        </div>
                     )}
-                        </main>
+                </main>
             </div>
 
 
@@ -7194,14 +7294,14 @@ export default function WorkstationDashboard() {
                 }}>
                     <div style={{
                         backgroundColor: '#ffffff',
-                        border: '2px solid #2563eb',
+                        border: '2px solid #bf222d',
                         borderRadius: '12px',
                         padding: '30px 24px',
                         width: '420px',
                         maxWidth: '90%',
                         boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.15)'
                     }}>
-                        <h3 style={{ fontSize: '18px', fontWeight: '700', color: '#111827', margin: '0 0 10px 0', textAlign: 'center' }}>
+                        <h3 style={{ fontSize: '18px', fontWeight: '700', color: '#bf222d', margin: '0 0 10px 0', textAlign: 'center' }}>
                             Renew Password or PIN
                         </h3>
                         <p style={{ fontSize: '13px', color: '#6b7280', margin: '0 0 20px 0', textAlign: 'center' }}>
@@ -7273,7 +7373,7 @@ export default function WorkstationDashboard() {
                                 onClick={handleRenewPinSubmit}
                                 style={{
                                     flex: 1,
-                                    backgroundColor: '#2563eb',
+                                    backgroundColor: '#bf222d',
                                     color: '#ffffff',
                                     border: 'none',
                                     borderRadius: '8px',

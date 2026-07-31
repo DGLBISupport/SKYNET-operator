@@ -115,7 +115,7 @@ CREATE TABLE public.shipments (
   delivery_agent_code text,
   delivery_route_code text,
   business_type text,
-  mawb_reference uuid,
+  mawb_reference text,
   CONSTRAINT shipments_pkey PRIMARY KEY (reference_number)
 );
 CREATE TABLE public.users (
@@ -200,6 +200,7 @@ CREATE TABLE public.service_provider_allocation (
   mapped_city bigint,
   unsealed boolean DEFAULT false,
   mapped_zone bigint,
+  scan_status text,
   CONSTRAINT service_provider_allocation_pkey PRIMARY KEY (id),
   CONSTRAINT service_provider_allocation_mawb_ref_fkey FOREIGN KEY (mawb_ref) REFERENCES public.mawb(mawb_reference),
   CONSTRAINT service_provider_allocation_service_provider_fkey FOREIGN KEY (service_provider) REFERENCES public.service_providers(id),
@@ -305,6 +306,8 @@ CREATE TABLE public.mawb_duplicate (
   log_file_path text,
   has_zones_allocated boolean DEFAULT false,
   has_service_providers_allocated boolean DEFAULT false,
+  is_download_acknowlegement_sent boolean DEFAULT false,
+  message_id text,
   CONSTRAINT mawb_duplicate_pkey PRIMARY KEY (mawb_reference)
 );
 CREATE TABLE public.shipments_duplicate (
@@ -451,6 +454,20 @@ CREATE TABLE public.admin_portal_users (
   role text,
   CONSTRAINT admin_portal_users_pkey PRIMARY KEY (id)
 );
+CREATE TABLE public.district_city_mapping_duplicate (
+  id bigint GENERATED ALWAYS AS IDENTITY NOT NULL,
+  created_at timestamp with time zone NOT NULL DEFAULT now(),
+  zone bigint,
+  area_name text,
+  city text,
+  area_code text,
+  zipcode bigint,
+  is_active boolean,
+  area_name_aliases text,
+  city_aliases text,
+  CONSTRAINT district_city_mapping_duplicate_pkey PRIMARY KEY (id),
+  CONSTRAINT district_city_mapping_duplicate_zone_fkey1 FOREIGN KEY (zone) REFERENCES public.zones(id)
+);
 CREATE TABLE public.service_provider_allocation_duplicate (
   id bigint GENERATED ALWAYS AS IDENTITY NOT NULL,
   created_at timestamp with time zone NOT NULL DEFAULT now(),
@@ -462,10 +479,11 @@ CREATE TABLE public.service_provider_allocation_duplicate (
   mapped_city bigint,
   unsealed boolean DEFAULT false,
   mapped_zone bigint,
+  scan_status text,
   CONSTRAINT service_provider_allocation_duplicate_pkey PRIMARY KEY (id),
-  CONSTRAINT service_provider_allocation_duplicate_mapped_city_fkey FOREIGN KEY (mapped_city) REFERENCES public.district_city_mapping(id),
   CONSTRAINT service_provider_allocation_duplicate_mapped_zone_fkey FOREIGN KEY (mapped_zone) REFERENCES public.zones(id),
-  CONSTRAINT service_provider_allocation_duplicate_mawb_ref_fkey FOREIGN KEY (mawb_ref) REFERENCES public.mawb(mawb_reference),
   CONSTRAINT service_provider_allocation_duplicate_service_provider_fkey FOREIGN KEY (service_provider) REFERENCES public.service_providers(id),
-  CONSTRAINT service_provider_allocation_duplicate_shipment_ref_fkey FOREIGN KEY (shipment_ref) REFERENCES public.shipments(reference_number)
+  CONSTRAINT service_provider_allocation_duplicate_mawb_ref_fkey FOREIGN KEY (mawb_ref) REFERENCES public.mawb_duplicate(mawb_reference),
+  CONSTRAINT service_provider_allocation_duplicate_shipment_ref_fkey FOREIGN KEY (shipment_ref) REFERENCES public.shipments_duplicate(reference_number),
+  CONSTRAINT service_provider_allocation_duplicate_mapped_city_fkey FOREIGN KEY (mapped_city) REFERENCES public.district_city_mapping(id)
 );

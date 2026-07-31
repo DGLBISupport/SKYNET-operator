@@ -89,6 +89,21 @@ export async function GET(request: Request) {
             providerMap[sp.id] = normName;
         });
 
+        // Build set of parcel reference numbers that have completed 1st scan (from bag_unsealing scanned_parcels)
+        const unsealedParcelRefsSet = new Set<string>();
+        unsealData.forEach((u: any) => {
+            if (u.scanned_parcels && Array.isArray(u.scanned_parcels)) {
+                u.scanned_parcels.forEach((p: any) => {
+                    if (typeof p === 'string' && p.trim()) {
+                        unsealedParcelRefsSet.add(p.trim().toLowerCase());
+                    } else if (p && typeof p === 'object') {
+                        const trk = p.trackingNumber || p.referenceNumber || p.refNumber;
+                        if (trk) unsealedParcelRefsSet.add(String(trk).trim().toLowerCase());
+                    }
+                });
+            }
+        });
+
         // Build Shipment Ref -> Partner Name + Scan Status Map from service_provider_allocation
         const shipmentToPartnerMap: Record<string, string> = {};
         const shipmentToScanStatusMap: Record<string, { firstScanDone: boolean; scanStatus: string }> = {};
@@ -99,9 +114,14 @@ export async function GET(request: Request) {
                 shipmentToPartnerMap[alloc.shipment_ref] = partnerName;
             }
             if (alloc.shipment_ref) {
+                const refLower = String(alloc.shipment_ref).trim().toLowerCase();
+                const isUnsealed = alloc.unsealed === true || (alloc.scan_status && alloc.scan_status !== 'PENDING');
+                if (isUnsealed) {
+                    unsealedParcelRefsSet.add(refLower);
+                }
                 shipmentToScanStatusMap[alloc.shipment_ref] = {
-                    firstScanDone: alloc.unsealed === true,
-                    scanStatus: alloc.scan_status || 'PENDING'
+                    firstScanDone: isUnsealed,
+                    scanStatus: alloc.scan_status || (isUnsealed ? 'UNSEALED' : 'PENDING')
                 };
             }
         });
@@ -120,7 +140,13 @@ export async function GET(request: Request) {
         };
 
         const receivedParcels = shipData.map(s => {
-            const isSorted = Boolean(s.bag_number && String(s.bag_number).trim() !== '');
+            const refLower = String(s.reference_number || '').trim().toLowerCase();
+            const hasBagNumber = Boolean(s.bag_number && String(s.bag_number).trim() !== '');
+            const hasUnsealRecord = unsealedParcelRefsSet.has(refLower);
+            const scanInfo = shipmentToScanStatusMap[s.reference_number];
+
+            // Parcels Sorted = all parcels where 1st scan (Box Unsealing) is done
+            const isSorted = hasBagNumber || hasUnsealRecord || scanInfo?.firstScanDone === true;
             if (isSorted) totalSorted++;
             
             // Resolve LMD Courier Partner strictly via service_provider_allocation table
@@ -144,7 +170,6 @@ export async function GET(request: Request) {
                 partnerDetailsMap[pName].pendingParcels++;
             }
 
-            const scanInfo = shipmentToScanStatusMap[s.reference_number];
             return {
                 referenceNumber: s.reference_number || 'N/A',
                 senderReference: s.sender_reference || '-',
@@ -155,11 +180,12 @@ export async function GET(request: Request) {
                 weight: s.weight ? `${s.weight} kg` : '-',
                 createdAt: s.created_at || new Date().toISOString(),
                 isSorted,
-                firstScanDone: scanInfo?.firstScanDone ?? false,
-                status: scanInfo?.scanStatus || 'PENDING'
+                firstScanDone: isSorted,
+                status: scanInfo?.scanStatus || (isSorted ? 'UNSEALED' : 'PENDING')
             };
         });
 
+        // Pending Parcels = Total Received - Parcels Sorted
         const pendingParcels = totalReceived - totalSorted;
 
         // 2. Bags Metrics & Structured List
@@ -169,7 +195,7 @@ export async function GET(request: Request) {
         let bagPartnerCounts: Record<string, number> = { PickMe: 0, Domex: 0, Pronto: 0, General: 0 };
 
         const bagsList = bagData.map(b => {
-            const isSealed = b.status === 'SEALED';
+            const isSealed = b.status === 'SEALED' || b.status === 'CLOSED';
             if (isSealed) sealedBags++;
             else openBags++;
 
@@ -209,13 +235,13 @@ export async function GET(request: Request) {
         let closedManifests = 0;
 
         const manifestsList = manData.map(m => {
-            const isClosed = m.status === 'CLOSED';
+            const isClosed = String(m.status || '').toUpperCase() === 'CLOSED';
             if (isClosed) closedManifests++;
             else openManifests++;
 
             return {
                 id: m.id,
-                manifestId: m.manifest_id || `MNF-${m.id}`,
+                manifestId: m.manifest_id || m.mawb_ref || `MNF-${m.id}`,
                 mawbRef: m.mawb_ref || m.manifest_id || '',
                 status: m.status || 'OPEN',
                 totalBags: m.total_bags || 0,
@@ -239,14 +265,16 @@ export async function GET(request: Request) {
             scannedParcels: u.scanned_parcels || []
         }));
 
-        // 4. Exception Counts & Structured List
+        // 4. Exception Counts & Structured List according to database
         let damagedLabelsCount = damData.length;
         let unsealedBoxesCount = unsealData.length;
         let discrepancyCount = 0;
 
         unsealData.forEach(u => {
-            const st = (u.status || '').toLowerCase();
-            if (st.includes('shortage') || st.includes('overage') || st.includes('discrepancy')) {
+            const isDiscrepancy = (u.discrepancy && u.discrepancy !== 0) ||
+                                 (u.scanned_count !== undefined && u.expected_count !== undefined && u.scanned_count !== u.expected_count) ||
+                                 (u.status && (u.status.toLowerCase().includes('shortage') || u.status.toLowerCase().includes('overage') || u.status.toLowerCase().includes('discrepancy')));
+            if (isDiscrepancy) {
                 discrepancyCount++;
             }
         });
