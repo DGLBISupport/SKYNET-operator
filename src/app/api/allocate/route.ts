@@ -803,63 +803,24 @@ export async function GET(request: Request) {
             const searchMawb = mawbRefParam.trim();
             const cleanSearchMawb = encodeURIComponent(searchMawb);
 
+            // Execute primary shipments query and unsealed bags query in parallel for max performance
+            const [shipmentsRes, unsealRes] = await Promise.all([
+                fetch(`${supabaseUrl}/rest/v1/shipments?mawb_reference=ilike.${cleanSearchMawb}&select=bag_number,reference_number&limit=2000`, { headers }),
+                fetch(`${supabaseUrl}/rest/v1/bag_unsealing?mawb_ref=ilike.${cleanSearchMawb}&select=bag_number,expected_count`, { headers })
+            ]);
+
             let allShipments: any[] = [];
-            let offset = 0;
-            const limit = 1000;
-            let hasMore = true;
-
-            // 1. Primary query on shipments table with ilike matching for MAWB
-            while (hasMore) {
-                const res = await fetch(`${supabaseUrl}/rest/v1/shipments?mawb_reference=ilike.${cleanSearchMawb}&select=bag_number,reference_number&limit=${limit}&offset=${offset}`, { headers });
-                if (!res.ok) {
-                    break;
-                }
-                const shipments = await res.json();
-                if (!Array.isArray(shipments) || shipments.length === 0) {
-                    hasMore = false;
-                } else {
-                    allShipments = allShipments.concat(shipments);
-                    if (shipments.length < limit) hasMore = false;
-                    else offset += limit;
-                }
+            if (shipmentsRes.ok) {
+                const data = await shipmentsRes.json();
+                if (Array.isArray(data)) allShipments = data;
             }
 
-            // 2. Query shipments table by bag_number matching searchMawb
-            offset = 0;
-            hasMore = true;
-            while (hasMore) {
-                const res = await fetch(`${supabaseUrl}/rest/v1/shipments?bag_number=ilike.*${cleanSearchMawb}*&select=bag_number,reference_number&limit=${limit}&offset=${offset}`, { headers });
-                if (!res.ok) break;
-                const shipments = await res.json();
-                if (!Array.isArray(shipments) || shipments.length === 0) {
-                    hasMore = false;
-                } else {
-                    const existingRefs = new Set(allShipments.map(s => s.reference_number));
-                    shipments.forEach(s => {
-                        if (!existingRefs.has(s.reference_number)) {
-                            allShipments.push(s);
-                        }
-                    });
-                    if (shipments.length < limit) hasMore = false;
-                    else offset += limit;
-                }
-            }
-
-            // 3. Fallback query on shipments_duplicate if primary returned 0 shipments
+            // Fallback query on shipments_duplicate if primary returned 0 shipments
             if (allShipments.length === 0) {
-                offset = 0;
-                hasMore = true;
-                while (hasMore) {
-                    const res = await fetch(`${supabaseUrl}/rest/v1/shipments_duplicate?mawb_reference=ilike.${cleanSearchMawb}&select=bag_number,reference_number&limit=${limit}&offset=${offset}`, { headers });
-                    if (!res.ok) break;
-                    const shipments = await res.json();
-                    if (!Array.isArray(shipments) || shipments.length === 0) {
-                        hasMore = false;
-                    } else {
-                        allShipments = allShipments.concat(shipments);
-                        if (shipments.length < limit) hasMore = false;
-                        else offset += limit;
-                    }
+                const dupRes = await fetch(`${supabaseUrl}/rest/v1/shipments_duplicate?mawb_reference=ilike.${cleanSearchMawb}&select=bag_number,reference_number&limit=2000`, { headers });
+                if (dupRes.ok) {
+                    const data = await dupRes.json();
+                    if (Array.isArray(data)) allShipments = data;
                 }
             }
 
@@ -875,8 +836,7 @@ export async function GET(request: Request) {
                 }
             });
 
-            // Also check bag_unsealing table for bags registered for this MAWB
-            const unsealRes = await fetch(`${supabaseUrl}/rest/v1/bag_unsealing?mawb_ref=ilike.${cleanSearchMawb}&select=bag_number,expected_count`, { headers });
+            // Add unsealed bags registered for this MAWB if not present
             if (unsealRes.ok) {
                 const unsealed = await unsealRes.json();
                 if (Array.isArray(unsealed)) {
@@ -888,18 +848,6 @@ export async function GET(request: Request) {
                             }
                         }
                     });
-                }
-            }
-
-            // For every bag found in bagCountsMap, verify count directly against shipments table specifically for this MAWB
-            for (const bNum of Object.keys(bagCountsMap)) {
-                if (bNum.includes('-UNASSIGNED') || bNum.includes('-BAG-')) continue;
-                const checkShipRes = await fetch(`${supabaseUrl}/rest/v1/shipments?mawb_reference=ilike.${cleanSearchMawb}&bag_number=ilike.${encodeURIComponent(bNum)}&select=reference_number`, { headers });
-                if (checkShipRes.ok) {
-                    const shipRows = await checkShipRes.json();
-                    if (Array.isArray(shipRows) && shipRows.length > 0) {
-                        bagCountsMap[bNum] = shipRows.length;
-                    }
                 }
             }
 
