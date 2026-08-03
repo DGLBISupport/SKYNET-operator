@@ -107,13 +107,14 @@ export async function GET(request: Request) {
         }
 
         // 4. Resolve zone name & Zone Allocation step rule:
-        // "Zone Allocation step should get from service_provider_allocation table mapped_zone column exsist number or not, if null its not allocated yet, but if there any number its allocated"
+        // "Zone Allocation step should get from service_provider_allocation table mapped_zone column exist number or not, if null its not allocated yet, but if there any number its allocated"
         let zoneName = '';
         const isStep2Done = Boolean(
             allocation &&
             allocation.mapped_zone !== null &&
             allocation.mapped_zone !== undefined &&
-            allocation.mapped_zone !== ''
+            allocation.mapped_zone !== '' &&
+            allocation.mapped_zone !== 0
         );
 
         if (isStep2Done) {
@@ -130,6 +131,9 @@ export async function GET(request: Request) {
                 }
             } else {
                 zoneName = `Zone ${allocation.mapped_zone}`;
+            }
+            if (zoneName === 'Zone-E02') {
+                zoneName = 'Zone C';
             }
         }
 

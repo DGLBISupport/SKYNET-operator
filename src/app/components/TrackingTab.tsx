@@ -42,20 +42,40 @@ export default function TrackingTab() {
     const [activeSectionTab, setActiveSectionTab] = useState<'all' | 'details' | 'manifest' | 'shipment'>('all');
     const trackingInputRef = React.useRef<HTMLInputElement>(null);
 
+    useEffect(() => {
+        if (typeof window !== 'undefined') {
+            const params = new URLSearchParams(window.location.search);
+            const queryUrl = params.get('q') || params.get('tracking');
+            const savedQuery = sessionStorage.getItem('last_tracked_barcode');
+            const barcodeToSearch = queryUrl || savedQuery;
+
+            if (barcodeToSearch && barcodeToSearch.trim()) {
+                const q = barcodeToSearch.trim();
+                setSearchQuery(q);
+                setLastScanned(q);
+                fetchTracking(q);
+            }
+        }
+    }, []);
+
     const fetchTracking = async (queryToSearch: string) => {
         if (!queryToSearch.trim()) return;
+        const q = queryToSearch.trim();
         setLoading(true);
         setNotFoundError(null);
+        if (typeof window !== 'undefined') {
+            sessionStorage.setItem('last_tracked_barcode', q);
+        }
         try {
-            const res = await fetch(`/api/tracking?q=${encodeURIComponent(queryToSearch.trim())}`);
+            const res = await fetch(`/api/tracking?q=${encodeURIComponent(q)}&_t=${Date.now()}`);
             const result = await res.json();
             if (result.success) {
                 setData(result);
-                setActiveQuery(queryToSearch.trim());
+                setActiveQuery(q);
             } else if (result.notFound) {
                 setData(null);
-                setActiveQuery(queryToSearch.trim());
-                setNotFoundError(result.error || `No parcel found matching barcode "${queryToSearch}" in Supabase database.`);
+                setActiveQuery(q);
+                setNotFoundError(result.error || `No parcel found matching barcode "${q}" in Supabase database.`);
             } else {
                 setData(null);
                 setNotFoundError(result.error || 'Failed to fetch tracking data.');
@@ -146,6 +166,27 @@ export default function TrackingTab() {
                         }}
                     >
                         {loading ? 'Searching ...' : 'Search Parcel'}
+                    </button>
+                    <button
+                        type="button"
+                        onClick={() => searchQuery.trim() && fetchTracking(searchQuery.trim())}
+                        disabled={loading || !searchQuery.trim()}
+                        style={{
+                            padding: '10px 16px',
+                            backgroundColor: '#ffffff',
+                            color: '#374151',
+                            border: '1px solid #d1d5db',
+                            borderRadius: '6px',
+                            fontSize: '14px',
+                            fontWeight: '700',
+                            cursor: loading || !searchQuery.trim() ? 'not-allowed' : 'pointer',
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '6px',
+                            opacity: loading || !searchQuery.trim() ? 0.6 : 1
+                        }}
+                    >
+                        Refresh
                     </button>
                 </form>
             </div>
