@@ -4,6 +4,7 @@ import { useState, useRef, useEffect, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import { AllocationResponse, SkyNetParcelData } from '@/types';
 import { toast } from 'sonner';
+import TrackingTab from '@/app/components/TrackingTab';
 
 // SVG Code 128 Barcode Generator
 function generateCode128SVG(text: string): string {
@@ -191,7 +192,7 @@ export default function WorkstationDashboard() {
         }
     };
 
-    const [activeTab, setActiveTab] = useState<'first-scan' | 'second-scan' | 'damaged-barcode' | 'verify' | 'config' | 'reports' | 'search' | 'dashboard'>('first-scan');
+    const [activeTab, setActiveTab] = useState<'first-scan' | 'second-scan' | 'damaged-barcode' | 'verify' | 'config' | 'reports' | 'search' | 'dashboard' | 'tracking'>('first-scan');
     const [isSidebarExpanded, setIsSidebarExpanded] = useState<boolean>(true);
     const [scannedToday, setScannedToday] = useState<number>(0);
     const [timeString, setTimeString] = useState<string>('');
@@ -380,13 +381,38 @@ export default function WorkstationDashboard() {
         city?: string;
     }>>([]);
 
-    // Tab: Damaged Barcode (Temu Scan)
+    // Tab: Damaged Barcode (Temu Scan) & Photo Upload Reporting
     const [damagedBarcodeInput, setDamagedBarcodeInput] = useState('');
     const [damagedLastScanned, setDamagedLastScanned] = useState('');
     const [damagedCurrentScan, setDamagedCurrentScan] = useState<AllocationResponse | null>(null);
     const [damagedStatus, setDamagedStatus] = useState<'READY' | 'FETCHING' | 'SUCCESS' | 'ERROR'>('READY');
     const [damagedErrorMessage, setDamagedErrorMessage] = useState('');
     const [damagedHistory, setDamagedHistory] = useState<AllocationResponse[]>([]);
+
+    // Damaged Parcel Reporting & Photo States
+    const [damagedReportCategory, setDamagedReportCategory] = useState('Packaging Crushed / Torn');
+    const [damagedReportSeverity, setDamagedReportSeverity] = useState('Moderate');
+    const [damagedImage1, setDamagedImage1] = useState<string | null>(null);
+    const [damagedImage2, setDamagedImage2] = useState<string | null>(null);
+    const [damagedReportRemarks, setDamagedReportRemarks] = useState('');
+    const [damagedSubmitting, setDamagedSubmitting] = useState(false);
+    const [damagedSubmitSuccess, setDamagedSubmitSuccess] = useState<string | null>(null);
+    const [damagedSubmitError, setDamagedSubmitError] = useState<string | null>(null);
+    const [damagedReportsList, setDamagedReportsList] = useState<any[]>([]);
+    const [damagedSelectedPhotosModal, setDamagedSelectedPhotosModal] = useState<{
+        trackingNumber: string;
+        temuBarcode?: string;
+        damageType: string;
+        severity: string;
+        imageUrl1: string;
+        imageUrl2: string;
+        remarks?: string;
+        createdAt?: string;
+        status?: string;
+    } | null>(null);
+    const [damagedReportFormOpen, setDamagedReportFormOpen] = useState(false);
+    const [damagedManualTracking, setDamagedManualTracking] = useState('');
+    const [damagedSubTab, setDamagedSubTab] = useState<'label' | 'parcels'>('label');
 
     // Tab 3: Config
     const [config, setConfig] = useState({
@@ -412,6 +438,7 @@ export default function WorkstationDashboard() {
     const [dashboardSubTab, setDashboardSubTab] = useState<'total_received' | 'parcels_sorted' | 'pending_parcels' | 'total_bags' | 'manifests' | 'exceptions' | 'productivity' | 'partner'>('total_received');
     const [dashSearchQuery, setDashSearchQuery] = useState('');
     const [dashPartnerFilter, setDashPartnerFilter] = useState('ALL');
+    const [dashMawbFilter, setDashMawbFilter] = useState('');
     const [dashStatusFilter, setDashStatusFilter] = useState('ALL');
 
     const fetchDashboard = async () => {
@@ -421,6 +448,21 @@ export default function WorkstationDashboard() {
             const data = await res.json();
             if (data.success && data.dashboard) {
                 setDashboardData(data.dashboard);
+                const isUuid = (val: string) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(val);
+                const isValidMawbRef = (ref: any) => {
+                    if (!ref || typeof ref !== 'string') return false;
+                    const clean = ref.trim();
+                    if (clean === '' || clean === '-' || clean.toUpperCase() === 'N/A' || clean.startsWith('MNF-')) return false;
+                    if (isUuid(clean)) return false;
+                    return true;
+                };
+                const availableMawbsSet = new Set<string>();
+                (data.dashboard.mawbTableList || []).forEach((m: any) => { if (isValidMawbRef(m.mawbReference)) availableMawbsSet.add(m.mawbReference.trim()); });
+                (data.dashboard.receivedParcels || []).forEach((p: any) => { if (isValidMawbRef(p.mawbReference)) availableMawbsSet.add(p.mawbReference.trim()); });
+                const mList = Array.from(availableMawbsSet).sort();
+                if (mList.length > 0) {
+                    setDashMawbFilter(prev => (!prev || prev === 'ALL' || !mList.includes(prev)) ? mList[0] : prev);
+                }
             }
         } catch (e) {
             console.error("Failed to load dashboard data:", e);
@@ -2259,6 +2301,112 @@ export default function WorkstationDashboard() {
         setDamagedCurrentScan({ ...damagedCurrentScan, assignedPartner: next });
     };
 
+    // Fetch damaged parcel reports from database
+    const fetchDamagedParcels = async () => {
+        try {
+            const res = await fetch('/api/damaged-parcels');
+            const data = await res.json();
+            if (data.success && Array.isArray(data.data)) {
+                setDamagedReportsList(data.data);
+            }
+        } catch (e) {
+            console.error('Failed to fetch damaged parcels list:', e);
+        }
+    };
+
+    // Load damaged parcel reports when Damaged Labels tab becomes active
+    useEffect(() => {
+        if (activeTab === 'damaged-barcode') {
+            fetchDamagedParcels();
+        }
+    }, [activeTab]);
+
+    // Handle image file upload to Base64 data URL
+    const handleDamagedImageUpload = (e: React.ChangeEvent<HTMLInputElement>, imageNum: 1 | 2) => {
+        const file = e.target.files?.[0];
+        if (!file) return;
+
+        if (file.size > 10 * 1024 * 1024) {
+            alert('File size exceeds 10MB limit. Please choose a smaller image.');
+            return;
+        }
+
+        const reader = new FileReader();
+        reader.onloadend = () => {
+            const result = reader.result as string;
+            if (imageNum === 1) {
+                setDamagedImage1(result);
+            } else {
+                setDamagedImage2(result);
+            }
+        };
+        reader.readAsDataURL(file);
+    };
+
+    // Submit Damaged Parcel Report (2 required images)
+    const handleSubmitDamagedParcelReport = async (e: React.FormEvent) => {
+        e.preventDefault();
+        setDamagedSubmitError(null);
+        setDamagedSubmitSuccess(null);
+
+        const tracking = (damagedCurrentScan?.parcel?.trackingNumber || damagedManualTracking || damagedBarcodeInput).trim();
+        if (!tracking) {
+            setDamagedSubmitError('Please scan or enter a parcel tracking number first.');
+            return;
+        }
+
+        if (!damagedImage1) {
+            setDamagedSubmitError('Photo 1 (Parcel Box Condition) is required. Please upload or capture Image 1.');
+            return;
+        }
+
+        if (!damagedImage2) {
+            setDamagedSubmitError('Photo 2 (Label / Barcode Condition) is required. Please upload or capture Image 2.');
+            return;
+        }
+
+        setDamagedSubmitting(true);
+        try {
+            const res = await fetch('/api/damaged-parcels', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    trackingNumber: tracking,
+                    temuBarcode: damagedCurrentScan?.parcel?.senderReference || damagedBarcodeInput || '',
+                    mawbReference: damagedCurrentScan?.parcel?.mawbRef || '',
+                    consigneeName: damagedCurrentScan?.parcel?.recipientName || '',
+                    assignedPartner: damagedCurrentScan?.assignedPartner || '',
+                    assignedZone: damagedCurrentScan?.assignedZone || '',
+                    damageType: damagedReportCategory,
+                    severity: damagedReportSeverity,
+                    imageUrl1: damagedImage1,
+                    imageUrl2: damagedImage2,
+                    remarks: damagedReportRemarks,
+                    reportedBy: 'Warehouse Operator'
+                })
+            });
+
+            const data = await res.json();
+            if (data.success) {
+                setDamagedSubmitSuccess(`Damaged parcel report for "${tracking}" submitted successfully with 2 images!`);
+                // Clear photo fields
+                setDamagedImage1(null);
+                setDamagedImage2(null);
+                setDamagedReportRemarks('');
+                setDamagedManualTracking('');
+                setDamagedReportFormOpen(false);
+                // Refresh list
+                fetchDamagedParcels();
+            } else {
+                setDamagedSubmitError(data.error || 'Failed to submit damaged parcel report.');
+            }
+        } catch (err: any) {
+            setDamagedSubmitError(err.message || 'Server connection error.');
+        } finally {
+            setDamagedSubmitting(false);
+        }
+    };
+
 
     // ── SHARED STYLES ────────────────────────────────────────────────────────
     const card: React.CSSProperties = {
@@ -2424,6 +2572,11 @@ export default function WorkstationDashboard() {
 
     const getPageHeaderInfo = () => {
         switch (activeTab) {
+            case 'tracking':
+                return {
+                    title: 'Parcel Tracking & Audit Log',
+                    description: 'Track shipment status through the 6-step parcel allocation lifecycle and view complete tracking history.'
+                };
             case 'first-scan':
                 return {
                     title: 'Box Unsealing (1st Scan)',
@@ -2644,6 +2797,17 @@ export default function WorkstationDashboard() {
                                         <polygon points="16 8 20 8 23 11 23 16 16 16 16 8" />
                                         <circle cx="5.5" cy="18.5" r="2.5" />
                                         <circle cx="18.5" cy="18.5" r="2.5" />
+                                    </svg>
+                                )
+                            },
+                            {
+                                id: 'tracking',
+                                label: 'Parcel Tracking',
+                                icon: (
+                                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                        <circle cx="11" cy="11" r="8" />
+                                        <line x1="21" y1="21" x2="16.65" y2="16.65" />
+                                        <path d="M11 8v6l4 2" />
                                     </svg>
                                 )
                             }
@@ -3019,6 +3183,13 @@ export default function WorkstationDashboard() {
                 }}>
 
                     {/* ═══════════════════════════════════════════════════════
+                    PARCEL TRACKING TAB
+                ═══════════════════════════════════════════════════════ */}
+                    {activeTab === 'tracking' && (
+                        <TrackingTab />
+                    )}
+
+                    {/* ═══════════════════════════════════════════════════════
                     TAB 1 — BOX UNSEALING (FIRST SCAN)
                 ═══════════════════════════════════════════════════════ */}
                     {activeTab === 'first-scan' && (
@@ -3227,13 +3398,13 @@ export default function WorkstationDashboard() {
                                                 if (scn === exp) {
                                                     return (
                                                         <span style={{ fontSize: '12px', fontWeight: '800', color: '#16a34a', backgroundColor: '#f0fdf4', border: '1px solid #bbf7d0', padding: '4px 10px', borderRadius: '6px', display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
-                                                            ✓ Counts Match!
+                                                            Counts Match!
                                                         </span>
                                                     );
                                                 }
                                                 if (scn < exp) {
                                                     return (
-                                                        <span style={{ fontSize: '12px', fontWeight: '700', color: '#d97706', backgroundColor: '#fffbe6', border: '1px solid #fef3c7', padding: '4px 10px', borderRadius: '6px' }}>
+                                                        <span style={{ fontSize: '11px', fontWeight: '700', color: '#oooooo', backgroundColor: '#ffffff', border: '1px solid #dc2626', padding: '3px 8px', borderRadius: '4px' }}>
                                                             Remaining: {exp - scn} left
                                                         </span>
                                                     );
@@ -3274,8 +3445,8 @@ export default function WorkstationDashboard() {
                                                 {firstScanHistory.length === Number(firstScanExpected)
                                                     ? ' Finish Box (Save & Close)'
                                                     : firstScanHistory.length < Number(firstScanExpected)
-                                                        ? `⚠ Finish with Shortage (${Number(firstScanExpected) - firstScanHistory.length} Missing)`
-                                                        : `⚠ Finish with Overage (+${firstScanHistory.length - Number(firstScanExpected)} Extra)`
+                                                        ? `Finish with Shortage (${Number(firstScanExpected) - firstScanHistory.length} Missing)`
+                                                        : `Finish with Overage (+${firstScanHistory.length - Number(firstScanExpected)} Extra)`
                                                 }
                                             </button>
 
@@ -4364,281 +4535,687 @@ export default function WorkstationDashboard() {
                 ═══════════════════════════════════════════════════════ */}
                     {activeTab === 'damaged-barcode' && (
                         <div>
-
-                            {damagedStatus === 'ERROR' && (
-                                <div style={{ backgroundColor: '#fef2f2', border: '1px solid #fca5a5', color: '#dc2626', padding: '12px 16px', borderRadius: '8px', marginBottom: '16px', display: 'flex', alignItems: 'center', gap: '8px', fontSize: '14px', fontWeight: '500' }}>
-                                    Scan Failed: {damagedErrorMessage}
-                                </div>
-                            )}
-
-                            <div style={{ display: 'flex', flexDirection: 'column', gap: '16px', marginBottom: '16px' }}>
-                                {/* Barcode Input Card */}
-                                <div style={card}>
-                                    <div style={label}>Damaged Label (Temu Barcode) Input</div>
-                                    <form onSubmit={handleDamagedScanSubmit} style={{ display: 'flex', gap: '8px', marginBottom: '18px' }}>
-                                        <input
-                                            ref={damagedInputRef}
-                                            type="text"
-                                            value={damagedBarcodeInput}
-                                            onChange={(e) => {
-                                                const val = e.target.value;
-                                                if (damagedLastScanned && val.startsWith(damagedLastScanned) && val.length > damagedLastScanned.length) {
-                                                    setDamagedBarcodeInput(val.slice(damagedLastScanned.length));
-                                                    setDamagedLastScanned('');
-                                                } else {
-                                                    setDamagedBarcodeInput(val);
-                                                }
-                                            }}
-                                            onFocus={(e) => e.target.select()}
-                                            placeholder="Scan Temu barcode (e.g. BG-...)..."
-                                            className="scan-input-blink"
-                                            style={{ ...inputStyle, flex: 1 }}
-                                        />
-                                    </form>
-                                    {rowItem('Manifest', damagedCurrentScan?.parcel?.mawbRef || '—')}
-                                    {rowItem('Scanned today', <span style={{ color: '#e21b22', fontWeight: '700' }}>{scannedToday}</span>, true)}
-
-                                </div>
-
-                                {/* Assigned Partner & Resolved Skynet tracking Card */}
-                                <div style={{
-                                    ...card,
-                                    display: 'flex',
-                                    flexDirection: 'column',
-                                    alignItems: 'center',
-                                    justifyContent: 'center',
-                                    padding: '36px 20px',
-                                    minHeight: '260px',
-                                    border: damagedCurrentScan?.assignedPartner
-                                        ? damagedCurrentScan.assignedPartner === 'PickMe'
-                                            ? '3px solid #ffcc00'
-                                            : damagedCurrentScan.assignedPartner === 'Domex'
-                                                ? '3px solid #7b0f1a'
-                                                : '3px solid #ea580c'
-                                        : '1px solid #e5e7eb',
-                                    backgroundColor: damagedCurrentScan?.assignedPartner
-                                        ? damagedCurrentScan.assignedPartner === 'PickMe'
-                                            ? '#ffcc00'
-                                            : damagedCurrentScan.assignedPartner === 'Domex'
-                                                ? '#7b0f1a'
-                                                : '#ea580c'
-                                        : '#ffffff',
-                                    color: damagedCurrentScan?.assignedPartner
-                                        ? damagedCurrentScan.assignedPartner === 'PickMe'
-                                            ? '#000000'
-                                            : '#ffffff'
-                                        : '#111827',
-                                    transition: 'all 0.2s ease-in-out'
-                                }}>
-                                    <div style={{
-                                        ...label,
-                                        marginBottom: '20px',
+                            {/* SUB-TABS NAVIGATION FOR DAMAGED LABELS EXCEPTION MANAGEMENT */}
+                            <div style={{ display: 'flex', gap: '10px', marginBottom: '20px', borderBottom: '2px solid #e5e7eb', paddingBottom: '10px' }}>
+                                <button
+                                    onClick={() => setDamagedSubTab('label')}
+                                    style={{
+                                        backgroundColor: damagedSubTab === 'label' ? '#dc2626' : '#ffffff',
+                                        color: damagedSubTab === 'label' ? '#ffffff' : '#374151',
+                                        border: damagedSubTab === 'label' ? '1px solid #dc2626' : '1px solid #d1d5db',
+                                        padding: '10px 22px',
+                                        borderRadius: '8px',
+                                        fontWeight: '700',
                                         fontSize: '13px',
-                                        color: damagedCurrentScan?.assignedPartner
-                                            ? damagedCurrentScan.assignedPartner === 'PickMe' ? '#000000' : '#ffffff'
-                                            : '#6b7280'
-                                    }}>
-                                        Assigned Partner
-                                    </div>
-                                    {damagedCurrentScan?.assignedPartner ? (
-                                        <div style={{ textAlign: 'center', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '16px' }}>
-                                            {/* Resolved Skynet ID Alert Banner */}
-                                            <div style={{
-                                                backgroundColor: '#ffffff',
-                                                color: '#111827',
-                                                padding: '10px 20px',
-                                                borderRadius: '8px',
-                                                border: '1px solid #d1d5db',
-                                                boxShadow: '0 2px 4px rgba(0,0,0,0.05)',
-                                                display: 'flex',
-                                                flexDirection: 'column',
-                                                alignItems: 'center',
-                                                gap: '4px'
-                                            }}>
-                                                <span style={{ fontSize: '11px', color: '#6b7280', fontWeight: 'bold', textTransform: 'uppercase' }}>Skynet Tracking Number</span>
-                                                <span style={{ fontSize: '22px', fontWeight: '800', letterSpacing: '1px', color: '#dc2626' }}>
-                                                    {damagedCurrentScan.parcel?.trackingNumber}
-                                                </span>
-                                            </div>
+                                        cursor: 'pointer',
+                                        display: 'flex',
+                                        alignItems: 'center',
+                                        gap: '8px',
+                                        boxShadow: damagedSubTab === 'label' ? '0 2px 4px rgba(220, 38, 38, 0.2)' : '0 1px 2px rgba(0,0,0,0.04)',
+                                        transition: 'all 0.15s ease'
+                                    }}
+                                >
+                                    Damaged Label
+                                </button>
+                                <button
+                                    onClick={() => setDamagedSubTab('parcels')}
+                                    style={{
+                                        backgroundColor: damagedSubTab === 'parcels' ? '#dc2626' : '#ffffff',
+                                        color: damagedSubTab === 'parcels' ? '#ffffff' : '#374151',
+                                        border: damagedSubTab === 'parcels' ? '1px solid #dc2626' : '1px solid #d1d5db',
+                                        padding: '10px 22px',
+                                        borderRadius: '8px',
+                                        fontWeight: '700',
+                                        fontSize: '13px',
+                                        cursor: 'pointer',
+                                        display: 'flex',
+                                        alignItems: 'center',
+                                        gap: '8px',
+                                        boxShadow: damagedSubTab === 'parcels' ? '0 2px 4px rgba(220, 38, 38, 0.2)' : '0 1px 2px rgba(0,0,0,0.04)',
+                                        transition: 'all 0.15s ease'
+                                    }}
+                                >
+                                    Damaged Parcels ({damagedReportsList.length})
+                                </button>
+                            </div>
 
-                                            {/* Logo Container */}
-                                            <div style={{
-                                                backgroundColor: '#ffffff',
-                                                padding: '12px 24px',
-                                                borderRadius: '10px',
-                                                display: 'flex',
-                                                alignItems: 'center',
-                                                justifyContent: 'center',
-                                                height: '100px',
-                                                width: '280px',
-                                                boxShadow: '0 4px 12px rgba(0,0,0,0.15)'
-                                            }}>
-                                                {damagedCurrentScan.assignedPartner === 'PickMe' ? (
-                                                    <img src="/pick_me_logo.png" alt="PickMe" style={{ maxHeight: '100%', maxWidth: '100%', objectFit: 'contain' }} />
-                                                ) : damagedCurrentScan.assignedPartner === 'Domex' ? (
-                                                    <img src="/domex_logo.png" alt="Domex" style={{ maxHeight: '100%', maxWidth: '100%', objectFit: 'contain' }} />
-                                                ) : (
-                                                    <span style={{ color: '#ea580c', fontWeight: '900', fontSize: '28px', letterSpacing: '1px' }}>PRONTO</span>
-                                                )}
-                                            </div>
+                            {/* ── SUB-TAB 1: DAMAGED LABEL ── */}
+                            {damagedSubTab === 'label' && (
+                                <div>
+                                    {damagedStatus === 'ERROR' && (
+                                        <div style={{ backgroundColor: '#fef2f2', border: '1px solid #fca5a5', color: '#dc2626', padding: '12px 16px', borderRadius: '8px', marginBottom: '16px', display: 'flex', alignItems: 'center', gap: '8px', fontSize: '14px', fontWeight: '500' }}>
+                                            Scan Failed: {damagedErrorMessage}
+                                        </div>
+                                    )}
 
-                                            {/* Zone Badge */}
-                                            <div style={{
-                                                fontSize: '16px',
-                                                fontWeight: '600',
-                                                color: damagedCurrentScan.assignedPartner === 'PickMe' ? '#000000' : '#ffffff',
-                                                backgroundColor: damagedCurrentScan.assignedPartner === 'PickMe' ? 'rgba(0, 0, 0, 0.08)' : 'rgba(255, 255, 255, 0.15)',
-                                                padding: '6px 20px',
-                                                borderRadius: '20px',
-                                                border: damagedCurrentScan.assignedPartner === 'PickMe' ? '1px solid rgba(0, 0, 0, 0.1)' : '1px solid rgba(255, 255, 255, 0.2)',
-                                                display: 'inline-block'
-                                            }}>
-                                                Zone: <span style={{ fontWeight: '800' }}>{damagedCurrentScan.assignedZone || '—'}</span>
-                                            </div>
+                                    <div style={{ display: 'flex', flexDirection: 'column', gap: '16px', marginBottom: '16px' }}>
+                                        {/* Barcode Input Card */}
+                                        <div style={card}>
+                                            <div style={label}>Damaged Label (Temu Barcode) Input</div>
+                                            <form onSubmit={handleDamagedScanSubmit} style={{ display: 'flex', gap: '8px', marginBottom: '18px' }}>
+                                                <input
+                                                    ref={damagedInputRef}
+                                                    type="text"
+                                                    value={damagedBarcodeInput}
+                                                    onChange={(e) => {
+                                                        const val = e.target.value;
+                                                        if (damagedLastScanned && val.startsWith(damagedLastScanned) && val.length > damagedLastScanned.length) {
+                                                            setDamagedBarcodeInput(val.slice(damagedLastScanned.length));
+                                                            setDamagedLastScanned('');
+                                                        } else {
+                                                            setDamagedBarcodeInput(val);
+                                                        }
+                                                    }}
+                                                    onFocus={(e) => e.target.select()}
+                                                    placeholder="Scan Temu barcode (e.g. BG-...)..."
+                                                    className="scan-input-blink"
+                                                    style={{ ...inputStyle, flex: 1 }}
+                                                />
+                                            </form>
+                                            {rowItem('Manifest', damagedCurrentScan?.parcel?.mawbRef || '—')}
+                                            {rowItem('Scanned today', <span style={{ color: '#e21b22', fontWeight: '700' }}>{scannedToday}</span>, true)}
 
-                                            {/* Missed First Scan Alert Badge */}
-                                            {damagedCurrentScan.missedFirstScan && (
-                                                <div style={{
-                                                    fontSize: '13px',
-                                                    fontWeight: '800',
-                                                    color: '#ffffff',
-                                                    backgroundColor: '#dc2626',
-                                                    border: '1px solid #ffffff',
-                                                    padding: '6px 16px',
-                                                    borderRadius: '6px',
-                                                    display: 'flex',
-                                                    alignItems: 'center',
-                                                    gap: '6px',
-                                                    boxShadow: '0 2px 4px rgba(0,0,0,0.1)'
-                                                }}>
-                                                    <span>⚠️ MISSED 1ST SCAN (AUTO RECORDED)</span>
+                                        </div>
+
+                                        {/* Assigned Partner & Resolved Skynet tracking Card */}
+                                        <div style={{
+                                            ...card,
+                                            display: 'flex',
+                                            flexDirection: 'column',
+                                            alignItems: 'center',
+                                            justifyContent: 'center',
+                                            padding: '36px 20px',
+                                            minHeight: '260px',
+                                            border: damagedCurrentScan?.assignedPartner
+                                                ? damagedCurrentScan.assignedPartner === 'PickMe'
+                                                    ? '3px solid #ffcc00'
+                                                    : damagedCurrentScan.assignedPartner === 'Domex'
+                                                        ? '3px solid #7b0f1a'
+                                                        : '3px solid #ea580c'
+                                                : '1px solid #e5e7eb',
+                                            backgroundColor: damagedCurrentScan?.assignedPartner
+                                                ? damagedCurrentScan.assignedPartner === 'PickMe'
+                                                    ? '#ffcc00'
+                                                    : damagedCurrentScan.assignedPartner === 'Domex'
+                                                        ? '#7b0f1a'
+                                                        : '#ea580c'
+                                                : '#ffffff',
+                                            color: damagedCurrentScan?.assignedPartner
+                                                ? damagedCurrentScan.assignedPartner === 'PickMe'
+                                                    ? '#000000'
+                                                    : '#ffffff'
+                                                : '#111827',
+                                            transition: 'all 0.2s ease-in-out'
+                                        }}>
+                                            <div style={{
+                                                ...label,
+                                                marginBottom: '20px',
+                                                fontSize: '13px',
+                                                color: damagedCurrentScan?.assignedPartner
+                                                    ? damagedCurrentScan.assignedPartner === 'PickMe' ? '#000000' : '#ffffff'
+                                                    : '#6b7280'
+                                            }}>
+                                                Assigned Partner
+                                            </div>
+                                            {damagedCurrentScan?.assignedPartner ? (
+                                                <div style={{ textAlign: 'center', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '16px' }}>
+                                                    {/* Resolved Skynet ID Alert Banner */}
+                                                    <div style={{
+                                                        backgroundColor: '#ffffff',
+                                                        color: '#111827',
+                                                        padding: '10px 20px',
+                                                        borderRadius: '8px',
+                                                        border: '1px solid #d1d5db',
+                                                        boxShadow: '0 2px 4px rgba(0,0,0,0.05)',
+                                                        display: 'flex',
+                                                        flexDirection: 'column',
+                                                        alignItems: 'center',
+                                                        gap: '4px'
+                                                    }}>
+                                                        <span style={{ fontSize: '11px', color: '#6b7280', fontWeight: 'bold', textTransform: 'uppercase' }}>Skynet Tracking Number</span>
+                                                        <span style={{ fontSize: '22px', fontWeight: '800', letterSpacing: '1px', color: '#dc2626' }}>
+                                                            {damagedCurrentScan.parcel?.trackingNumber}
+                                                        </span>
+                                                    </div>
+
+                                                    {/* Logo Container */}
+                                                    <div style={{
+                                                        backgroundColor: '#ffffff',
+                                                        padding: '12px 24px',
+                                                        borderRadius: '10px',
+                                                        display: 'flex',
+                                                        alignItems: 'center',
+                                                        justifyContent: 'center',
+                                                        height: '100px',
+                                                        width: '280px',
+                                                        boxShadow: '0 4px 12px rgba(0,0,0,0.15)'
+                                                    }}>
+                                                        {damagedCurrentScan.assignedPartner === 'PickMe' ? (
+                                                            <img src="/pick_me_logo.png" alt="PickMe" style={{ maxHeight: '100%', maxWidth: '100%', objectFit: 'contain' }} />
+                                                        ) : damagedCurrentScan.assignedPartner === 'Domex' ? (
+                                                            <img src="/domex_logo.png" alt="Domex" style={{ maxHeight: '100%', maxWidth: '100%', objectFit: 'contain' }} />
+                                                        ) : (
+                                                            <span style={{ color: '#ea580c', fontWeight: '900', fontSize: '28px', letterSpacing: '1px' }}>PRONTO</span>
+                                                        )}
+                                                    </div>
+
+                                                    {/* Zone Badge */}
+                                                    <div style={{
+                                                        fontSize: '16px',
+                                                        fontWeight: '600',
+                                                        color: damagedCurrentScan.assignedPartner === 'PickMe' ? '#000000' : '#ffffff',
+                                                        backgroundColor: damagedCurrentScan.assignedPartner === 'PickMe' ? 'rgba(0, 0, 0, 0.08)' : 'rgba(255, 255, 255, 0.15)',
+                                                        padding: '6px 20px',
+                                                        borderRadius: '20px',
+                                                        border: damagedCurrentScan.assignedPartner === 'PickMe' ? '1px solid rgba(0, 0, 0, 0.1)' : '1px solid rgba(255, 255, 255, 0.2)',
+                                                        display: 'inline-block'
+                                                    }}>
+                                                        Zone: <span style={{ fontWeight: '800' }}>{damagedCurrentScan.assignedZone || '—'}</span>
+                                                    </div>
+
+                                                    {/* Missed First Scan Alert Badge */}
+                                                    {damagedCurrentScan.missedFirstScan && (
+                                                        <div style={{
+                                                            fontSize: '13px',
+                                                            fontWeight: '800',
+                                                            color: '#ffffff',
+                                                            backgroundColor: '#dc2626',
+                                                            border: '1px solid #ffffff',
+                                                            padding: '6px 16px',
+                                                            borderRadius: '6px',
+                                                            display: 'flex',
+                                                            alignItems: 'center',
+                                                            gap: '6px',
+                                                            boxShadow: '0 2px 4px rgba(0,0,0,0.1)'
+                                                        }}>
+                                                            <span>⚠️ MISSED 1ST SCAN (AUTO RECORDED)</span>
+                                                        </div>
+                                                    )}
+                                                </div>
+                                            ) : (
+                                                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '8px', color: '#9ca3af' }}>
+                                                    <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                                                        <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z" />
+                                                        <polyline points="3.27 6.96 12 12.01 20.73 6.96" />
+                                                        <line x1="12" y1="22.08" x2="12" y2="12" />
+                                                    </svg>
+                                                    <span style={{ fontSize: '15px', fontWeight: '500', marginTop: '4px' }}>
+                                                        Awaiting Temu barcode scan...
+                                                    </span>
                                                 </div>
                                             )}
                                         </div>
-                                    ) : (
-                                        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '8px', color: '#9ca3af' }}>
-                                            <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-                                                <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z" />
-                                                <polyline points="3.27 6.96 12 12.01 20.73 6.96" />
-                                                <line x1="12" y1="22.08" x2="12" y2="12" />
-                                            </svg>
-                                            <span style={{ fontSize: '15px', fontWeight: '500', marginTop: '4px' }}>
-                                                Awaiting Temu barcode scan...
-                                            </span>
+                                    </div>
+
+                                    {/* Display Detailed Info Card when resolved */}
+                                    {damagedCurrentScan && damagedCurrentScan.parcel && (
+                                        <div style={{ ...card, marginBottom: '16px' }}>
+                                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid #e5e7eb', paddingBottom: '14px', marginBottom: '16px' }}>
+                                                <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
+                                                    <h3 style={{ margin: 0, fontSize: '16px', color: '#111827', fontWeight: '700' }}>Resolved Parcel Details</h3>
+                                                    <span style={{ fontSize: '12px', color: '#6b7280' }}>Temu barcode: {damagedCurrentScan.parcel.senderReference || '—'}</span>
+                                                </div>
+                                                <div style={{ display: 'flex', gap: '8px' }}>
+                                                    <button
+                                                        onClick={() => {
+                                                            if (damagedCurrentScan?.parcel) {
+                                                                setPrintLabelModal({
+                                                                    trackingNumber: damagedCurrentScan.parcel.trackingNumber,
+                                                                    senderReference: damagedCurrentScan.parcel.senderReference,
+                                                                    recipientName: damagedCurrentScan.parcel.recipientName,
+                                                                    city: damagedCurrentScan.parcel.city,
+                                                                    province: damagedCurrentScan.parcel.province,
+                                                                    district: damagedCurrentScan.parcel.district,
+                                                                    weight: damagedCurrentScan.parcel.weight,
+                                                                    mawbRef: damagedCurrentScan.parcel.mawbRef,
+                                                                    assignedPartner: damagedCurrentScan.assignedPartner,
+                                                                    assignedZone: damagedCurrentScan.assignedZone
+                                                                });
+                                                            }
+                                                        }}
+                                                        style={{
+                                                            ...btnSecondary,
+                                                            backgroundColor: '#eff6ff',
+                                                            color: '#2563eb',
+                                                            border: '1px solid #bfdbfe',
+                                                            fontWeight: '700'
+                                                        }}
+                                                    >
+                                                        🖨 Print Replacement Label
+                                                    </button>
+                                                    <button onClick={handleChangeLMDDamaged} style={btnSecondary}>
+                                                        Change LMD Partner
+                                                    </button>
+                                                    <button onClick={handleConfirmDispatchDamaged} style={btnPrimary}>
+                                                        Confirm Dispatch
+                                                    </button>
+                                                    <button onClick={handleClearDamagedScan} style={btnDanger}>
+                                                        Clear
+                                                    </button>
+                                                </div>
+                                            </div>
+                                            {parcelDetailsGrid(damagedCurrentScan.parcel)}
                                         </div>
                                     )}
-                                </div>
-                            </div>
 
-                            {/* Display Detailed Info Card when resolved */}
-                            {damagedCurrentScan && damagedCurrentScan.parcel && (
-                                <div style={{ ...card, marginBottom: '16px' }}>
-                                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid #e5e7eb', paddingBottom: '14px', marginBottom: '16px' }}>
-                                        <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
-                                            <h3 style={{ margin: 0, fontSize: '16px', color: '#111827', fontWeight: '700' }}>Resolved Parcel Details</h3>
-                                            <span style={{ fontSize: '12px', color: '#6b7280' }}>Temu barcode: {damagedCurrentScan.parcel.senderReference || '—'}</span>
-                                        </div>
-                                        <div style={{ display: 'flex', gap: '8px' }}>
-                                            <button
-                                                onClick={() => {
-                                                    if (damagedCurrentScan?.parcel) {
-                                                        setPrintLabelModal({
-                                                            trackingNumber: damagedCurrentScan.parcel.trackingNumber,
-                                                            senderReference: damagedCurrentScan.parcel.senderReference,
-                                                            recipientName: damagedCurrentScan.parcel.recipientName,
-                                                            city: damagedCurrentScan.parcel.city,
-                                                            province: damagedCurrentScan.parcel.province,
-                                                            district: damagedCurrentScan.parcel.district,
-                                                            weight: damagedCurrentScan.parcel.weight,
-                                                            mawbRef: damagedCurrentScan.parcel.mawbRef,
-                                                            assignedPartner: damagedCurrentScan.assignedPartner,
-                                                            assignedZone: damagedCurrentScan.assignedZone
-                                                        });
-                                                    }
-                                                }}
-                                                style={{
-                                                    ...btnSecondary,
-                                                    backgroundColor: '#eff6ff',
-                                                    color: '#2563eb',
-                                                    border: '1px solid #bfdbfe',
-                                                    fontWeight: '700'
-                                                }}
-                                            >
-                                                🖨 Print Replacement Label
-                                            </button>
-                                            <button onClick={handleChangeLMDDamaged} style={btnSecondary}>
-                                                Change LMD Partner
-                                            </button>
-                                            <button onClick={handleConfirmDispatchDamaged} style={btnPrimary}>
-                                                Confirm Dispatch
-                                            </button>
-                                            <button onClick={handleClearDamagedScan} style={btnDanger}>
-                                                Clear
-                                            </button>
-                                        </div>
+                                    {/* Recent Scans Table */}
+                                    <div style={card}>
+                                        <div style={label}>Recent Damaged Scans History</div>
+                                        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px', textAlign: 'left' }}>
+                                            <thead>
+                                                <tr style={{ borderBottom: '2px solid #e5e7eb' }}>
+                                                    {['Status', 'Skynet Tracking no.', 'Temu Barcode', 'Consignee', 'LMD Partner', 'Zone', 'City'].map(h => (
+                                                        <th key={h} style={{ padding: '10px 8px', color: '#6b7280', fontWeight: '600', fontSize: '12px', textTransform: 'uppercase', letterSpacing: '0.4px' }}>{h}</th>
+                                                    ))}
+                                                </tr>
+                                            </thead>
+                                            <tbody>
+                                                {damagedHistory.map((item, idx) => {
+                                                    const isLatest = idx === 0;
+                                                    return (
+                                                        <tr key={idx} style={{ borderBottom: '1px solid #f3f4f6', backgroundColor: isLatest ? '#fff1f2' : 'transparent' }}>
+                                                            <td style={{ padding: '10px 8px' }}>
+                                                                {isLatest ? (
+                                                                    <span style={{ backgroundColor: '#e21b22', color: '#ffffff', padding: '2px 6px', borderRadius: '4px', fontSize: '10px', fontWeight: 'bold' }}>
+                                                                        Current
+                                                                    </span>
+                                                                ) : (
+                                                                    <span style={{ color: '#9ca3af', fontSize: '11px' }}>
+                                                                        Scanned
+                                                                    </span>
+                                                                )}
+                                                            </td>
+                                                            <td style={{ padding: '10px 8px', fontWeight: '600', color: '#dc2626' }}>{item.parcel?.trackingNumber}</td>
+                                                            <td style={{ padding: '10px 8px', fontWeight: '500', color: '#111827' }}>{item.parcel?.senderReference}</td>
+                                                            <td style={{ padding: '10px 8px', color: '#374151' }}>{item.parcel?.recipientName}</td>
+                                                            <td style={{ padding: '10px 8px' }}>
+                                                                <span style={{
+                                                                    backgroundColor: item.assignedPartner === 'PickMe'
+                                                                        ? '#ffcc00'
+                                                                        : item.assignedPartner === 'Domex'
+                                                                            ? '#7b0f1a'
+                                                                            : '#ea580c',
+                                                                    color: item.assignedPartner === 'PickMe' ? '#000000' : '#ffffff',
+                                                                    padding: '3px 8px',
+                                                                    borderRadius: '4px',
+                                                                    fontWeight: '700',
+                                                                    fontSize: '11px',
+                                                                    textTransform: 'uppercase'
+                                                                }}>
+                                                                    {item.assignedPartner}
+                                                                </span>
+                                                            </td>
+                                                            <td style={{ padding: '10px 8px', color: '#374151' }}>{item.assignedZone}</td>
+                                                            <td style={{ padding: '10px 8px', color: '#6b7280' }}>{item.parcel?.city}</td>
+                                                        </tr>
+                                                    );
+                                                })}
+                                                {damagedHistory.length === 0 && (
+                                                    <tr><td colSpan={7} style={{ padding: '24px 8px', textAlign: 'center', color: '#9ca3af' }}>No scans in this session.</td></tr>
+                                                )}
+                                            </tbody>
+                                        </table>
                                     </div>
-                                    {parcelDetailsGrid(damagedCurrentScan.parcel)}
                                 </div>
                             )}
 
-                            {/* Recent Scans Table */}
-                            <div style={card}>
-                                <div style={label}>Recent Damaged Scans History</div>
-                                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px', textAlign: 'left' }}>
-                                    <thead>
-                                        <tr style={{ borderBottom: '2px solid #e5e7eb' }}>
-                                            {['Status', 'Skynet Tracking no.', 'Temu Barcode', 'Consignee', 'LMD Partner', 'Zone', 'City'].map(h => (
-                                                <th key={h} style={{ padding: '10px 8px', color: '#6b7280', fontWeight: '600', fontSize: '12px', textTransform: 'uppercase', letterSpacing: '0.4px' }}>{h}</th>
-                                            ))}
-                                        </tr>
-                                    </thead>
-                                    <tbody>
-                                        {damagedHistory.map((item, idx) => {
-                                            const isLatest = idx === 0;
-                                            return (
-                                                <tr key={idx} style={{ borderBottom: '1px solid #f3f4f6', backgroundColor: isLatest ? '#fff1f2' : 'transparent' }}>
-                                                    <td style={{ padding: '10px 8px' }}>
-                                                        {isLatest ? (
-                                                            <span style={{ backgroundColor: '#e21b22', color: '#ffffff', padding: '2px 6px', borderRadius: '4px', fontSize: '10px', fontWeight: 'bold' }}>
-                                                                Current
-                                                            </span>
-                                                        ) : (
-                                                            <span style={{ color: '#9ca3af', fontSize: '11px' }}>
-                                                                Scanned
-                                                            </span>
-                                                        )}
-                                                    </td>
-                                                    <td style={{ padding: '10px 8px', fontWeight: '600', color: '#dc2626' }}>{item.parcel?.trackingNumber}</td>
-                                                    <td style={{ padding: '10px 8px', fontWeight: '500', color: '#111827' }}>{item.parcel?.senderReference}</td>
-                                                    <td style={{ padding: '10px 8px', color: '#374151' }}>{item.parcel?.recipientName}</td>
-                                                    <td style={{ padding: '10px 8px' }}>
-                                                        <span style={{
-                                                            backgroundColor: item.assignedPartner === 'PickMe'
-                                                                ? '#ffcc00'
-                                                                : item.assignedPartner === 'Domex'
-                                                                    ? '#7b0f1a'
-                                                                    : '#ea580c',
-                                                            color: item.assignedPartner === 'PickMe' ? '#000000' : '#ffffff',
-                                                            padding: '3px 8px',
-                                                            borderRadius: '4px',
-                                                            fontWeight: '700',
-                                                            fontSize: '11px',
-                                                            textTransform: 'uppercase'
-                                                        }}>
-                                                            {item.assignedPartner}
-                                                        </span>
-                                                    </td>
-                                                    <td style={{ padding: '10px 8px', color: '#374151' }}>{item.assignedZone}</td>
-                                                    <td style={{ padding: '10px 8px', color: '#6b7280' }}>{item.parcel?.city}</td>
-                                                </tr>
-                                            );
-                                        })}
-                                        {damagedHistory.length === 0 && (
-                                            <tr><td colSpan={7} style={{ padding: '24px 8px', textAlign: 'center', color: '#9ca3af' }}>No scans in this session.</td></tr>
+                            {/* ── SUB-TAB 2: DAMAGED PARCELS (WHITE THEME) ── */}
+                            {damagedSubTab === 'parcels' && (
+                                <div>
+                                    <div style={{ ...card, border: '1px solid #e5e7eb', backgroundColor: '#ffffff', boxShadow: '0 2px 8px rgba(0,0,0,0.04)' }}>
+                                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px', borderBottom: '1px solid #f3f4f6', paddingBottom: '16px' }}>
+                                            <div>
+                                                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+
+                                                    <h3 style={{ margin: 0, fontSize: '18px', color: '#111827', fontWeight: '800' }}>
+                                                        Damaged Parcels Photo Submission Section
+                                                    </h3>
+
+                                                </div>
+                                                <p style={{ margin: '4px 0 0 0', fontSize: '13px', color: '#6b7280' }}>
+                                                    Record damaged parcel details and attach 2 required images (Parcel condition & Label condition) for claim verification and system database storage.
+                                                </p>
+                                            </div>
+                                            <button
+                                                onClick={() => {
+                                                    setDamagedReportFormOpen(!damagedReportFormOpen);
+                                                    setDamagedSubmitError(null);
+                                                    setDamagedSubmitSuccess(null);
+                                                }}
+                                                style={{
+                                                    ...btnPrimary,
+                                                    backgroundColor: damagedReportFormOpen ? '#4b5563' : '#dc2626',
+                                                    display: 'flex',
+                                                    alignItems: 'center',
+                                                    gap: '6px',
+                                                    fontWeight: '700',
+                                                    padding: '10px 20px',
+                                                    boxShadow: '0 2px 4px rgba(0,0,0,0.1)'
+                                                }}
+                                            >
+                                                {damagedReportFormOpen ? '✖ Close Form' : 'Submit Damaged Parcel'}
+                                            </button>
+                                        </div>
+
+                                        {damagedSubmitSuccess && (
+                                            <div style={{ backgroundColor: '#f0fdf4', border: '1px solid #86efac', color: '#166534', padding: '12px 16px', borderRadius: '8px', marginBottom: '16px', fontSize: '13px', fontWeight: '700', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                                ✅ {damagedSubmitSuccess}
+                                            </div>
                                         )}
-                                    </tbody>
-                                </table>
-                            </div>
+
+                                        {/* DAMAGED PARCEL REPORT FORM CARD (WHITE THEME) */}
+                                        {damagedReportFormOpen && (
+                                            <form onSubmit={handleSubmitDamagedParcelReport} style={{ backgroundColor: '#ffffff', border: '1px solid #e5e7eb', borderRadius: '12px', padding: '24px', marginBottom: '24px', boxShadow: '0 4px 12px rgba(0,0,0,0.04)' }}>
+
+                                                {damagedSubmitError && (
+                                                    <div style={{ backgroundColor: '#fef2f2', border: '1px solid #fca5a5', color: '#dc2626', padding: '10px 14px', borderRadius: '6px', marginBottom: '16px', fontSize: '13px', fontWeight: '600' }}>
+                                                        ⚠️ {damagedSubmitError}
+                                                    </div>
+                                                )}
+
+                                                {/* Target Parcel Info Banner (White / Gray theme) */}
+                                                <div style={{ backgroundColor: '#f9fafb', border: '1px solid #e5e7eb', borderRadius: '8px', padding: '14px 18px', marginBottom: '20px' }}>
+                                                    <div style={{ fontSize: '11px', fontWeight: '800', color: '#374151', textTransform: 'uppercase', marginBottom: '6px' }}>
+                                                        Selected Parcel to Report:
+                                                    </div>
+                                                    {damagedCurrentScan?.parcel ? (
+                                                        <div style={{ display: 'flex', gap: '24px', flexWrap: 'wrap', fontSize: '13px', color: '#111827' }}>
+                                                            <div><strong>Tracking:</strong> <span style={{ color: '#dc2626', fontWeight: '800' }}>{damagedCurrentScan.parcel.trackingNumber}</span></div>
+                                                            {damagedCurrentScan.parcel.senderReference && <div><strong>Temu Barcode:</strong> {damagedCurrentScan.parcel.senderReference}</div>}
+                                                            {damagedCurrentScan.parcel.mawbRef && <div><strong>MAWB:</strong> {damagedCurrentScan.parcel.mawbRef}</div>}
+                                                            {damagedCurrentScan.assignedPartner && <div><strong>Partner:</strong> <span style={{ fontWeight: '700' }}>{damagedCurrentScan.assignedPartner}</span></div>}
+                                                        </div>
+                                                    ) : (
+                                                        <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                                                            <div style={{ fontSize: '12px', color: '#6b7280' }}>No barcode currently active in scanner. Enter tracking number manually below:</div>
+                                                            <input
+                                                                type="text"
+                                                                value={damagedManualTracking}
+                                                                onChange={(e) => setDamagedManualTracking(e.target.value)}
+                                                                placeholder="Enter Skynet Tracking Number (e.g. SKY-998822)..."
+                                                                style={{ ...inputStyle, maxWidth: '400px' }}
+                                                            />
+                                                        </div>
+                                                    )}
+                                                </div>
+
+                                                {/* Damage Category & Severity Selection */}
+                                                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '18px', marginBottom: '20px' }}>
+                                                    <div>
+                                                        <label style={{ ...label, marginBottom: '6px' }}>Damage Category *</label>
+                                                        <select
+                                                            value={damagedReportCategory}
+                                                            onChange={(e) => setDamagedReportCategory(e.target.value)}
+                                                            style={{ ...inputStyle, width: '100%', cursor: 'pointer', backgroundColor: '#ffffff' }}
+                                                        >
+                                                            <option value="Packaging Crushed / Torn">Packaging Crushed / Torn</option>
+                                                            <option value="Water / Liquid Damage">Water / Liquid Damage</option>
+                                                            <option value="Barcode / Label Unreadable">Barcode / Label Unreadable</option>
+                                                            <option value="Contents Exposed / Damaged">Contents Exposed / Damaged</option>
+                                                            <option value="Tampered Tape / Open">Tampered Tape / Open Package</option>
+                                                        </select>
+                                                    </div>
+
+                                                    <div>
+                                                        <label style={{ ...label, marginBottom: '6px' }}>Severity Level *</label>
+                                                        <select
+                                                            value={damagedReportSeverity}
+                                                            onChange={(e) => setDamagedReportSeverity(e.target.value)}
+                                                            style={{ ...inputStyle, width: '100%', cursor: 'pointer', backgroundColor: '#ffffff' }}
+                                                        >
+                                                            <option value="Minor">Minor (Packaging Scratched / Light Dent)</option>
+                                                            <option value="Moderate">Moderate (Box Crushed / Partial Label Damage)</option>
+                                                            <option value="Severe / Total Loss">Severe / Total Loss (Contents Destroyed)</option>
+                                                        </select>
+                                                    </div>
+                                                </div>
+
+                                                {/* DUAL IMAGE UPLOADS CONTAINER (WHITE THEME) */}
+                                                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '18px', marginBottom: '20px' }}>
+
+                                                    {/* IMAGE 1: PARCEL CONDITION */}
+                                                    <div style={{ border: damagedImage1 ? '2px solid #22c55e' : '2px dashed #cbd5e1', borderRadius: '12px', padding: '18px', backgroundColor: damagedImage1 ? '#f0fdf4' : '#f8fafc', textAlign: 'center', transition: 'all 0.2s' }}>
+                                                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
+                                                            <span style={{ fontSize: '13px', fontWeight: '800', color: damagedImage1 ? '#15803d' : '#111827' }}>
+                                                                Photo 1: Parcel Box Condition *
+                                                            </span>
+                                                            {damagedImage1 ? (
+                                                                <span style={{ backgroundColor: '#22c55e', color: '#ffffff', fontSize: '10.5px', fontWeight: '800', padding: '2px 8px', borderRadius: '4px' }}>
+                                                                    Uploaded
+                                                                </span>
+                                                            ) : (
+                                                                <span style={{ backgroundColor: '#ef4444', color: '#ffffff', fontSize: '10.5px', fontWeight: '800', padding: '2px 8px', borderRadius: '4px' }}>
+                                                                    Required
+                                                                </span>
+                                                            )}
+                                                        </div>
+
+                                                        {damagedImage1 ? (
+                                                            <div style={{ position: 'relative', display: 'inline-block', width: '100%' }}>
+                                                                <img
+                                                                    src={damagedImage1}
+                                                                    alt="Parcel Condition"
+                                                                    style={{ width: '100%', maxHeight: '200px', objectFit: 'cover', borderRadius: '8px', border: '1px solid #bbf7d0', boxShadow: '0 2px 6px rgba(0,0,0,0.08)' }}
+                                                                />
+                                                                <button
+                                                                    type="button"
+                                                                    onClick={() => setDamagedImage1(null)}
+                                                                    style={{ position: 'absolute', top: '8px', right: '8px', backgroundColor: '#dc2626', color: '#ffffff', border: 'none', borderRadius: '50%', width: '28px', height: '28px', fontSize: '13px', cursor: 'pointer', fontWeight: 'bold' }}
+                                                                    title="Remove image"
+                                                                >
+                                                                    ✕
+                                                                </button>
+                                                            </div>
+                                                        ) : (
+                                                            <label style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '150px', border: '1px dashed #cbd5e1', borderRadius: '8px', cursor: 'pointer', backgroundColor: '#ffffff', transition: 'background-color 0.2s' }}>
+
+                                                                <span style={{ fontSize: '13px', fontWeight: '700', color: '#1e293b' }}>Upload / Take Photo 1</span>
+                                                                <span style={{ fontSize: '11.5px', color: '#64748b', marginTop: '2px' }}>Front / Box Damage Condition</span>
+                                                                <input
+                                                                    type="file"
+                                                                    accept="image/*"
+                                                                    capture="environment"
+                                                                    onChange={(e) => handleDamagedImageUpload(e, 1)}
+                                                                    style={{ display: 'none' }}
+                                                                />
+                                                            </label>
+                                                        )}
+                                                    </div>
+
+                                                    {/* IMAGE 2: LABEL / BARCODE CONDITION */}
+                                                    <div style={{ border: damagedImage2 ? '2px solid #22c55e' : '2px dashed #cbd5e1', borderRadius: '12px', padding: '18px', backgroundColor: damagedImage2 ? '#f0fdf4' : '#f8fafc', textAlign: 'center', transition: 'all 0.2s' }}>
+                                                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
+                                                            <span style={{ fontSize: '13px', fontWeight: '800', color: damagedImage2 ? '#15803d' : '#111827' }}>
+                                                                Photo 2: Shipping Label / Barcode *
+                                                            </span>
+                                                            {damagedImage2 ? (
+                                                                <span style={{ backgroundColor: '#22c55e', color: '#ffffff', fontSize: '10.5px', fontWeight: '800', padding: '2px 8px', borderRadius: '4px' }}>
+                                                                    Uploaded
+                                                                </span>
+                                                            ) : (
+                                                                <span style={{ backgroundColor: '#ef4444', color: '#ffffff', fontSize: '10.5px', fontWeight: '800', padding: '2px 8px', borderRadius: '4px' }}>
+                                                                    Required
+                                                                </span>
+                                                            )}
+                                                        </div>
+
+                                                        {damagedImage2 ? (
+                                                            <div style={{ position: 'relative', display: 'inline-block', width: '100%' }}>
+                                                                <img
+                                                                    src={damagedImage2}
+                                                                    alt="Label Condition"
+                                                                    style={{ width: '100%', maxHeight: '200px', objectFit: 'cover', borderRadius: '8px', border: '1px solid #bbf7d0', boxShadow: '0 2px 6px rgba(0,0,0,0.08)' }}
+                                                                />
+                                                                <button
+                                                                    type="button"
+                                                                    onClick={() => setDamagedImage2(null)}
+                                                                    style={{ position: 'absolute', top: '8px', right: '8px', backgroundColor: '#dc2626', color: '#ffffff', border: 'none', borderRadius: '50%', width: '28px', height: '28px', fontSize: '13px', cursor: 'pointer', fontWeight: 'bold' }}
+                                                                    title="Remove image"
+                                                                >
+                                                                    ✕
+                                                                </button>
+                                                            </div>
+                                                        ) : (
+                                                            <label style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '150px', border: '1px dashed #cbd5e1', borderRadius: '8px', cursor: 'pointer', backgroundColor: '#ffffff', transition: 'background-color 0.2s' }}>
+
+                                                                <span style={{ fontSize: '13px', fontWeight: '700', color: '#1e293b' }}>Upload / Take Photo 2</span>
+                                                                <span style={{ fontSize: '11.5px', color: '#64748b', marginTop: '2px' }}>Label / Barcode Condition</span>
+                                                                <input
+                                                                    type="file"
+                                                                    accept="image/*"
+                                                                    capture="environment"
+                                                                    onChange={(e) => handleDamagedImageUpload(e, 2)}
+                                                                    style={{ display: 'none' }}
+                                                                />
+                                                            </label>
+                                                        )}
+                                                    </div>
+
+                                                </div>
+
+                                                {/* Remarks Textarea */}
+                                                <div style={{ marginBottom: '20px' }}>
+                                                    <label style={{ ...label, marginBottom: '6px' }}>Damage Remarks & Notes</label>
+                                                    <textarea
+                                                        value={damagedReportRemarks}
+                                                        onChange={(e) => setDamagedReportRemarks(e.target.value)}
+                                                        rows={2}
+                                                        placeholder="Provide extra details on damage condition, missing contents, or warehouse notes..."
+                                                        style={{ ...inputStyle, width: '100%', resize: 'vertical' }}
+                                                    />
+                                                </div>
+
+                                                {/* Form Actions */}
+                                                <div style={{ display: 'flex', gap: '10px', justifyContent: 'flex-end' }}>
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => setDamagedReportFormOpen(false)}
+                                                        style={btnSecondary}
+                                                    >
+                                                        Cancel
+                                                    </button>
+                                                    <button
+                                                        type="submit"
+                                                        disabled={damagedSubmitting}
+                                                        style={{
+                                                            ...btnPrimary,
+                                                            backgroundColor: '#dc2626',
+                                                            fontWeight: '700',
+                                                            padding: '10px 24px',
+                                                            opacity: damagedSubmitting ? 0.7 : 1
+                                                        }}
+                                                    >
+                                                        {damagedSubmitting ? 'Saving Report & Photos...' : 'Submit Damaged Parcel Report'}
+                                                    </button>
+                                                </div>
+                                            </form>
+                                        )}
+
+                                        {/* SUBMITTED DAMAGED PARCELS LOG & GALLERY TABLE (WHITE THEME) */}
+                                        <div>
+                                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px' }}>
+                                                <div style={{ fontSize: '14px', fontWeight: '800', color: '#111827' }}>
+                                                    Submitted Damaged Parcels Registry ({damagedReportsList.length})
+                                                </div>
+                                                <button
+                                                    onClick={fetchDamagedParcels}
+                                                    style={{ background: 'none', border: 'none', color: '#2563eb', fontSize: '12.5px', fontWeight: '700', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '4px' }}
+                                                >
+                                                    Refresh
+                                                </button>
+                                            </div>
+
+                                            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px', textAlign: 'left' }}>
+                                                <thead>
+                                                    <tr style={{ borderBottom: '2px solid #e5e7eb', backgroundColor: '#f9fafb' }}>
+                                                        {['Date / Time', 'Tracking Number', 'Damage Category', 'Severity', 'Attached Photos', 'LMD Partner / Zone', 'Status', 'Action'].map(h => (
+                                                            <th key={h} style={{ padding: '12px 10px', color: '#374151', fontWeight: '700', fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.4px' }}>{h}</th>
+                                                        ))}
+                                                    </tr>
+                                                </thead>
+                                                <tbody>
+                                                    {damagedReportsList.map((item, idx) => {
+                                                        const d = new Date(item.createdAt);
+                                                        const dateStr = !isNaN(d.getTime()) ? d.toLocaleString('en-GB', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }) : item.createdAt;
+
+                                                        return (
+                                                            <tr key={item.id || idx} style={{ borderBottom: '1px solid #f3f4f6', backgroundColor: idx % 2 === 0 ? '#ffffff' : '#f9fafb' }}>
+                                                                <td style={{ padding: '12px 10px', color: '#6b7280', fontSize: '12px' }}>{dateStr}</td>
+                                                                <td style={{ padding: '12px 10px' }}>
+                                                                    <div style={{ fontWeight: '700', color: '#dc2626' }}>{item.trackingNumber}</div>
+                                                                    {item.temuBarcode && <div style={{ fontSize: '11px', color: '#6b7280' }}>Temu: {item.temuBarcode}</div>}
+                                                                </td>
+                                                                <td style={{ padding: '12px 10px', fontWeight: '600', color: '#111827' }}>
+                                                                    {item.damageType}
+                                                                    {item.remarks && <div style={{ fontSize: '11px', color: '#6b7280', fontStyle: 'italic' }}>"{item.remarks}"</div>}
+                                                                </td>
+                                                                <td style={{ padding: '12px 10px' }}>
+                                                                    <span style={{
+                                                                        backgroundColor: '#ffffff',
+                                                                        color: '#000000',
+                                                                        border: '1px solid #dc2626',
+                                                                        padding: '3px 8px',
+                                                                        borderRadius: '4px',
+                                                                        fontWeight: '700',
+                                                                        fontSize: '11px'
+                                                                    }}>
+                                                                        {item.severity}
+                                                                    </span>
+                                                                </td>
+                                                                <td style={{ padding: '12px 10px' }}>
+                                                                    <div style={{ display: 'flex', gap: '6px' }}>
+                                                                        {item.imageUrl1 && (
+                                                                            <img
+                                                                                src={item.imageUrl1}
+                                                                                alt="Photo 1"
+                                                                                onClick={() => setDamagedSelectedPhotosModal(item)}
+                                                                                style={{ width: '38px', height: '38px', objectFit: 'cover', borderRadius: '4px', border: '1px solid #d1d5db', cursor: 'pointer' }}
+                                                                                title="Click to expand Photo 1"
+                                                                            />
+                                                                        )}
+                                                                        {item.imageUrl2 && (
+                                                                            <img
+                                                                                src={item.imageUrl2}
+                                                                                alt="Photo 2"
+                                                                                onClick={() => setDamagedSelectedPhotosModal(item)}
+                                                                                style={{ width: '38px', height: '38px', objectFit: 'cover', borderRadius: '4px', border: '1px solid #d1d5db', cursor: 'pointer' }}
+                                                                                title="Click to expand Photo 2"
+                                                                            />
+                                                                        )}
+                                                                    </div>
+                                                                </td>
+                                                                <td style={{ padding: '12px 10px', fontSize: '12px', color: '#374151' }}>
+                                                                    {item.assignedPartner || '—'} {item.assignedZone ? `(${item.assignedZone})` : ''}
+                                                                </td>
+                                                                <td style={{ padding: '12px 10px' }}>
+                                                                    <span style={{ backgroundColor: '#ffffff', color: '#000000', border: '1px solid #dc2626', padding: '3px 8px', borderRadius: '4px', fontSize: '11px', fontWeight: '700' }}>
+                                                                        {item.status || 'REPORTED'}
+                                                                    </span>
+                                                                </td>
+                                                                <td style={{ padding: '12px 10px' }}>
+                                                                    <button
+                                                                        onClick={() => setDamagedSelectedPhotosModal(item)}
+                                                                        style={{ backgroundColor: '#ffffff', border: '1px solid #d1d5db', color: '#374151', padding: '5px 12px', borderRadius: '6px', fontSize: '11.5px', fontWeight: '700', cursor: 'pointer', boxShadow: '0 1px 2px rgba(0,0,0,0.04)' }}
+                                                                    >
+                                                                        View Photos
+                                                                    </button>
+                                                                </td>
+                                                            </tr>
+                                                        );
+                                                    })}
+                                                    {damagedReportsList.length === 0 && (
+                                                        <tr>
+                                                            <td colSpan={8} style={{ padding: '28px 8px', textAlign: 'center', color: '#9ca3af', fontSize: '13px' }}>
+                                                                No damaged parcel reports submitted yet. Click "+ Submit Damaged Parcel" above to record one.
+                                                            </td>
+                                                        </tr>
+                                                    )}
+                                                </tbody>
+                                            </table>
+                                        </div>
+                                    </div>
+                                </div>
+                            )}
                         </div>
                     )}
 
@@ -5092,865 +5669,1093 @@ export default function WorkstationDashboard() {
                                     <div style={{ display: 'inline-block', width: '24px', height: '24px', border: '3px solid #e5e7eb', borderTopColor: '#111827', borderRadius: '50%', animation: 'spin 0.8s linear infinite', marginBottom: '12px' }} />
                                     <div>Loading Real-Time Operational Metrics...</div>
                                 </div>
-                            ) : dashboardData ? (
-                                <>
-                                    {/* KPI Cards — only for Parcel Operations view */}
-                                    {dashboardSubTab !== 'productivity' && (
-                                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(6, 1fr)', gap: '12px' }}>
-                                            {/* Card 1: Total Received */}
-                                            <div
-                                                onClick={() => setDashboardSubTab('total_received')}
-                                                onMouseOver={(e) => { e.currentTarget.style.outline = '2px solid #e21b22'; e.currentTarget.style.outlineOffset = '-2px'; }}
-                                                onMouseOut={(e) => { e.currentTarget.style.outline = 'none'; }}
-                                                style={{
-                                                    backgroundColor: '#ffffff',
-                                                    border: dashboardSubTab === 'total_received' ? '2px solid #e21b22' : '1px solid #e5e7eb',
-                                                    borderRadius: '10px',
-                                                    padding: '14px 10px',
-                                                    textAlign: 'center',
-                                                    boxShadow: dashboardSubTab === 'total_received' ? '0 4px 12px rgba(226, 27, 34, 0.15)' : '0 1px 3px rgba(0,0,0,0.05)',
-                                                    cursor: 'pointer',
-                                                    transition: 'all 0.15s ease-in-out',
-                                                    transform: dashboardSubTab === 'total_received' ? 'translateY(-2px)' : 'none'
-                                                }}
-                                            >
-                                                <div style={{ fontSize: '10px', fontWeight: '700', color: dashboardSubTab === 'total_received' ? '#e21b22' : '#6b7280', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Total Received</div>
-                                                <div style={{ fontSize: '26px', fontWeight: '800', color: '#111827', marginTop: '4px' }}>{dashboardData.totalReceived}</div>
-                                                <div style={{ fontSize: '11px', color: '#6b7280', marginTop: '4px' }}>Parcels Inbound</div>
-                                            </div>
+                            ) : dashboardData ? (() => {
+                                // 1. Calculate unique MAWBs list across mawb table, manifests, shipments, and bags
+                                const isUuid = (val: string) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(val);
+                                const isValidMawbRef = (ref: any) => {
+                                    if (!ref || typeof ref !== 'string') return false;
+                                    const clean = ref.trim();
+                                    if (clean === '' || clean === '-' || clean.toUpperCase() === 'N/A' || clean.startsWith('MNF-')) return false;
+                                    if (isUuid(clean)) return false;
+                                    return true;
+                                };
 
-                                            {/* Card 2: Parcels Sorted */}
-                                            <div
-                                                onClick={() => setDashboardSubTab('parcels_sorted')}
-                                                onMouseOver={(e) => { e.currentTarget.style.outline = '2px solid #e21b22'; e.currentTarget.style.outlineOffset = '-2px'; }}
-                                                onMouseOut={(e) => { e.currentTarget.style.outline = 'none'; }}
-                                                style={{
-                                                    backgroundColor: '#ffffff',
-                                                    border: dashboardSubTab === 'parcels_sorted' ? '2px solid #e21b22' : '1px solid #e5e7eb',
-                                                    borderRadius: '10px',
-                                                    padding: '14px 10px',
-                                                    textAlign: 'center',
-                                                    boxShadow: dashboardSubTab === 'parcels_sorted' ? '0 4px 12px rgba(226, 27, 34, 0.15)' : '0 1px 3px rgba(0,0,0,0.05)',
-                                                    cursor: 'pointer',
-                                                    transition: 'all 0.15s ease-in-out',
-                                                    transform: dashboardSubTab === 'parcels_sorted' ? 'translateY(-2px)' : 'none'
-                                                }}
-                                            >
-                                                <div style={{ fontSize: '10px', fontWeight: '700', color: dashboardSubTab === 'parcels_sorted' ? '#e21b22' : '#6b7280', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Parcels Sorted</div>
-                                                <div style={{ fontSize: '26px', fontWeight: '800', color: '#111827', marginTop: '4px' }}>{dashboardData.totalSorted}</div>
-                                                <div style={{ fontSize: '11px', color: '#6b7280', marginTop: '4px' }}>Allocated in Bags</div>
-                                            </div>
+                                const availableMawbsSet = new Set<string>();
+                                (dashboardData.mawbTableList || []).forEach((m: any) => {
+                                    if (isValidMawbRef(m.mawbReference)) availableMawbsSet.add(m.mawbReference.trim());
+                                });
+                                (dashboardData.receivedParcels || []).forEach((p: any) => {
+                                    if (isValidMawbRef(p.mawbReference)) availableMawbsSet.add(p.mawbReference.trim());
+                                });
+                                (dashboardData.manifestsList || []).forEach((m: any) => {
+                                    if (isValidMawbRef(m.mawbRef)) availableMawbsSet.add(m.mawbRef.trim());
+                                });
+                                (dashboardData.bagsList || []).forEach((b: any) => {
+                                    if (isValidMawbRef(b.mawbRef)) availableMawbsSet.add(b.mawbRef.trim());
+                                });
+                                const availableMawbsList = Array.from(availableMawbsSet).sort();
 
-                                            {/* Card 3: Pending Parcels */}
-                                            <div
-                                                onClick={() => setDashboardSubTab('pending_parcels')}
-                                                onMouseOver={(e) => { e.currentTarget.style.outline = '2px solid #e21b22'; e.currentTarget.style.outlineOffset = '-2px'; }}
-                                                onMouseOut={(e) => { e.currentTarget.style.outline = 'none'; }}
-                                                style={{
-                                                    backgroundColor: '#ffffff',
-                                                    border: dashboardSubTab === 'pending_parcels' ? '2px solid #e21b22' : '1px solid #e5e7eb',
-                                                    borderRadius: '10px',
-                                                    padding: '14px 10px',
-                                                    textAlign: 'center',
-                                                    boxShadow: dashboardSubTab === 'pending_parcels' ? '0 4px 12px rgba(226, 27, 34, 0.15)' : '0 1px 3px rgba(0,0,0,0.05)',
-                                                    cursor: 'pointer',
-                                                    transition: 'all 0.15s ease-in-out',
-                                                    transform: dashboardSubTab === 'pending_parcels' ? 'translateY(-2px)' : 'none'
-                                                }}
-                                            >
-                                                <div style={{ fontSize: '10px', fontWeight: '700', color: dashboardSubTab === 'pending_parcels' ? '#e21b22' : '#6b7280', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Pending Parcels</div>
-                                                <div style={{ fontSize: '26px', fontWeight: '800', color: '#111827', marginTop: '4px' }}>{dashboardData.pendingParcels}</div>
-                                                <div style={{ fontSize: '11px', color: '#6b7280', marginTop: '4px' }}>Awaiting Sorting</div>
-                                            </div>
+                                // 2. Filter datasets based on dashMawbFilter
+                                const activeMawb = dashMawbFilter;
 
-                                            {/* Card 4: Total Bags */}
-                                            <div
-                                                onClick={() => setDashboardSubTab('total_bags')}
-                                                onMouseOver={(e) => { e.currentTarget.style.outline = '2px solid #e21b22'; e.currentTarget.style.outlineOffset = '-2px'; }}
-                                                onMouseOut={(e) => { e.currentTarget.style.outline = 'none'; }}
-                                                style={{
-                                                    backgroundColor: '#ffffff',
-                                                    border: dashboardSubTab === 'total_bags' ? '2px solid #e21b22' : '1px solid #e5e7eb',
-                                                    borderRadius: '10px',
-                                                    padding: '14px 10px',
-                                                    textAlign: 'center',
-                                                    boxShadow: dashboardSubTab === 'total_bags' ? '0 4px 12px rgba(226, 27, 34, 0.15)' : '0 1px 3px rgba(0,0,0,0.05)',
-                                                    cursor: 'pointer',
-                                                    transition: 'all 0.15s ease-in-out',
-                                                    transform: dashboardSubTab === 'total_bags' ? 'translateY(-2px)' : 'none'
-                                                }}
-                                            >
-                                                <div style={{ fontSize: '10px', fontWeight: '700', color: dashboardSubTab === 'total_bags' ? '#e21b22' : '#6b7280', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Total Bags</div>
-                                                <div style={{ fontSize: '26px', fontWeight: '800', color: '#111827', marginTop: '4px' }}>{dashboardData.totalBagsCreated}</div>
-                                                <div style={{ fontSize: '10px', color: '#4b5563', marginTop: '4px', display: 'flex', justifyContent: 'center', gap: '4px' }}>
-                                                    <span style={{ color: '#166534', fontWeight: '700' }}>{dashboardData.openBags} Open</span> •
-                                                    <span style={{ color: '#dc2626', fontWeight: '700' }}>{dashboardData.sealedBags} Sealed</span>
-                                                </div>
-                                            </div>
+                                const filteredParcels = (dashboardData.receivedParcels || []).filter((p: any) => {
+                                    if (activeMawb !== 'ALL' && String(p.mawbReference || '').toUpperCase() !== activeMawb.toUpperCase()) return false;
+                                    return true;
+                                });
+                                const totalRec = filteredParcels.length;
+                                const totalSort = filteredParcels.filter((p: any) => p.isSorted).length;
+                                const pendingParc = totalRec - totalSort;
 
-                                            {/* Card 5: Manifests */}
-                                            <div
-                                                onClick={() => setDashboardSubTab('manifests')}
-                                                onMouseOver={(e) => { e.currentTarget.style.outline = '2px solid #e21b22'; e.currentTarget.style.outlineOffset = '-2px'; }}
-                                                onMouseOut={(e) => { e.currentTarget.style.outline = 'none'; }}
-                                                style={{
-                                                    backgroundColor: '#ffffff',
-                                                    border: dashboardSubTab === 'manifests' ? '2px solid #e21b22' : '1px solid #e5e7eb',
-                                                    borderRadius: '10px',
-                                                    padding: '14px 10px',
-                                                    textAlign: 'center',
-                                                    boxShadow: dashboardSubTab === 'manifests' ? '0 4px 12px rgba(226, 27, 34, 0.15)' : '0 1px 3px rgba(0,0,0,0.05)',
-                                                    cursor: 'pointer',
-                                                    transition: 'all 0.15s ease-in-out',
-                                                    transform: dashboardSubTab === 'manifests' ? 'translateY(-2px)' : 'none'
-                                                }}
-                                            >
-                                                <div style={{ fontSize: '10px', fontWeight: '700', color: dashboardSubTab === 'manifests' ? '#e21b22' : '#6b7280', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Manifests</div>
-                                                <div style={{ fontSize: '26px', fontWeight: '800', color: '#111827', marginTop: '4px' }}>{dashboardData.totalManifests}</div>
-                                                <div style={{ fontSize: '10px', color: '#4b5563', marginTop: '4px', display: 'flex', justifyContent: 'center', gap: '4px' }}>
-                                                    <span style={{ color: '#166534', fontWeight: '700' }}>{dashboardData.openManifests} Open</span> •
-                                                    <span style={{ color: '#dc2626', fontWeight: '700' }}>{dashboardData.closedManifests} Closed</span>
-                                                </div>
-                                            </div>
+                                const filteredBags = (dashboardData.bagsList || []).filter((b: any) => {
+                                    if (activeMawb !== 'ALL' && String(b.mawbRef || '').toUpperCase() !== activeMawb.toUpperCase()) return false;
+                                    return true;
+                                });
+                                const totalBags = filteredBags.length;
+                                const openBags = filteredBags.filter((b: any) => b.status !== 'SEALED' && b.status !== 'CLOSED').length;
+                                const sealedBags = filteredBags.filter((b: any) => b.status === 'SEALED' || b.status === 'CLOSED').length;
 
-                                            {/* Card 6: Exceptions */}
-                                            <div
-                                                onClick={() => setDashboardSubTab('exceptions')}
-                                                onMouseOver={(e) => { e.currentTarget.style.outline = '2px solid #e21b22'; e.currentTarget.style.outlineOffset = '-2px'; }}
-                                                onMouseOut={(e) => { e.currentTarget.style.outline = 'none'; }}
-                                                style={{
-                                                    backgroundColor: '#ffffff',
-                                                    border: dashboardSubTab === 'exceptions' ? '2px solid #e21b22' : '1px solid #e5e7eb',
-                                                    borderRadius: '10px',
-                                                    padding: '14px 10px',
-                                                    textAlign: 'center',
-                                                    boxShadow: dashboardSubTab === 'exceptions' ? '0 4px 12px rgba(226, 27, 34, 0.15)' : '0 1px 3px rgba(0,0,0,0.05)',
-                                                    cursor: 'pointer',
-                                                    transition: 'all 0.15s ease-in-out',
-                                                    transform: dashboardSubTab === 'exceptions' ? 'translateY(-2px)' : 'none'
-                                                }}
-                                            >
-                                                <div style={{ fontSize: '10px', fontWeight: '700', color: dashboardSubTab === 'exceptions' ? '#e21b22' : '#6b7280', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Exceptions</div>
-                                                <div style={{ fontSize: '26px', fontWeight: '800', color: '#111827', marginTop: '4px' }}>
-                                                    {dashboardData.exceptions ? (dashboardData.exceptions.damagedLabelsCount + dashboardData.exceptions.discrepancyCount) : 0}
-                                                </div>
-                                                <div style={{ fontSize: '10px', color: '#6b7280', marginTop: '4px' }}>
-                                                    {dashboardData.exceptions?.damagedLabelsCount || 0} Damaged / {dashboardData.exceptions?.discrepancyCount || 0} Shortage
-                                                </div>
-                                            </div>
-                                        </div>
-                                    )}
+                                const filteredManifests = (dashboardData.manifestsList || []).filter((m: any) => {
+                                    if (activeMawb !== 'ALL' && String(m.mawbRef || m.manifestId || '').toUpperCase() !== activeMawb.toUpperCase()) return false;
+                                    return true;
+                                });
+                                const totalMan = filteredManifests.length;
+                                const openMan = filteredManifests.filter((m: any) => String(m.status).toUpperCase() !== 'CLOSED').length;
+                                const closedMan = filteredManifests.filter((m: any) => String(m.status).toUpperCase() === 'CLOSED').length;
 
-                                    {/* Parcel Operations Sub-Tabs Navigation Bar — hidden on User Productivity */}
-                                    {dashboardSubTab !== 'productivity' && (
-                                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '2px solid #e5e7eb', marginTop: '8px', gap: '12px' }}>
-                                            <div style={{ display: 'flex', gap: '12px', overflowX: 'auto', paddingBottom: '2px' }}>
-                                                {[
-                                                    { id: 'total_received', label: 'Total Received' },
-                                                    { id: 'parcels_sorted', label: 'Parcels Sorted' },
-                                                    { id: 'pending_parcels', label: 'Pending Parcels' },
-                                                    { id: 'total_bags', label: 'Bags & Sealed' },
-                                                    { id: 'manifests', label: 'Manifests' },
-                                                    { id: 'exceptions', label: 'Exceptions' },
-                                                    { id: 'partner', label: 'Courier Distribution' }
-                                                ].map(tab => (
-                                                    <button
-                                                        key={tab.id}
-                                                        onClick={() => setDashboardSubTab(tab.id as any)}
+                                const filteredExceptions = (dashboardData.exceptionsList || []).filter((e: any) => {
+                                    if (activeMawb !== 'ALL') {
+                                        const det = (e.details || '').toUpperCase();
+                                        const ref = (e.refNumber || '').toUpperCase();
+                                        if (!det.includes(activeMawb.toUpperCase()) && !ref.includes(activeMawb.toUpperCase())) return false;
+                                    }
+                                    return true;
+                                });
+                                const totalExc = filteredExceptions.length;
+
+                                const mawbParcelCounts: Record<string, number> = {};
+                                (dashboardData.receivedParcels || []).forEach((p: any) => {
+                                    if (isValidMawbRef(p.mawbReference)) {
+                                        const ref = p.mawbReference.trim();
+                                        mawbParcelCounts[ref] = (mawbParcelCounts[ref] || 0) + 1;
+                                    }
+                                });
+
+                                return (
+                                    <>
+                                        {/* Manifest (MAWB) View Selector Control Banner */}
+                                        {dashboardSubTab !== 'productivity' && (
+                                            <div style={{
+                                                display: 'flex',
+                                                justifyContent: 'space-between',
+                                                alignItems: 'center',
+                                                backgroundColor: '#ffffff',
+                                                padding: '12px 18px',
+                                                borderRadius: '10px',
+                                                border: '1px solid #cacccf',
+                                                boxShadow: '0 2px 6px rgba(0,0,0,0.04)',
+                                                flexWrap: 'wrap',
+                                                gap: '12px'
+                                            }}>
+                                                <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
+                                                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '13px', fontWeight: '700', color: '#111827' }}>
+                                                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#e21b22" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                                                            <path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z" />
+                                                            <polyline points="14 2 14 8 20 8" />
+                                                            <line x1="16" y1="13" x2="8" y2="13" />
+                                                            <line x1="16" y1="17" x2="8" y2="17" />
+                                                        </svg>
+                                                        Available Manifest (MAWB View):
+                                                    </div>
+                                                    <select
+                                                        value={dashMawbFilter}
+                                                        onChange={e => setDashMawbFilter(e.target.value)}
                                                         style={{
-                                                            padding: '10px 12px',
-                                                            fontSize: '12px',
+                                                            padding: '8px 14px',
+                                                            fontSize: '13px',
                                                             fontWeight: '700',
-                                                            border: 'none',
-                                                            borderBottom: dashboardSubTab === tab.id ? '3px solid #e21b22' : '3px solid transparent',
-                                                            marginBottom: '-2px',
+                                                            borderRadius: '6px',
+                                                            border: '1px solid #cacccf',
+                                                            //backgroundColor: '#fef2f2',
+                                                            color: '#111827',
+                                                            outline: 'none',
                                                             cursor: 'pointer',
-                                                            backgroundColor: 'transparent',
-                                                            color: dashboardSubTab === tab.id ? '#e21b22' : '#4b5563',
-                                                            whiteSpace: 'nowrap',
-                                                            transition: 'all 0.15s ease'
+                                                            minWidth: '260px'
                                                         }}
                                                     >
-                                                        {tab.label}
-                                                    </button>
-                                                ))}
+                                                        {availableMawbsList.map(mawb => (
+                                                            <option key={mawb} value={mawb}>
+                                                                Manifest: {mawb} ({mawbParcelCounts[mawb] || 0} Parcels)
+                                                            </option>
+                                                        ))}
+                                                    </select>
+                                                </div>
                                             </div>
-                                            <button
-                                                onClick={fetchDashboard}
-                                                disabled={isLoadingDashboard}
-                                                title="Refresh Metrics"
-                                                style={{
-                                                    display: 'inline-flex',
-                                                    alignItems: 'center',
-                                                    gap: '6px',
-                                                    backgroundColor: '#ffffff',
-                                                    border: '1px solid #d1d5db',
-                                                    borderRadius: '6px',
-                                                    padding: '6px 12px',
-                                                    fontSize: '12px',
-                                                    fontWeight: '600',
-                                                    color: '#374151',
-                                                    cursor: 'pointer',
-                                                    whiteSpace: 'nowrap',
-                                                    marginBottom: '4px',
-                                                    transition: 'all 0.15s ease'
-                                                }}
-                                                onMouseOver={(e) => { e.currentTarget.style.backgroundColor = '#f9fafb'; }}
-                                                onMouseOut={(e) => { e.currentTarget.style.backgroundColor = '#ffffff'; }}
-                                            >
-                                                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ animation: isLoadingDashboard ? 'spin 1s linear infinite' : 'none' }}>
-                                                    <polyline points="23 4 23 10 17 10" />
-                                                    <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10" />
-                                                </svg>
-                                                {isLoadingDashboard ? 'Refreshing...' : 'Refresh'}
-                                            </button>
-                                        </div>
-                                    )}
+                                        )}
 
-                                    {/* Universal Search & Filter Control Bar for Detail Views */}
-                                    {['total_received', 'parcels_sorted', 'pending_parcels', 'total_bags', 'exceptions'].includes(dashboardSubTab) && (
-                                        <div style={{ display: 'flex', gap: '16px', alignItems: 'center', backgroundColor: '#f9fafb', padding: '12px 16px', borderRadius: '8px', border: '1px solid #e5e7eb' }}>
-                                            <div style={{ flex: 1, minWidth: 0, position: 'relative' }}>
-                                                <input
-                                                    type="text"
-                                                    placeholder="Search by tracking number, barcode, bag #, MAWB, or location..."
-                                                    value={dashSearchQuery}
-                                                    onChange={e => setDashSearchQuery(e.target.value)}
-                                                    style={{ width: '100%', boxSizing: 'border-box', padding: '8px 12px', fontSize: '13px', borderRadius: '6px', border: '1px solid #d1d5db', outline: 'none' }}
-                                                />
-                                            </div>
-                                            {['total_received', 'parcels_sorted', 'pending_parcels', 'total_bags'].includes(dashboardSubTab) && (
-                                                <select
-                                                    value={dashPartnerFilter}
-                                                    onChange={e => setDashPartnerFilter(e.target.value)}
-                                                    style={{ flexShrink: 0, boxSizing: 'border-box', padding: '8px 12px', fontSize: '13px', borderRadius: '6px', border: '1px solid #d1d5db', backgroundColor: '#ffffff', minWidth: '150px' }}
+                                        {/* KPI Cards — only for Parcel Operations view */}
+                                        {dashboardSubTab !== 'productivity' && (
+                                            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(6, 1fr)', gap: '12px' }}>
+                                                {/* Card 1: Total Received */}
+                                                <div
+                                                    onClick={() => setDashboardSubTab('total_received')}
+                                                    onMouseOver={(e) => { e.currentTarget.style.outline = '2px solid #e21b22'; e.currentTarget.style.outlineOffset = '-2px'; }}
+                                                    onMouseOut={(e) => { e.currentTarget.style.outline = 'none'; }}
+                                                    style={{
+                                                        backgroundColor: '#ffffff',
+                                                        border: dashboardSubTab === 'total_received' ? '2px solid #e21b22' : '1px solid #e5e7eb',
+                                                        borderRadius: '10px',
+                                                        padding: '14px 10px',
+                                                        textAlign: 'center',
+                                                        boxShadow: dashboardSubTab === 'total_received' ? '0 4px 12px rgba(226, 27, 34, 0.15)' : '0 1px 3px rgba(0,0,0,0.05)',
+                                                        cursor: 'pointer',
+                                                        transition: 'all 0.15s ease-in-out',
+                                                        transform: dashboardSubTab === 'total_received' ? 'translateY(-2px)' : 'none'
+                                                    }}
                                                 >
-                                                    <option value="ALL">All Partners</option>
-                                                    <option value="PickMe">PickMe</option>
-                                                    <option value="Domex">Domex</option>
-                                                    <option value="Pronto">Pronto</option>
-                                                    <option value="Other">Other / General</option>
-                                                </select>
-                                            )}
-                                            {dashSearchQuery || dashPartnerFilter !== 'ALL' ? (
+                                                    <div style={{ fontSize: '10px', fontWeight: '700', color: dashboardSubTab === 'total_received' ? '#e21b22' : '#6b7280', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Total Received</div>
+                                                    <div style={{ fontSize: '26px', fontWeight: '800', color: '#111827', marginTop: '4px' }}>{totalRec}</div>
+                                                    <div style={{ fontSize: '11px', color: '#6b7280', marginTop: '4px' }}>Parcels Inbound</div>
+                                                </div>
+
+                                                {/* Card 2: Parcels Sorted */}
+                                                <div
+                                                    onClick={() => setDashboardSubTab('parcels_sorted')}
+                                                    onMouseOver={(e) => { e.currentTarget.style.outline = '2px solid #e21b22'; e.currentTarget.style.outlineOffset = '-2px'; }}
+                                                    onMouseOut={(e) => { e.currentTarget.style.outline = 'none'; }}
+                                                    style={{
+                                                        backgroundColor: '#ffffff',
+                                                        border: dashboardSubTab === 'parcels_sorted' ? '2px solid #e21b22' : '1px solid #e5e7eb',
+                                                        borderRadius: '10px',
+                                                        padding: '14px 10px',
+                                                        textAlign: 'center',
+                                                        boxShadow: dashboardSubTab === 'parcels_sorted' ? '0 4px 12px rgba(226, 27, 34, 0.15)' : '0 1px 3px rgba(0,0,0,0.05)',
+                                                        cursor: 'pointer',
+                                                        transition: 'all 0.15s ease-in-out',
+                                                        transform: dashboardSubTab === 'parcels_sorted' ? 'translateY(-2px)' : 'none'
+                                                    }}
+                                                >
+                                                    <div style={{ fontSize: '10px', fontWeight: '700', color: dashboardSubTab === 'parcels_sorted' ? '#e21b22' : '#6b7280', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Parcels Sorted</div>
+                                                    <div style={{ fontSize: '26px', fontWeight: '800', color: '#111827', marginTop: '4px' }}>{totalSort}</div>
+                                                    <div style={{ fontSize: '11px', color: '#6b7280', marginTop: '4px' }}>Allocated in Bags</div>
+                                                </div>
+
+                                                {/* Card 3: Pending Parcels */}
+                                                <div
+                                                    onClick={() => setDashboardSubTab('pending_parcels')}
+                                                    onMouseOver={(e) => { e.currentTarget.style.outline = '2px solid #e21b22'; e.currentTarget.style.outlineOffset = '-2px'; }}
+                                                    onMouseOut={(e) => { e.currentTarget.style.outline = 'none'; }}
+                                                    style={{
+                                                        backgroundColor: '#ffffff',
+                                                        border: dashboardSubTab === 'pending_parcels' ? '2px solid #e21b22' : '1px solid #e5e7eb',
+                                                        borderRadius: '10px',
+                                                        padding: '14px 10px',
+                                                        textAlign: 'center',
+                                                        boxShadow: dashboardSubTab === 'pending_parcels' ? '0 4px 12px rgba(226, 27, 34, 0.15)' : '0 1px 3px rgba(0,0,0,0.05)',
+                                                        cursor: 'pointer',
+                                                        transition: 'all 0.15s ease-in-out',
+                                                        transform: dashboardSubTab === 'pending_parcels' ? 'translateY(-2px)' : 'none'
+                                                    }}
+                                                >
+                                                    <div style={{ fontSize: '10px', fontWeight: '700', color: dashboardSubTab === 'pending_parcels' ? '#e21b22' : '#6b7280', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Pending Parcels</div>
+                                                    <div style={{ fontSize: '26px', fontWeight: '800', color: '#111827', marginTop: '4px' }}>{pendingParc}</div>
+                                                    <div style={{ fontSize: '11px', color: '#6b7280', marginTop: '4px' }}>Awaiting Sorting</div>
+                                                </div>
+
+                                                {/* Card 4: Total Bags */}
+                                                <div
+                                                    onClick={() => setDashboardSubTab('total_bags')}
+                                                    onMouseOver={(e) => { e.currentTarget.style.outline = '2px solid #e21b22'; e.currentTarget.style.outlineOffset = '-2px'; }}
+                                                    onMouseOut={(e) => { e.currentTarget.style.outline = 'none'; }}
+                                                    style={{
+                                                        backgroundColor: '#ffffff',
+                                                        border: dashboardSubTab === 'total_bags' ? '2px solid #e21b22' : '1px solid #e5e7eb',
+                                                        borderRadius: '10px',
+                                                        padding: '14px 10px',
+                                                        textAlign: 'center',
+                                                        boxShadow: dashboardSubTab === 'total_bags' ? '0 4px 12px rgba(226, 27, 34, 0.15)' : '0 1px 3px rgba(0,0,0,0.05)',
+                                                        cursor: 'pointer',
+                                                        transition: 'all 0.15s ease-in-out',
+                                                        transform: dashboardSubTab === 'total_bags' ? 'translateY(-2px)' : 'none'
+                                                    }}
+                                                >
+                                                    <div style={{ fontSize: '10px', fontWeight: '700', color: dashboardSubTab === 'total_bags' ? '#e21b22' : '#6b7280', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Total Bags</div>
+                                                    <div style={{ fontSize: '26px', fontWeight: '800', color: '#111827', marginTop: '4px' }}>{totalBags}</div>
+                                                    <div style={{ fontSize: '10px', color: '#4b5563', marginTop: '4px', display: 'flex', justifyContent: 'center', gap: '4px' }}>
+                                                        <span style={{ color: '#166534', fontWeight: '700' }}>{openBags} Open</span> •
+                                                        <span style={{ color: '#dc2626', fontWeight: '700' }}>{sealedBags} Sealed</span>
+                                                    </div>
+                                                </div>
+
+                                                {/* Card 5: Manifests */}
+                                                <div
+                                                    onClick={() => setDashboardSubTab('manifests')}
+                                                    onMouseOver={(e) => { e.currentTarget.style.outline = '2px solid #e21b22'; e.currentTarget.style.outlineOffset = '-2px'; }}
+                                                    onMouseOut={(e) => { e.currentTarget.style.outline = 'none'; }}
+                                                    style={{
+                                                        backgroundColor: '#ffffff',
+                                                        border: dashboardSubTab === 'manifests' ? '2px solid #e21b22' : '1px solid #e5e7eb',
+                                                        borderRadius: '10px',
+                                                        padding: '14px 10px',
+                                                        textAlign: 'center',
+                                                        boxShadow: dashboardSubTab === 'manifests' ? '0 4px 12px rgba(226, 27, 34, 0.15)' : '0 1px 3px rgba(0,0,0,0.05)',
+                                                        cursor: 'pointer',
+                                                        transition: 'all 0.15s ease-in-out',
+                                                        transform: dashboardSubTab === 'manifests' ? 'translateY(-2px)' : 'none'
+                                                    }}
+                                                >
+                                                    <div style={{ fontSize: '10px', fontWeight: '700', color: dashboardSubTab === 'manifests' ? '#e21b22' : '#6b7280', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Manifests</div>
+                                                    <div style={{ fontSize: '26px', fontWeight: '800', color: '#111827', marginTop: '4px' }}>{totalMan}</div>
+                                                    <div style={{ fontSize: '10px', color: '#4b5563', marginTop: '4px', display: 'flex', justifyContent: 'center', gap: '4px' }}>
+                                                        <span style={{ color: '#166534', fontWeight: '700' }}>{openMan} Open</span> •
+                                                        <span style={{ color: '#dc2626', fontWeight: '700' }}>{closedMan} Closed</span>
+                                                    </div>
+                                                </div>
+
+                                                {/* Card 6: Exceptions */}
+                                                <div
+                                                    onClick={() => setDashboardSubTab('exceptions')}
+                                                    onMouseOver={(e) => { e.currentTarget.style.outline = '2px solid #e21b22'; e.currentTarget.style.outlineOffset = '-2px'; }}
+                                                    onMouseOut={(e) => { e.currentTarget.style.outline = 'none'; }}
+                                                    style={{
+                                                        backgroundColor: '#ffffff',
+                                                        border: dashboardSubTab === 'exceptions' ? '2px solid #e21b22' : '1px solid #e5e7eb',
+                                                        borderRadius: '10px',
+                                                        padding: '14px 10px',
+                                                        textAlign: 'center',
+                                                        boxShadow: dashboardSubTab === 'exceptions' ? '0 4px 12px rgba(226, 27, 34, 0.15)' : '0 1px 3px rgba(0,0,0,0.05)',
+                                                        cursor: 'pointer',
+                                                        transition: 'all 0.15s ease-in-out',
+                                                        transform: dashboardSubTab === 'exceptions' ? 'translateY(-2px)' : 'none'
+                                                    }}
+                                                >
+                                                    <div style={{ fontSize: '10px', fontWeight: '700', color: dashboardSubTab === 'exceptions' ? '#e21b22' : '#6b7280', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Exceptions</div>
+                                                    <div style={{ fontSize: '26px', fontWeight: '800', color: '#111827', marginTop: '4px' }}>
+                                                        {totalExc}
+                                                    </div>
+                                                    <div style={{ fontSize: '10px', color: '#6b7280', marginTop: '4px' }}>
+                                                        {filteredExceptions.filter((e: any) => e.type === 'Damaged Barcode').length} Damaged / {filteredExceptions.filter((e: any) => e.type !== 'Damaged Barcode').length} Discrepancy
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        )}
+
+                                        {/* Parcel Operations Sub-Tabs Navigation Bar — hidden on User Productivity */}
+                                        {dashboardSubTab !== 'productivity' && (
+                                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '2px solid #e5e7eb', marginTop: '8px', gap: '12px' }}>
+                                                <div style={{ display: 'flex', gap: '12px', overflowX: 'auto', paddingBottom: '2px' }}>
+                                                    {[
+                                                        { id: 'total_received', label: 'Total Received' },
+                                                        { id: 'parcels_sorted', label: 'Parcels Sorted' },
+                                                        { id: 'pending_parcels', label: 'Pending Parcels' },
+                                                        { id: 'total_bags', label: 'Bags & Sealed' },
+                                                        { id: 'manifests', label: 'Manifests' },
+                                                        { id: 'exceptions', label: 'Exceptions' },
+                                                        { id: 'partner', label: 'Courier Distribution' }
+                                                    ].map(tab => (
+                                                        <button
+                                                            key={tab.id}
+                                                            onClick={() => setDashboardSubTab(tab.id as any)}
+                                                            style={{
+                                                                padding: '10px 12px',
+                                                                fontSize: '12px',
+                                                                fontWeight: '700',
+                                                                border: 'none',
+                                                                borderBottom: dashboardSubTab === tab.id ? '3px solid #e21b22' : '3px solid transparent',
+                                                                marginBottom: '-2px',
+                                                                cursor: 'pointer',
+                                                                backgroundColor: 'transparent',
+                                                                color: dashboardSubTab === tab.id ? '#e21b22' : '#4b5563',
+                                                                whiteSpace: 'nowrap',
+                                                                transition: 'all 0.15s ease'
+                                                            }}
+                                                        >
+                                                            {tab.label}
+                                                        </button>
+                                                    ))}
+                                                </div>
                                                 <button
-                                                    onClick={() => { setDashSearchQuery(''); setDashPartnerFilter('ALL'); }}
-                                                    style={{ flexShrink: 0, fontSize: '12px', color: '#dc2626', background: 'none', border: 'none', cursor: 'pointer', fontWeight: '700', whiteSpace: 'nowrap' }}
+                                                    onClick={fetchDashboard}
+                                                    disabled={isLoadingDashboard}
+                                                    title="Refresh Metrics"
+                                                    style={{
+                                                        display: 'inline-flex',
+                                                        alignItems: 'center',
+                                                        gap: '6px',
+                                                        backgroundColor: '#ffffff',
+                                                        border: '1px solid #d1d5db',
+                                                        borderRadius: '6px',
+                                                        padding: '6px 12px',
+                                                        fontSize: '12px',
+                                                        fontWeight: '600',
+                                                        color: '#374151',
+                                                        cursor: 'pointer',
+                                                        whiteSpace: 'nowrap',
+                                                        marginBottom: '4px',
+                                                        transition: 'all 0.15s ease'
+                                                    }}
+                                                    onMouseOver={(e) => { e.currentTarget.style.backgroundColor = '#f9fafb'; }}
+                                                    onMouseOut={(e) => { e.currentTarget.style.backgroundColor = '#ffffff'; }}
                                                 >
-                                                    Clear Filters
+                                                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ animation: isLoadingDashboard ? 'spin 1s linear infinite' : 'none' }}>
+                                                        <polyline points="23 4 23 10 17 10" />
+                                                        <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10" />
+                                                    </svg>
+                                                    {isLoadingDashboard ? 'Refreshing...' : 'Refresh'}
                                                 </button>
-                                            ) : null}
-                                        </div>
-                                    )}
+                                            </div>
+                                        )}
 
-                                    {/* ═══════════════════════════════════════════════════════
+                                        {/* Universal Search & Filter Control Bar for Detail Views */}
+                                        {['total_received', 'parcels_sorted', 'pending_parcels', 'total_bags', 'exceptions'].includes(dashboardSubTab) && (
+                                            <div style={{ display: 'flex', gap: '12px', alignItems: 'center', backgroundColor: '#f9fafb', padding: '12px 16px', borderRadius: '8px', border: '1px solid #e5e7eb', flexWrap: 'wrap' }}>
+                                                <div style={{ flex: 1, minWidth: '240px', position: 'relative' }}>
+                                                    <input
+                                                        type="text"
+                                                        placeholder="Search by tracking number, barcode, bag #, MAWB, or location..."
+                                                        value={dashSearchQuery}
+                                                        onChange={e => setDashSearchQuery(e.target.value)}
+                                                        style={{ width: '100%', boxSizing: 'border-box', padding: '8px 12px', fontSize: '13px', borderRadius: '6px', border: '1px solid #d1d5db', outline: 'none' }}
+                                                    />
+                                                </div>
+
+                                                {/* Manifest Filter Dropdown */}
+                                                <select
+                                                    value={dashMawbFilter}
+                                                    onChange={e => setDashMawbFilter(e.target.value)}
+                                                    style={{
+                                                        flexShrink: 0,
+                                                        boxSizing: 'border-box',
+                                                        padding: '8px 12px',
+                                                        fontSize: '13px',
+                                                        fontWeight: '700',
+                                                        borderRadius: '6px',
+                                                        border: '1px solid #cacccf',
+                                                        //backgroundColor: '#fef2f2',
+                                                        color: '#111827',
+                                                        minWidth: '180px'
+                                                    }}
+                                                >
+                                                    <option value="ALL">All Manifests (MAWBs)</option>
+                                                    {availableMawbsList.map(mawb => (
+                                                        <option key={mawb} value={mawb}>Manifest: {mawb}</option>
+                                                    ))}
+                                                </select>
+
+                                                {['total_received', 'parcels_sorted', 'pending_parcels', 'total_bags'].includes(dashboardSubTab) && (
+                                                    <select
+                                                        value={dashPartnerFilter}
+                                                        onChange={e => setDashPartnerFilter(e.target.value)}
+                                                        style={{ flexShrink: 0, boxSizing: 'border-box', padding: '8px 12px', fontSize: '13px', borderRadius: '6px', border: '1px solid #d1d5db', backgroundColor: '#ffffff', minWidth: '140px' }}
+                                                    >
+                                                        <option value="ALL">All Partners</option>
+                                                        <option value="PickMe">PickMe</option>
+                                                        <option value="Domex">Domex</option>
+                                                        <option value="Pronto">Pronto</option>
+                                                        <option value="Other">Other / General</option>
+                                                    </select>
+                                                )}
+                                                {dashSearchQuery || dashPartnerFilter !== 'ALL' || dashMawbFilter !== 'ALL' ? (
+                                                    <button
+                                                        onClick={() => { setDashSearchQuery(''); setDashPartnerFilter('ALL'); setDashMawbFilter('ALL'); }}
+                                                        style={{ flexShrink: 0, fontSize: '12px', color: '#dc2626', background: 'none', border: 'none', cursor: 'pointer', fontWeight: '700', whiteSpace: 'nowrap' }}
+                                                    >
+                                                        Clear All Filters
+                                                    </button>
+                                                ) : null}
+                                            </div>
+                                        )}
+
+                                        {/* ═══════════════════════════════════════════════════════
                                         DETAIL TAB 1: TOTAL RECEIVED (INBOUND PARCELS)
                                     ═══════════════════════════════════════════════════════ */}
-                                    {dashboardSubTab === 'total_received' && (
-                                        <div style={card}>
-                                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
-                                                <div style={label}>Total Received Inbound Parcels</div>
-                                                <div style={{ fontSize: '12px', color: '#6b7280' }}>
-                                                    Showing <strong>{(dashboardData.receivedParcels || []).filter((p: any) => {
-                                                        const q = dashSearchQuery.toLowerCase();
-                                                        const matchQ = !q || p.referenceNumber.toLowerCase().includes(q) || p.senderReference.toLowerCase().includes(q) || p.mawbReference.toLowerCase().includes(q) || p.consigneeLocation.toLowerCase().includes(q);
-                                                        const matchP = dashPartnerFilter === 'ALL' || p.deliveryAgentCode === dashPartnerFilter;
-                                                        return matchQ && matchP;
-                                                    }).length}</strong> of {dashboardData.totalReceived} parcels
+                                        {dashboardSubTab === 'total_received' && (
+                                            <div style={card}>
+                                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+                                                    <div style={label}>Total Received Inbound Parcels</div>
+                                                    <div style={{ fontSize: '12px', color: '#6b7280' }}>
+                                                        Showing <strong>{filteredParcels.filter((p: any) => {
+                                                            const q = dashSearchQuery.toLowerCase();
+                                                            const matchQ = !q || p.referenceNumber.toLowerCase().includes(q) || p.senderReference.toLowerCase().includes(q) || (p.mawbReference && p.mawbReference.toLowerCase().includes(q)) || (p.consigneeLocation && p.consigneeLocation.toLowerCase().includes(q));
+                                                            const matchP = dashPartnerFilter === 'ALL' || p.deliveryAgentCode === dashPartnerFilter;
+                                                            return matchQ && matchP;
+                                                        }).length}</strong> of {totalRec} parcels
+                                                    </div>
                                                 </div>
-                                            </div>
 
-                                            {dashboardData.receivedParcels && dashboardData.receivedParcels.length > 0 ? (
-                                                <div style={{ overflowX: 'auto' }}>
-                                                    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px', textAlign: 'left' }}>
-                                                        <thead>
-                                                            <tr style={{ borderBottom: '2px solid #e5e7eb', backgroundColor: '#f9fafb' }}>
-                                                                {['#', 'Parcel Reference', 'Temu Barcode', 'Courier Partner', 'Destination City', 'Weight', 'Allocation Status', 'Received Date'].map(h => (
-                                                                    <th key={h} style={{ padding: '10px 8px', color: '#6b7280', fontWeight: '700', fontSize: '11px', textTransform: 'uppercase' }}>{h}</th>
-                                                                ))}
-                                                            </tr>
-                                                        </thead>
-                                                        <tbody>
-                                                            {(dashboardData.receivedParcels || []).filter((p: any) => {
-                                                                const q = dashSearchQuery.toLowerCase();
-                                                                const matchQ = !q || p.referenceNumber.toLowerCase().includes(q) || p.senderReference.toLowerCase().includes(q) || p.mawbReference.toLowerCase().includes(q) || p.consigneeLocation.toLowerCase().includes(q);
-                                                                const matchP = dashPartnerFilter === 'ALL' || p.deliveryAgentCode === dashPartnerFilter;
-                                                                return matchQ && matchP;
-                                                            }).slice(0, 100).map((p: any, idx: number) => (
-                                                                <tr key={`rec-${idx}`} style={{ borderBottom: '1px solid #f3f4f6' }}>
-                                                                    <td style={{ padding: '10px 8px', color: '#9ca3af', fontSize: '11px' }}>{idx + 1}</td>
-                                                                    <td style={{ padding: '10px 8px', fontWeight: '700', color: '#111827' }}>{p.referenceNumber}</td>
-                                                                    <td style={{ padding: '10px 8px', color: '#4b5563', fontFamily: 'monospace', fontSize: '12px' }}>{p.senderReference}</td>
-                                                                    <td style={{ padding: '10px 8px' }}>
-                                                                        <span style={{ padding: '2px 8px', borderRadius: '4px', fontSize: '11px', fontWeight: '700', backgroundColor: p.deliveryAgentCode === 'PickMe' ? '#fef3c7' : p.deliveryAgentCode === 'Domex' ? '#dbeafe' : p.deliveryAgentCode === 'Pronto' ? '#e0e7ff' : '#f3f4f6', color: p.deliveryAgentCode === 'PickMe' ? '#b45309' : p.deliveryAgentCode === 'Domex' ? '#1d4ed8' : p.deliveryAgentCode === 'Pronto' ? '#4338ca' : '#374151' }}>
-                                                                            {p.deliveryAgentCode}
-                                                                        </span>
-                                                                    </td>
-                                                                    <td style={{ padding: '10px 8px', color: '#374151' }}>{p.consigneeLocation || 'N/A'}</td>
-                                                                    <td style={{ padding: '10px 8px', color: '#6b7280' }}>{p.weight}</td>
-                                                                    <td style={{ padding: '10px 8px' }}>
-                                                                        <span style={{ padding: '2px 8px', borderRadius: '4px', fontSize: '11px', fontWeight: '700', backgroundColor: p.isSorted ? '#dcfce7' : '#fef3c7', color: p.isSorted ? '#15803d' : '#b45309' }}>
-                                                                            {p.isSorted ? `Sorted (${p.bagNumber})` : 'Awaiting Sort'}
-                                                                        </span>
-                                                                    </td>
-                                                                    <td style={{ padding: '10px 8px', color: '#6b7280', fontSize: '11px' }}>{p.createdAt ? new Date(p.createdAt).toLocaleDateString() : '-'}</td>
+                                                {filteredParcels.length > 0 ? (
+                                                    <div style={{ overflowX: 'auto' }}>
+                                                        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px', textAlign: 'left' }}>
+                                                            <thead>
+                                                                <tr style={{ borderBottom: '2px solid #e5e7eb', backgroundColor: '#f9fafb' }}>
+                                                                    {['#', 'Parcel Reference', 'Temu Barcode', 'Courier Partner', 'Destination City', 'Weight', 'Allocation Status', 'Received Date'].map(h => (
+                                                                        <th key={h} style={{ padding: '10px 8px', color: '#6b7280', fontWeight: '700', fontSize: '11px', textTransform: 'uppercase' }}>{h}</th>
+                                                                    ))}
                                                                 </tr>
-                                                            ))}
-                                                        </tbody>
-                                                    </table>
-                                                </div>
-                                            ) : (
-                                                <div style={{ textAlign: 'center', padding: '30px', color: '#9ca3af', fontSize: '13px' }}>No received parcels found matching your criteria.</div>
-                                            )}
-                                        </div>
-                                    )}
+                                                            </thead>
+                                                            <tbody>
+                                                                {filteredParcels.filter((p: any) => {
+                                                                    const q = dashSearchQuery.toLowerCase();
+                                                                    const matchQ = !q || p.referenceNumber.toLowerCase().includes(q) || p.senderReference.toLowerCase().includes(q) || (p.mawbReference && p.mawbReference.toLowerCase().includes(q)) || (p.consigneeLocation && p.consigneeLocation.toLowerCase().includes(q));
+                                                                    const matchP = dashPartnerFilter === 'ALL' || p.deliveryAgentCode === dashPartnerFilter;
+                                                                    return matchQ && matchP;
+                                                                }).slice(0, 100).map((p: any, idx: number) => (
+                                                                    <tr key={`rec-${idx}`} style={{ borderBottom: '1px solid #f3f4f6' }}>
+                                                                        <td style={{ padding: '10px 8px', color: '#9ca3af', fontSize: '11px' }}>{idx + 1}</td>
+                                                                        <td style={{ padding: '10px 8px', fontWeight: '700', color: '#111827' }}>{p.referenceNumber}</td>
+                                                                        <td style={{ padding: '10px 8px', color: '#4b5563', fontFamily: 'monospace', fontSize: '12px' }}>{p.senderReference}</td>
+                                                                        <td style={{ padding: '10px 8px' }}>
+                                                                            <span style={{ padding: '2px 8px', borderRadius: '4px', fontSize: '11px', fontWeight: '700', backgroundColor: p.deliveryAgentCode === 'PickMe' ? '#fef3c7' : p.deliveryAgentCode === 'Domex' ? '#dbeafe' : p.deliveryAgentCode === 'Pronto' ? '#e0e7ff' : '#f3f4f6', color: p.deliveryAgentCode === 'PickMe' ? '#b45309' : p.deliveryAgentCode === 'Domex' ? '#1d4ed8' : p.deliveryAgentCode === 'Pronto' ? '#4338ca' : '#374151' }}>
+                                                                                {p.deliveryAgentCode}
+                                                                            </span>
+                                                                        </td>
+                                                                        <td style={{ padding: '10px 8px', color: '#374151' }}>{p.consigneeLocation || 'N/A'}</td>
+                                                                        <td style={{ padding: '10px 8px', color: '#6b7280' }}>{p.weight}</td>
+                                                                        <td style={{ padding: '10px 8px' }}>
+                                                                            {p.allocationStage === '2ND_SCAN_DONE' || p.bagNumber ? (
+                                                                                <span style={{ padding: '3px 8px', borderRadius: '4px', fontSize: '11px', fontWeight: '700', backgroundColor: '#dcfce7', color: '#15803d' }}>
+                                                                                    2nd Scan Done {/* {p.bagNumber ? `(${p.bagNumber})` : ''} */}
+                                                                                </span>
+                                                                            ) : p.allocationStage === '1ST_SCAN_DONE' || p.isSorted ? (
+                                                                                <span style={{ padding: '3px 8px', borderRadius: '4px', fontSize: '11px', fontWeight: '700', backgroundColor: '#e0f2fe', color: '#0369a1' }}>
+                                                                                    1st Scan Done
+                                                                                </span>
+                                                                            ) : (
+                                                                                <span style={{ padding: '3px 8px', borderRadius: '4px', fontSize: '11px', fontWeight: '700', backgroundColor: '#fef3c7', color: '#b45309' }}>
+                                                                                    Pending 1st Scan
+                                                                                </span>
+                                                                            )}
+                                                                        </td>
+                                                                        <td style={{ padding: '10px 8px', color: '#6b7280', fontSize: '11px' }}>{p.createdAt ? new Date(p.createdAt).toLocaleDateString() : '-'}</td>
+                                                                    </tr>
+                                                                ))}
+                                                            </tbody>
+                                                        </table>
+                                                    </div>
+                                                ) : (
+                                                    <div style={{ textAlign: 'center', padding: '30px', color: '#9ca3af', fontSize: '13px' }}>No received parcels found matching your criteria.</div>
+                                                )}
+                                            </div>
+                                        )}
 
-                                    {/* ═══════════════════════════════════════════════════════
+                                        {/* ═══════════════════════════════════════════════════════
                                         DETAIL TAB 2: PARCELS SORTED (ALLOCATED IN BAGS)
                                     ═══════════════════════════════════════════════════════ */}
-                                    {dashboardSubTab === 'parcels_sorted' && (
-                                        <div style={card}>
-                                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
-                                                <div style={label}>Parcels Sorted & Allocated in Outbound Bags</div>
-                                                <div style={{ fontSize: '12px', color: '#6b7280' }}>
-                                                    Total Allocated: <strong>{dashboardData.totalSorted} parcels</strong>
+                                        {dashboardSubTab === 'parcels_sorted' && (
+                                            <div style={card}>
+                                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+                                                    <div style={label}>Parcels Sorted & Allocated in Outbound Bags</div>
+                                                    <div style={{ fontSize: '12px', color: '#6b7280' }}>
+                                                        Total Allocated: <strong>{totalSort} parcels</strong>
+                                                    </div>
                                                 </div>
-                                            </div>
 
-                                            {dashboardData.receivedParcels && dashboardData.receivedParcels.filter((p: any) => p.isSorted).length > 0 ? (
-                                                <div style={{ overflowX: 'auto' }}>
-                                                    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px', textAlign: 'left' }}>
-                                                        <thead>
-                                                            <tr style={{ borderBottom: '2px solid #e5e7eb', backgroundColor: '#f9fafb' }}>
-                                                                {['#', 'Parcel Reference', 'Assigned Bag #', 'Courier Partner', 'Destination City', 'Weight', 'Status'].map(h => (
-                                                                    <th key={h} style={{ padding: '10px 8px', color: '#6b7280', fontWeight: '700', fontSize: '11px', textTransform: 'uppercase' }}>{h}</th>
-                                                                ))}
-                                                            </tr>
-                                                        </thead>
-                                                        <tbody>
-                                                            {(dashboardData.receivedParcels || []).filter((p: any) => p.isSorted).filter((p: any) => {
-                                                                const q = dashSearchQuery.toLowerCase();
-                                                                const matchQ = !q || p.referenceNumber.toLowerCase().includes(q) || p.bagNumber.toLowerCase().includes(q) || p.consigneeLocation.toLowerCase().includes(q);
-                                                                const matchP = dashPartnerFilter === 'ALL' || p.deliveryAgentCode === dashPartnerFilter;
-                                                                return matchQ && matchP;
-                                                            }).slice(0, 100).map((p: any, idx: number) => (
-                                                                <tr key={`sorted-${idx}`} style={{ borderBottom: '1px solid #f3f4f6' }}>
-                                                                    <td style={{ padding: '10px 8px', color: '#9ca3af', fontSize: '11px' }}>{idx + 1}</td>
-                                                                    <td style={{ padding: '10px 8px', fontWeight: '700', color: '#111827' }}>{p.referenceNumber}</td>
-                                                                    <td style={{ padding: '10px 8px' }}>
-                                                                        <span style={{ padding: '3px 8px', borderRadius: '4px', fontSize: '12px', fontWeight: '700', backgroundColor: '#dcfce7', color: '#15803d', fontFamily: 'monospace' }}>
-                                                                            {p.bagNumber}
-                                                                        </span>
-                                                                    </td>
-                                                                    <td style={{ padding: '10px 8px', fontWeight: '600' }}>{p.deliveryAgentCode}</td>
-                                                                    <td style={{ padding: '10px 8px', color: '#374151' }}>{p.consigneeLocation || 'N/A'}</td>
-                                                                    <td style={{ padding: '10px 8px', color: '#6b7280' }}>{p.weight}</td>
-                                                                    <td style={{ padding: '10px 8px', color: '#166534', fontWeight: '700', fontSize: '12px' }}>✓ Allocated</td>
+                                                {filteredParcels.filter((p: any) => p.isSorted).length > 0 ? (
+                                                    <div style={{ overflowX: 'auto' }}>
+                                                        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px', textAlign: 'left' }}>
+                                                            <thead>
+                                                                <tr style={{ borderBottom: '2px solid #e5e7eb', backgroundColor: '#f9fafb' }}>
+                                                                    {['#', 'Parcel Reference', 'Assigned Bag #', 'Courier Partner', 'Destination City', 'Weight', 'Status'].map(h => (
+                                                                        <th key={h} style={{ padding: '10px 8px', color: '#6b7280', fontWeight: '700', fontSize: '11px', textTransform: 'uppercase' }}>{h}</th>
+                                                                    ))}
                                                                 </tr>
-                                                            ))}
-                                                        </tbody>
-                                                    </table>
-                                                </div>
-                                            ) : (
-                                                <div style={{ textAlign: 'center', padding: '30px', color: '#9ca3af', fontSize: '13px' }}>No sorted parcels found.</div>
-                                            )}
-                                        </div>
-                                    )}
+                                                            </thead>
+                                                            <tbody>
+                                                                {filteredParcels.filter((p: any) => p.isSorted).filter((p: any) => {
+                                                                    const q = dashSearchQuery.toLowerCase();
+                                                                    const matchQ = !q || p.referenceNumber.toLowerCase().includes(q) || (p.bagNumber && p.bagNumber.toLowerCase().includes(q)) || (p.consigneeLocation && p.consigneeLocation.toLowerCase().includes(q));
+                                                                    const matchP = dashPartnerFilter === 'ALL' || p.deliveryAgentCode === dashPartnerFilter;
+                                                                    return matchQ && matchP;
+                                                                }).slice(0, 100).map((p: any, idx: number) => (
+                                                                    <tr key={`sorted-${idx}`} style={{ borderBottom: '1px solid #f3f4f6' }}>
+                                                                        <td style={{ padding: '10px 8px', color: '#9ca3af', fontSize: '11px' }}>{idx + 1}</td>
+                                                                        <td style={{ padding: '10px 8px', fontWeight: '700', color: '#111827' }}>{p.referenceNumber}</td>
+                                                                        <td style={{ padding: '10px 8px' }}>
+                                                                            <span style={{ padding: '3px 8px', borderRadius: '4px', fontSize: '12px', fontWeight: '700', backgroundColor: '#dcfce7', color: '#15803d', fontFamily: 'monospace' }}>
+                                                                                {p.bagNumber || 'Allocated'}
+                                                                            </span>
+                                                                        </td>
+                                                                        <td style={{ padding: '10px 8px', fontWeight: '600' }}>{p.deliveryAgentCode}</td>
+                                                                        <td style={{ padding: '10px 8px', color: '#374151' }}>{p.consigneeLocation || 'N/A'}</td>
+                                                                        <td style={{ padding: '10px 8px', color: '#6b7280' }}>{p.weight}</td>
+                                                                        <td style={{ padding: '10px 8px' }}>
+                                                                            {p.allocationStage === '2ND_SCAN_DONE' || p.bagNumber ? (
+                                                                                <span style={{ padding: '3px 8px', borderRadius: '4px', fontSize: '11px', fontWeight: '700', backgroundColor: '#dcfce7', color: '#15803d' }}>
+                                                                                    2nd Scan Done
+                                                                                </span>
+                                                                            ) : (
+                                                                                <span style={{ padding: '3px 8px', borderRadius: '4px', fontSize: '11px', fontWeight: '700', backgroundColor: '#e0f2fe', color: '#0369a1' }}>
+                                                                                    1st Scan Done
+                                                                                </span>
+                                                                            )}
+                                                                        </td>
+                                                                    </tr>
+                                                                ))}
+                                                            </tbody>
+                                                        </table>
+                                                    </div>
+                                                ) : (
+                                                    <div style={{ textAlign: 'center', padding: '30px', color: '#9ca3af', fontSize: '13px' }}>No sorted parcels found matching criteria.</div>
+                                                )}
+                                            </div>
+                                        )}
 
-                                    {/* ═══════════════════════════════════════════════════════
+                                        {/* ═══════════════════════════════════════════════════════
                                         DETAIL TAB 3: PENDING PARCELS (AWAITING SORTING)
                                     ═══════════════════════════════════════════════════════ */}
-                                    {dashboardSubTab === 'pending_parcels' && (
-                                        <div style={card}>
-                                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
-                                                <div style={label}>Pending Parcels Awaiting Sorting</div>
-                                                <div style={{ fontSize: '12px', color: '#6b7280' }}>
-                                                    Total Pending: <strong>{dashboardData.pendingParcels} parcels</strong>
+                                        {dashboardSubTab === 'pending_parcels' && (
+                                            <div style={card}>
+                                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+                                                    <div style={label}>Pending Parcels Awaiting Sorting</div>
+                                                    <div style={{ fontSize: '12px', color: '#6b7280' }}>
+                                                        Total Pending: <strong>{pendingParc} parcels</strong>
+                                                    </div>
                                                 </div>
-                                            </div>
 
-                                            {dashboardData.receivedParcels && dashboardData.receivedParcels.filter((p: any) => !p.isSorted).length > 0 ? (
-                                                <div style={{ overflowX: 'auto' }}>
-                                                    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px', textAlign: 'left' }}>
-                                                        <thead>
-                                                            <tr style={{ borderBottom: '2px solid #e5e7eb', backgroundColor: '#f9fafb' }}>
-                                                                {['#', 'Parcel Reference', 'Temu Barcode', 'Target Partner', 'Destination City', 'Status', 'Received Date'].map(h => (
-                                                                    <th key={h} style={{ padding: '10px 8px', color: '#6b7280', fontWeight: '700', fontSize: '11px', textTransform: 'uppercase' }}>{h}</th>
-                                                                ))}
-                                                            </tr>
-                                                        </thead>
-                                                        <tbody>
-                                                            {(dashboardData.receivedParcels || []).filter((p: any) => !p.isSorted).filter((p: any) => {
-                                                                const q = dashSearchQuery.toLowerCase();
-                                                                const matchQ = !q || p.referenceNumber.toLowerCase().includes(q) || p.senderReference.toLowerCase().includes(q) || p.consigneeLocation.toLowerCase().includes(q);
-                                                                const matchP = dashPartnerFilter === 'ALL' || p.deliveryAgentCode === dashPartnerFilter;
-                                                                return matchQ && matchP;
-                                                            }).slice(0, 100).map((p: any, idx: number) => (
-                                                                <tr key={`pend-${idx}`} style={{ borderBottom: '1px solid #f3f4f6' }}>
-                                                                    <td style={{ padding: '10px 8px', color: '#9ca3af', fontSize: '11px' }}>{idx + 1}</td>
-                                                                    <td style={{ padding: '10px 8px', fontWeight: '700', color: '#111827' }}>{p.referenceNumber}</td>
-                                                                    <td style={{ padding: '10px 8px', color: '#4b5563', fontFamily: 'monospace', fontSize: '12px' }}>{p.senderReference}</td>
-                                                                    <td style={{ padding: '10px 8px', fontWeight: '600' }}>{p.deliveryAgentCode}</td>
-                                                                    <td style={{ padding: '10px 8px', color: '#374151' }}>{p.consigneeLocation || 'N/A'}</td>
-                                                                    <td style={{ padding: '10px 8px' }}>
-                                                                        <span style={{ padding: '2px 8px', borderRadius: '4px', fontSize: '11px', fontWeight: '700', backgroundColor: '#fef3c7', color: '#b45309' }}>
-                                                                            ⏳ Awaiting Sorting
-                                                                        </span>
-                                                                    </td>
-                                                                    <td style={{ padding: '10px 8px', color: '#6b7280', fontSize: '11px' }}>{p.createdAt ? new Date(p.createdAt).toLocaleDateString() : '-'}</td>
+                                                {filteredParcels.filter((p: any) => !p.isSorted).length > 0 ? (
+                                                    <div style={{ overflowX: 'auto' }}>
+                                                        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px', textAlign: 'left' }}>
+                                                            <thead>
+                                                                <tr style={{ borderBottom: '2px solid #e5e7eb', backgroundColor: '#f9fafb' }}>
+                                                                    {['#', 'Parcel Reference', 'Temu Barcode', 'Target Partner', 'Destination City', 'Allocation Status', 'Received Date'].map(h => (
+                                                                        <th key={h} style={{ padding: '10px 8px', color: '#6b7280', fontWeight: '700', fontSize: '11px', textTransform: 'uppercase' }}>{h}</th>
+                                                                    ))}
                                                                 </tr>
-                                                            ))}
-                                                        </tbody>
-                                                    </table>
-                                                </div>
-                                            ) : (
-                                                <div style={{ textAlign: 'center', padding: '30px', color: '#9ca3af', fontSize: '13px' }}>No pending parcels awaiting sorting.</div>
-                                            )}
-                                        </div>
-                                    )}
+                                                            </thead>
+                                                            <tbody>
+                                                                {filteredParcels.filter((p: any) => !p.isSorted).filter((p: any) => {
+                                                                    const q = dashSearchQuery.toLowerCase();
+                                                                    const matchQ = !q || p.referenceNumber.toLowerCase().includes(q) || p.senderReference.toLowerCase().includes(q) || (p.consigneeLocation && p.consigneeLocation.toLowerCase().includes(q));
+                                                                    const matchP = dashPartnerFilter === 'ALL' || p.deliveryAgentCode === dashPartnerFilter;
+                                                                    return matchQ && matchP;
+                                                                }).slice(0, 100).map((p: any, idx: number) => (
+                                                                    <tr key={`pend-${idx}`} style={{ borderBottom: '1px solid #f3f4f6' }}>
+                                                                        <td style={{ padding: '10px 8px', color: '#9ca3af', fontSize: '11px' }}>{idx + 1}</td>
+                                                                        <td style={{ padding: '10px 8px', fontWeight: '700', color: '#111827' }}>{p.referenceNumber}</td>
+                                                                        <td style={{ padding: '10px 8px', color: '#4b5563', fontFamily: 'monospace', fontSize: '12px' }}>{p.senderReference}</td>
+                                                                        <td style={{ padding: '10px 8px', fontWeight: '600' }}>{p.deliveryAgentCode}</td>
+                                                                        <td style={{ padding: '10px 8px', color: '#374151' }}>{p.consigneeLocation || 'N/A'}</td>
+                                                                        <td style={{ padding: '10px 8px' }}>
+                                                                            <span style={{ padding: '3px 8px', borderRadius: '4px', fontSize: '11px', fontWeight: '700', backgroundColor: '#fef3c7', color: '#b45309' }}>
+                                                                                Pending 1st Scan
+                                                                            </span>
+                                                                        </td>
+                                                                        <td style={{ padding: '10px 8px', color: '#6b7280', fontSize: '11px' }}>{p.createdAt ? new Date(p.createdAt).toLocaleDateString() : '-'}</td>
+                                                                    </tr>
+                                                                ))}
+                                                            </tbody>
+                                                        </table>
+                                                    </div>
+                                                ) : (
+                                                    <div style={{ textAlign: 'center', padding: '30px', color: '#9ca3af', fontSize: '13px' }}>No pending parcels awaiting sorting.</div>
+                                                )}
+                                            </div>
+                                        )}
 
-                                    {/* ═══════════════════════════════════════════════════════
+                                        {/* ═══════════════════════════════════════════════════════
                                         DETAIL TAB 4: TOTAL BAGS & SEALED BAGS
                                     ═══════════════════════════════════════════════════════ */}
-                                    {dashboardSubTab === 'total_bags' && (
-                                        <div style={card}>
-                                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
-                                                <div style={label}>Outbound LMD Bags Overview</div>
-                                                <div style={{ fontSize: '12px', color: '#6b7280' }}>
-                                                    Total Bags: <strong>{dashboardData.totalBagsCreated}</strong> ({dashboardData.openBags} Open / {dashboardData.sealedBags} Sealed)
+                                        {dashboardSubTab === 'total_bags' && (
+                                            <div style={card}>
+                                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+                                                    <div style={label}>Outbound LMD Bags Overview</div>
+                                                    <div style={{ fontSize: '12px', color: '#6b7280' }}>
+                                                        Total Bags: <strong>{totalBags}</strong> ({openBags} Open / {sealedBags} Sealed)
+                                                    </div>
                                                 </div>
-                                            </div>
 
-                                            {dashboardData.bagsList && dashboardData.bagsList.length > 0 ? (
-                                                <div style={{ overflowX: 'auto' }}>
-                                                    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px', textAlign: 'left' }}>
-                                                        <thead>
-                                                            <tr style={{ borderBottom: '2px solid #e5e7eb', backgroundColor: '#f9fafb' }}>
-                                                                {['#', 'Bag Number', 'Target Partner', 'Status', 'Parcels Inside', 'Created By', 'Sealed By', 'Created Date'].map(h => (
-                                                                    <th key={h} style={{ padding: '10px 8px', color: '#6b7280', fontWeight: '700', fontSize: '11px', textTransform: 'uppercase' }}>{h}</th>
-                                                                ))}
-                                                            </tr>
-                                                        </thead>
-                                                        <tbody>
-                                                            {(dashboardData.bagsList || []).filter((b: any) => {
-                                                                const q = dashSearchQuery.toLowerCase();
-                                                                const matchQ = !q || b.bagNumber.toLowerCase().includes(q) || (b.createdBy && b.createdBy.toLowerCase().includes(q));
-                                                                const matchP = dashPartnerFilter === 'ALL' || b.targetPartner === dashPartnerFilter;
-                                                                return matchQ && matchP;
-                                                            }).map((b: any, idx: number) => (
-                                                                <tr key={`bag-${idx}`} style={{ borderBottom: '1px solid #f3f4f6' }}>
-                                                                    <td style={{ padding: '10px 8px', color: '#9ca3af', fontSize: '11px' }}>{idx + 1}</td>
-                                                                    <td style={{ padding: '10px 8px', fontWeight: '800', color: '#111827', fontFamily: 'monospace' }}>{b.bagNumber}</td>
-                                                                    <td style={{ padding: '10px 8px', fontWeight: '600' }}>{b.targetPartner}</td>
-                                                                    <td style={{ padding: '10px 8px' }}>
-                                                                        <span style={{ padding: '2px 8px', borderRadius: '4px', fontSize: '11px', fontWeight: '700', color: b.status === 'SEALED' ? '#dc2626' : '#15803d' }}>
-                                                                            {b.status === 'SEALED' ? 'SEALED' : 'OPEN'}
-                                                                        </span>
-                                                                    </td>
-                                                                    <td style={{ padding: '10px 8px', fontWeight: '700', color: '#111827' }}>{b.parcelCount} parcels</td>
-                                                                    <td style={{ padding: '10px 8px', color: '#374151' }}>{b.createdBy}</td>
-                                                                    <td style={{ padding: '10px 8px', color: '#6b7280' }}>{b.sealedBy}</td>
-                                                                    <td style={{ padding: '10px 8px', color: '#6b7280', fontSize: '11px' }}>{b.createdAt ? new Date(b.createdAt).toLocaleDateString() : '-'}</td>
+                                                {filteredBags.length > 0 ? (
+                                                    <div style={{ overflowX: 'auto' }}>
+                                                        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px', textAlign: 'left' }}>
+                                                            <thead>
+                                                                <tr style={{ borderBottom: '2px solid #e5e7eb', backgroundColor: '#f9fafb' }}>
+                                                                    {['#', 'Bag Number', 'Target Partner', 'Status', 'Parcels Inside', 'Created By', 'Sealed By', 'Created Date'].map(h => (
+                                                                        <th key={h} style={{ padding: '10px 8px', color: '#6b7280', fontWeight: '700', fontSize: '11px', textTransform: 'uppercase' }}>{h}</th>
+                                                                    ))}
                                                                 </tr>
-                                                            ))}
-                                                        </tbody>
-                                                    </table>
-                                                </div>
-                                            ) : (
-                                                <div style={{ textAlign: 'center', padding: '30px', color: '#9ca3af', fontSize: '13px' }}>No bags created yet today.</div>
-                                            )}
-                                        </div>
-                                    )}
+                                                            </thead>
+                                                            <tbody>
+                                                                {filteredBags.filter((b: any) => {
+                                                                    const q = dashSearchQuery.toLowerCase();
+                                                                    const matchQ = !q || b.bagNumber.toLowerCase().includes(q) || (b.createdBy && b.createdBy.toLowerCase().includes(q));
+                                                                    const matchP = dashPartnerFilter === 'ALL' || b.targetPartner === dashPartnerFilter;
+                                                                    return matchQ && matchP;
+                                                                }).map((b: any, idx: number) => (
+                                                                    <tr key={`bag-${idx}`} style={{ borderBottom: '1px solid #f3f4f6' }}>
+                                                                        <td style={{ padding: '10px 8px', color: '#9ca3af', fontSize: '11px' }}>{idx + 1}</td>
+                                                                        <td style={{ padding: '10px 8px', fontWeight: '800', color: '#111827', fontFamily: 'monospace' }}>{b.bagNumber}</td>
+                                                                        <td style={{ padding: '10px 8px', fontWeight: '600' }}>{b.targetPartner}</td>
+                                                                        <td style={{ padding: '10px 8px' }}>
+                                                                            <span style={{ padding: '2px 8px', borderRadius: '4px', fontSize: '11px', fontWeight: '700', color: b.status === 'SEALED' ? '#dc2626' : '#15803d' }}>
+                                                                                {b.status === 'SEALED' ? 'SEALED' : 'OPEN'}
+                                                                            </span>
+                                                                        </td>
+                                                                        <td style={{ padding: '10px 8px', fontWeight: '700', color: '#111827' }}>{b.parcelCount} parcels</td>
+                                                                        <td style={{ padding: '10px 8px', color: '#374151' }}>{b.createdBy}</td>
+                                                                        <td style={{ padding: '10px 8px', color: '#6b7280' }}>{b.sealedBy}</td>
+                                                                        <td style={{ padding: '10px 8px', color: '#6b7280', fontSize: '11px' }}>{b.createdAt ? new Date(b.createdAt).toLocaleDateString() : '-'}</td>
+                                                                    </tr>
+                                                                ))}
+                                                            </tbody>
+                                                        </table>
+                                                    </div>
+                                                ) : (
+                                                    <div style={{ textAlign: 'center', padding: '30px', color: '#9ca3af', fontSize: '13px' }}>No bags created yet today.</div>
+                                                )}
+                                            </div>
+                                        )}
 
-                                    {/* ═══════════════════════════════════════════════════════
+                                        {/* ═══════════════════════════════════════════════════════
                                         DETAIL TAB 5: MANIFESTS & MAWB SESSIONS
                                     ═══════════════════════════════════════════════════════ */}
-                                    {dashboardSubTab === 'manifests' && (
-                                        <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
-                                            {/* Manifest Header & Select Bar */}
-                                            <div style={card}>
-                                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
-                                                    <div>
-                                                        <div style={label}>Manifest & MAWB Session Inspector</div>
-                                                        <p style={{ fontSize: '12px', color: '#6b7280', margin: '4px 0 0 0' }}>Comprehensive breakdown of Manifest Sessions, LMD Bags, Box Unsealings, and Allocated Parcels by MAWB Ref.</p>
+                                        {dashboardSubTab === 'manifests' && (
+                                            <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+                                                {/* Manifest Header & Select Bar */}
+                                                <div style={card}>
+                                                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
+                                                        <div>
+                                                            <div style={label}>Manifest & MAWB Session Inspector</div>
+                                                            <p style={{ fontSize: '12px', color: '#6b7280', margin: '4px 0 0 0' }}>Comprehensive breakdown of Manifest Sessions, LMD Bags, Box Unsealings, and Allocated Parcels by MAWB Ref.</p>
+                                                        </div>
+                                                        <div style={{ fontSize: '12px', color: '#6b7280' }}>
+                                                            Total Manifests: <strong>{dashboardData.totalManifests}</strong> ({dashboardData.openManifests} Open / {dashboardData.closedManifests} Closed)
+                                                        </div>
                                                     </div>
-                                                    <div style={{ fontSize: '12px', color: '#6b7280' }}>
-                                                        Total Manifests: <strong>{dashboardData.totalManifests}</strong> ({dashboardData.openManifests} Open / {dashboardData.closedManifests} Closed)
-                                                    </div>
-                                                </div>
 
-                                                {/* MAWB Selector & Search Input */}
-                                                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: '12px', gap: '16px' }}>
-                                                    <div style={{ flex: '1 1 360px', maxWidth: '480px', minWidth: 0, position: 'relative' }}>
-                                                        <input
-                                                            type="text"
-                                                            placeholder="Type MAWB Ref (e.g. 603-70659761)..."
-                                                            value={dashSearchQuery}
-                                                            onChange={(e) => setDashSearchQuery(e.target.value)}
-                                                            style={{ width: '100%', boxSizing: 'border-box', padding: '9px 14px', fontSize: '13px', borderRadius: '8px', border: '1px solid #d1d5db', outline: 'none' }}
-                                                        />
-                                                        {dashSearchQuery && (
-                                                            <button
-                                                                onClick={() => setDashSearchQuery('')}
-                                                                style={{ position: 'absolute', right: '12px', top: '50%', transform: 'translateY(-50%)', border: 'none', background: 'none', color: '#9ca3af', cursor: 'pointer', fontWeight: 'bold' }}
+                                                    {/* MAWB Selector & Search Input */}
+                                                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: '12px', gap: '16px' }}>
+                                                        <div style={{ flex: '1 1 360px', maxWidth: '480px', minWidth: 0, position: 'relative' }}>
+                                                            <input
+                                                                type="text"
+                                                                placeholder="Type MAWB Ref (e.g. 603-70659761)..."
+                                                                value={dashSearchQuery}
+                                                                onChange={(e) => setDashSearchQuery(e.target.value)}
+                                                                style={{ width: '100%', boxSizing: 'border-box', padding: '9px 14px', fontSize: '13px', borderRadius: '8px', border: '1px solid #d1d5db', outline: 'none' }}
+                                                            />
+                                                            {dashSearchQuery && (
+                                                                <button
+                                                                    onClick={() => setDashSearchQuery('')}
+                                                                    style={{ position: 'absolute', right: '12px', top: '50%', transform: 'translateY(-50%)', border: 'none', background: 'none', color: '#9ca3af', cursor: 'pointer', fontWeight: 'bold' }}
+                                                                >
+                                                                    ✕
+                                                                </button>
+                                                            )}
+                                                        </div>
+                                                        {(mawbsList && mawbsList.length > 0) && (
+                                                            <select
+                                                                value={dashSearchQuery}
+                                                                onChange={(e) => setDashSearchQuery(e.target.value)}
+                                                                style={{ padding: '9px 14px', fontSize: '13px', borderRadius: '8px', border: '1px solid #d1d5db', backgroundColor: '#ffffff', width: '220px', flexShrink: 0, boxSizing: 'border-box' }}
                                                             >
-                                                                ✕
-                                                            </button>
+                                                                <option value="">Select MAWB Ref...</option>
+                                                                {mawbsList.map((m: any) => (
+                                                                    <option key={m.mawb_reference} value={m.mawb_reference}>{m.mawb_reference}</option>
+                                                                ))}
+                                                            </select>
                                                         )}
                                                     </div>
-                                                    {(mawbsList && mawbsList.length > 0) && (
-                                                        <select
-                                                            value={dashSearchQuery}
-                                                            onChange={(e) => setDashSearchQuery(e.target.value)}
-                                                            style={{ padding: '9px 14px', fontSize: '13px', borderRadius: '8px', border: '1px solid #d1d5db', backgroundColor: '#ffffff', width: '220px', flexShrink: 0, boxSizing: 'border-box' }}
-                                                        >
-                                                            <option value="">Select MAWB Ref...</option>
-                                                            {mawbsList.map((m: any) => (
-                                                                <option key={m.mawb_reference} value={m.mawb_reference}>{m.mawb_reference}</option>
-                                                            ))}
-                                                        </select>
-                                                    )}
                                                 </div>
-                                            </div>
 
-                                            {/* 1. MATCHED MANIFEST SESSIONS */}
-                                            <div style={card}>
-                                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
-                                                    <div style={label}>Matched Manifest Sessions ({
-                                                        (dashboardData.manifestsList || []).filter((m: any) => {
-                                                            const q = dashSearchQuery.trim().toLowerCase();
-                                                            return !q || (m.mawbRef && m.mawbRef.toLowerCase().includes(q)) || (m.manifestId && m.manifestId.toLowerCase().includes(q));
-                                                        }).length
-                                                    })</div>
-                                                </div>
-                                                <div style={{ overflowX: 'auto' }}>
-                                                    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px', textAlign: 'left' }}>
-                                                        <thead>
-                                                            <tr style={{ borderBottom: '2px solid #e5e7eb', backgroundColor: '#f9fafb' }}>
-                                                                {['MAWB / Manifest Ref', 'Status', 'Closed By', 'Total Bags', 'Total Parcels', 'Date'].map(h => (
-                                                                    <th key={h} style={{ padding: '10px 8px', color: '#6b7280', fontWeight: '700', fontSize: '11px', textTransform: 'uppercase' }}>{h}</th>
-                                                                ))}
-                                                            </tr>
-                                                        </thead>
-                                                        <tbody>
-                                                            {(dashboardData.manifestsList || []).filter((m: any) => {
+                                                {/* 1. MATCHED MANIFEST SESSIONS */}
+                                                <div style={card}>
+                                                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
+                                                        <div style={label}>Matched Manifest Sessions ({
+                                                            (dashboardData.manifestsList || []).filter((m: any) => {
                                                                 const q = dashSearchQuery.trim().toLowerCase();
                                                                 return !q || (m.mawbRef && m.mawbRef.toLowerCase().includes(q)) || (m.manifestId && m.manifestId.toLowerCase().includes(q));
-                                                            }).map((m: any, idx: number) => (
-                                                                <tr key={`m-${idx}`} style={{ borderBottom: '1px solid #f3f4f6' }}>
-                                                                    <td style={{ padding: '10px 8px', fontWeight: '800', color: '#111827', fontFamily: 'monospace' }}>{m.mawbRef || m.manifestId}</td>
-                                                                    <td style={{ padding: '10px 8px' }}>
-                                                                        <span style={{ padding: '2px 8px', borderRadius: '4px', fontSize: '11px', fontWeight: '700', backgroundColor: m.status === 'CLOSED' ? '#e0e7ff' : '#dcfce7', color: m.status === 'CLOSED' ? '#4338ca' : '#15803d' }}>
-                                                                            {m.status === 'CLOSED' ? '✔ CLOSED' : '⚡ OPEN'}
-                                                                        </span>
-                                                                    </td>
-                                                                    <td style={{ padding: '10px 8px', color: '#374151' }}>{m.closedBy || '—'}</td>
-                                                                    <td style={{ padding: '10px 8px', fontWeight: '700' }}>{m.totalBags} bags</td>
-                                                                    <td style={{ padding: '10px 8px', fontWeight: '700', color: '#166534' }}>{m.totalParcels} parcels</td>
-                                                                    <td style={{ padding: '10px 8px', color: '#6b7280', fontSize: '11px' }}>{m.createdAt ? new Date(m.createdAt).toLocaleDateString() : '-'}</td>
+                                                            }).length
+                                                        })</div>
+                                                    </div>
+                                                    <div style={{ overflowX: 'auto' }}>
+                                                        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px', textAlign: 'left' }}>
+                                                            <thead>
+                                                                <tr style={{ borderBottom: '2px solid #e5e7eb', backgroundColor: '#f9fafb' }}>
+                                                                    {['MAWB / Manifest Ref', 'Status', 'Closed By', 'Total Bags', 'Total Parcels', 'Date'].map(h => (
+                                                                        <th key={h} style={{ padding: '10px 8px', color: '#6b7280', fontWeight: '700', fontSize: '11px', textTransform: 'uppercase' }}>{h}</th>
+                                                                    ))}
                                                                 </tr>
-                                                            ))}
-                                                            {(dashboardData.manifestsList || []).filter((m: any) => {
-                                                                const q = dashSearchQuery.trim().toLowerCase();
-                                                                return !q || (m.mawbRef && m.mawbRef.toLowerCase().includes(q)) || (m.manifestId && m.manifestId.toLowerCase().includes(q));
-                                                            }).length === 0 && (
-                                                                    <tr>
-                                                                        <td colSpan={6} style={{ padding: '20px', textAlign: 'center', color: '#9ca3af', fontSize: '13px' }}>
-                                                                            No manifest sessions matched query "{dashSearchQuery}"
-                                                                        </td>
-                                                                    </tr>
-                                                                )}
-                                                        </tbody>
-                                                    </table>
-                                                </div>
-                                            </div>
-
-                                            {/* 2. MATCHED LMD BAGS */}
-                                            <div style={card}>
-                                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
-                                                    <div style={label}>Matched LMD Bags ({
-                                                        (dashboardData.bagsList || []).filter((b: any) => {
-                                                            const q = dashSearchQuery.trim().toLowerCase();
-                                                            return !q || (b.mawbRef && b.mawbRef.toLowerCase().includes(q)) || (b.bagNumber && b.bagNumber.toLowerCase().includes(q));
-                                                        }).length
-                                                    })</div>
-                                                </div>
-                                                <div style={{ overflowX: 'auto' }}>
-                                                    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px', textAlign: 'left' }}>
-                                                        <thead>
-                                                            <tr style={{ borderBottom: '2px solid #e5e7eb', backgroundColor: '#f9fafb' }}>
-                                                                {['Bag Number', 'MAWB Ref', 'Target Partner', 'Destination Hub', 'Parcels', 'Total Weight', 'Status', 'Created / Sealed By & Timestamp'].map(h => (
-                                                                    <th key={h} style={{ padding: '10px 8px', color: '#6b7280', fontWeight: '700', fontSize: '11px', textTransform: 'uppercase' }}>{h}</th>
-                                                                ))}
-                                                            </tr>
-                                                        </thead>
-                                                        <tbody>
-                                                            {(dashboardData.bagsList || []).filter((b: any) => {
-                                                                const q = dashSearchQuery.trim().toLowerCase();
-                                                                return !q || (b.mawbRef && b.mawbRef.toLowerCase().includes(q)) || (b.bagNumber && b.bagNumber.toLowerCase().includes(q));
-                                                            }).map((b: any, idx: number) => (
-                                                                <tr key={`b-${idx}`} style={{ borderBottom: '1px solid #f3f4f6' }}>
-                                                                    <td style={{ padding: '10px 8px', fontWeight: '800', color: '#111827', fontFamily: 'monospace' }}>{b.bagNumber}</td>
-                                                                    <td style={{ padding: '10px 8px', color: '#374151', fontSize: '12px' }}>{b.mawbRef || '—'}</td>
-                                                                    <td style={{ padding: '10px 8px' }}>
-                                                                        <span style={{ padding: '2px 8px', borderRadius: '4px', fontSize: '11px', fontWeight: '700', backgroundColor: b.targetPartner === 'PickMe' ? '#fef3c7' : b.targetPartner === 'Domex' ? '#dbeafe' : b.targetPartner === 'Pronto' ? '#e0e7ff' : '#f3f4f6', color: b.targetPartner === 'PickMe' ? '#b45309' : b.targetPartner === 'Domex' ? '#1d4ed8' : b.targetPartner === 'Pronto' ? '#4338ca' : '#374151' }}>
-                                                                            {b.targetPartner}
-                                                                        </span>
-                                                                    </td>
-                                                                    <td style={{ padding: '10px 8px', color: '#374151' }}>{b.destinationHub || b.targetPartner}</td>
-                                                                    <td style={{ padding: '10px 8px', fontWeight: '700' }}>{b.parcelCount} items</td>
-                                                                    <td style={{ padding: '10px 8px', color: '#4b5563' }}>{b.totalWeight ? `${b.totalWeight} kg` : '-'}</td>
-                                                                    <td style={{ padding: '10px 8px' }}>
-                                                                        <span style={{ padding: '2px 8px', borderRadius: '4px', fontSize: '11px', fontWeight: '700', backgroundColor: b.status === 'SEALED' ? '#fee2e2' : '#dcfce7', color: b.status === 'SEALED' ? '#dc2626' : '#15803d' }}>
-                                                                            {b.status === 'SEALED' ? 'SEALED' : 'OPEN'}
-                                                                        </span>
-                                                                    </td>
-                                                                    <td style={{ padding: '10px 8px', color: '#4b5563', fontSize: '11px' }}>
-                                                                        <div style={{ fontWeight: '600', color: '#111827' }}>{b.sealedBy && b.sealedBy !== '-' ? b.sealedBy : b.createdBy}</div>
-                                                                        <div style={{ color: '#6b7280', fontSize: '10px' }}>{b.sealedAt && b.sealedAt !== '-' ? new Date(b.sealedAt).toLocaleString() : b.createdAt ? new Date(b.createdAt).toLocaleString() : '-'}</div>
-                                                                    </td>
-                                                                </tr>
-                                                            ))}
-                                                            {(dashboardData.bagsList || []).filter((b: any) => {
-                                                                const q = dashSearchQuery.trim().toLowerCase();
-                                                                return !q || (b.mawbRef && b.mawbRef.toLowerCase().includes(q)) || (b.bagNumber && b.bagNumber.toLowerCase().includes(q));
-                                                            }).length === 0 && (
-                                                                    <tr>
-                                                                        <td colSpan={8} style={{ padding: '20px', textAlign: 'center', color: '#9ca3af', fontSize: '13px' }}>
-                                                                            No LMD bags matched query "{dashSearchQuery}"
-                                                                        </td>
-                                                                    </tr>
-                                                                )}
-                                                        </tbody>
-                                                    </table>
-                                                </div>
-                                            </div>
-
-                                            {/* 3. MATCHED BOX UNSEALINGS */}
-                                            <div style={card}>
-                                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
-                                                    <div style={label}>Matched Box Unsealings ({
-                                                        (dashboardData.unsealedBoxesList || []).filter((u: any) => {
-                                                            const q = dashSearchQuery.trim().toLowerCase();
-                                                            return !q || (u.mawbRef && u.mawbRef.toLowerCase().includes(q)) || (u.bagNumber && u.bagNumber.toLowerCase().includes(q));
-                                                        }).length
-                                                    })</div>
-                                                </div>
-                                                <div style={{ overflowX: 'auto' }}>
-                                                    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px', textAlign: 'left' }}>
-                                                        <thead>
-                                                            <tr style={{ borderBottom: '2px solid #e5e7eb', backgroundColor: '#f9fafb' }}>
-                                                                {['Box Bag No', 'MAWB Ref', 'Scanned / Expected Count', 'Unsealed By', 'Timestamp'].map(h => (
-                                                                    <th key={h} style={{ padding: '10px 8px', color: '#6b7280', fontWeight: '700', fontSize: '11px', textTransform: 'uppercase' }}>{h}</th>
-                                                                ))}
-                                                            </tr>
-                                                        </thead>
-                                                        <tbody>
-                                                            {(dashboardData.unsealedBoxesList || []).filter((u: any) => {
-                                                                const q = dashSearchQuery.trim().toLowerCase();
-                                                                return !q || (u.mawbRef && u.mawbRef.toLowerCase().includes(q)) || (u.bagNumber && u.bagNumber.toLowerCase().includes(q));
-                                                            }).map((u: any, idx: number) => (
-                                                                <tr key={`ub-${idx}`} style={{ borderBottom: '1px solid #f3f4f6' }}>
-                                                                    <td style={{ padding: '10px 8px', fontWeight: '800', color: '#111827', fontFamily: 'monospace' }}>{u.bagNumber}</td>
-                                                                    <td style={{ padding: '10px 8px', color: '#374151' }}>{u.mawbRef || '—'}</td>
-                                                                    <td style={{ padding: '10px 8px', fontWeight: '700', color: u.scannedCount === u.expectedCount ? '#166534' : '#dc2626' }}>
-                                                                        {u.scannedCount} / {u.expectedCount}
-                                                                    </td>
-                                                                    <td style={{ padding: '10px 8px', color: '#4b5563' }}>{u.unsealedBy}</td>
-                                                                    <td style={{ padding: '10px 8px', color: '#6b7280', fontSize: '11px' }}>{u.createdAt ? new Date(u.createdAt).toLocaleString() : '-'}</td>
-                                                                </tr>
-                                                            ))}
-                                                            {(dashboardData.unsealedBoxesList || []).filter((u: any) => {
-                                                                const q = dashSearchQuery.trim().toLowerCase();
-                                                                return !q || (u.mawbRef && u.mawbRef.toLowerCase().includes(q)) || (u.bagNumber && u.bagNumber.toLowerCase().includes(q));
-                                                            }).length === 0 && (
-                                                                    <tr>
-                                                                        <td colSpan={5} style={{ padding: '20px', textAlign: 'center', color: '#9ca3af', fontSize: '13px' }}>
-                                                                            No box unsealings matched query "{dashSearchQuery}"
-                                                                        </td>
-                                                                    </tr>
-                                                                )}
-                                                        </tbody>
-                                                    </table>
-                                                </div>
-                                            </div>
-
-                                            {/* 4. MATCHED PARCELS */}
-                                            <div style={card}>
-                                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
-                                                    <div style={label}>Matched Parcels ({
-                                                        (dashboardData.receivedParcels || []).filter((p: any) => {
-                                                            const q = dashSearchQuery.trim().toLowerCase();
-                                                            return !q || (p.mawbReference && p.mawbReference.toLowerCase().includes(q)) || (p.referenceNumber && p.referenceNumber.toLowerCase().includes(q)) || (p.bagNumber && p.bagNumber.toLowerCase().includes(q));
-                                                        }).length
-                                                    })</div>
-                                                </div>
-                                                <div style={{ overflowX: 'auto' }}>
-                                                    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px', textAlign: 'left' }}>
-                                                        <thead>
-                                                            <tr style={{ borderBottom: '2px solid #e5e7eb', backgroundColor: '#f9fafb' }}>
-                                                                {['Waybill / Ref', 'Temu Barcode', 'MAWB Ref', 'Assigned Bag #', 'Courier Partner', 'Destination City', 'Status'].map(h => (
-                                                                    <th key={h} style={{ padding: '10px 8px', color: '#6b7280', fontWeight: '700', fontSize: '11px', textTransform: 'uppercase' }}>{h}</th>
-                                                                ))}
-                                                            </tr>
-                                                        </thead>
-                                                        <tbody>
-                                                            {(dashboardData.receivedParcels || []).filter((p: any) => {
-                                                                const q = dashSearchQuery.trim().toLowerCase();
-                                                                return !q || (p.mawbReference && p.mawbReference.toLowerCase().includes(q)) || (p.referenceNumber && p.referenceNumber.toLowerCase().includes(q)) || (p.bagNumber && p.bagNumber.toLowerCase().includes(q));
-                                                            }).slice(0, 100).map((p: any, idx: number) => (
-                                                                <tr key={`mp-${idx}`} style={{ borderBottom: '1px solid #f3f4f6' }}>
-                                                                    <td style={{ padding: '10px 8px', fontWeight: '700', color: '#111827' }}>{p.referenceNumber}</td>
-                                                                    <td style={{ padding: '10px 8px', color: '#4b5563', fontFamily: 'monospace', fontSize: '12px' }}>{p.senderReference}</td>
-                                                                    <td style={{ padding: '10px 8px', color: '#374151', fontSize: '12px' }}>{p.mawbReference}</td>
-                                                                    <td style={{ padding: '10px 8px' }}>
-                                                                        {p.bagNumber ? (
-                                                                            <span style={{ padding: '2px 8px', borderRadius: '4px', fontSize: '11px', fontWeight: '700', backgroundColor: '#dcfce7', color: '#15803d', fontFamily: 'monospace' }}>
-                                                                                {p.bagNumber}
+                                                            </thead>
+                                                            <tbody>
+                                                                {(dashboardData.manifestsList || []).filter((m: any) => {
+                                                                    const q = dashSearchQuery.trim().toLowerCase();
+                                                                    return !q || (m.mawbRef && m.mawbRef.toLowerCase().includes(q)) || (m.manifestId && m.manifestId.toLowerCase().includes(q));
+                                                                }).map((m: any, idx: number) => (
+                                                                    <tr key={`m-${idx}`} style={{ borderBottom: '1px solid #f3f4f6' }}>
+                                                                        <td style={{ padding: '10px 8px', fontWeight: '800', color: '#111827', fontFamily: 'monospace' }}>{m.mawbRef || m.manifestId}</td>
+                                                                        <td style={{ padding: '10px 8px' }}>
+                                                                            <span style={{ padding: '2px 8px', borderRadius: '4px', fontSize: '11px', fontWeight: '700', backgroundColor: m.status === 'CLOSED' ? '#e0e7ff' : '#dcfce7', color: m.status === 'CLOSED' ? '#4338ca' : '#15803d' }}>
+                                                                                {m.status === 'CLOSED' ? '✔ CLOSED' : '⚡ OPEN'}
                                                                             </span>
-                                                                        ) : (
-                                                                            <span style={{ color: '#9ca3af', fontSize: '12px' }}>Unassigned</span>
-                                                                        )}
-                                                                    </td>
-                                                                    <td style={{ padding: '10px 8px', fontWeight: '600' }}>{p.deliveryAgentCode}</td>
-                                                                    <td style={{ padding: '10px 8px', color: '#374151' }}>{p.consigneeLocation || 'N/A'}</td>
-                                                                    <td style={{ padding: '10px 8px' }}>
-                                                                        <span style={{ padding: '2px 8px', borderRadius: '4px', fontSize: '11px', fontWeight: '700', backgroundColor: p.isSorted ? '#dcfce7' : '#fef3c7', color: p.isSorted ? '#15803d' : '#b45309' }}>
-                                                                            {p.isSorted ? 'LMD ALLOCATED' : 'RECEIVED'}
-                                                                        </span>
-                                                                    </td>
-                                                                </tr>
-                                                            ))}
-                                                            {(dashboardData.receivedParcels || []).filter((p: any) => {
+                                                                        </td>
+                                                                        <td style={{ padding: '10px 8px', color: '#374151' }}>{m.closedBy || '—'}</td>
+                                                                        <td style={{ padding: '10px 8px', fontWeight: '700' }}>{m.totalBags} bags</td>
+                                                                        <td style={{ padding: '10px 8px', fontWeight: '700', color: '#166534' }}>{m.totalParcels} parcels</td>
+                                                                        <td style={{ padding: '10px 8px', color: '#6b7280', fontSize: '11px' }}>{m.createdAt ? new Date(m.createdAt).toLocaleDateString() : '-'}</td>
+                                                                    </tr>
+                                                                ))}
+                                                                {(dashboardData.manifestsList || []).filter((m: any) => {
+                                                                    const q = dashSearchQuery.trim().toLowerCase();
+                                                                    return !q || (m.mawbRef && m.mawbRef.toLowerCase().includes(q)) || (m.manifestId && m.manifestId.toLowerCase().includes(q));
+                                                                }).length === 0 && (
+                                                                        <tr>
+                                                                            <td colSpan={6} style={{ padding: '20px', textAlign: 'center', color: '#9ca3af', fontSize: '13px' }}>
+                                                                                No manifest sessions matched query "{dashSearchQuery}"
+                                                                            </td>
+                                                                        </tr>
+                                                                    )}
+                                                            </tbody>
+                                                        </table>
+                                                    </div>
+                                                </div>
+
+                                                {/* 2. MATCHED LMD BAGS */}
+                                                <div style={card}>
+                                                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
+                                                        <div style={label}>Matched LMD Bags ({
+                                                            (dashboardData.bagsList || []).filter((b: any) => {
                                                                 const q = dashSearchQuery.trim().toLowerCase();
-                                                                return !q || (p.mawbReference && p.mawbReference.toLowerCase().includes(q)) || (p.referenceNumber && p.referenceNumber.toLowerCase().includes(q)) || (p.bagNumber && p.bagNumber.toLowerCase().includes(q));
-                                                            }).length === 0 && (
-                                                                    <tr>
-                                                                        <td colSpan={7} style={{ padding: '20px', textAlign: 'center', color: '#9ca3af', fontSize: '13px' }}>
-                                                                            No parcels matched query "{dashSearchQuery}"
+                                                                return !q || (b.mawbRef && b.mawbRef.toLowerCase().includes(q)) || (b.bagNumber && b.bagNumber.toLowerCase().includes(q));
+                                                            }).length
+                                                        })</div>
+                                                    </div>
+                                                    <div style={{ overflowX: 'auto' }}>
+                                                        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px', textAlign: 'left' }}>
+                                                            <thead>
+                                                                <tr style={{ borderBottom: '2px solid #e5e7eb', backgroundColor: '#f9fafb' }}>
+                                                                    {['Bag Number', 'MAWB Ref', 'Target Partner', 'Destination Hub', 'Parcels', 'Total Weight', 'Status', 'Created / Sealed By & Timestamp'].map(h => (
+                                                                        <th key={h} style={{ padding: '10px 8px', color: '#6b7280', fontWeight: '700', fontSize: '11px', textTransform: 'uppercase' }}>{h}</th>
+                                                                    ))}
+                                                                </tr>
+                                                            </thead>
+                                                            <tbody>
+                                                                {(dashboardData.bagsList || []).filter((b: any) => {
+                                                                    const q = dashSearchQuery.trim().toLowerCase();
+                                                                    return !q || (b.mawbRef && b.mawbRef.toLowerCase().includes(q)) || (b.bagNumber && b.bagNumber.toLowerCase().includes(q));
+                                                                }).map((b: any, idx: number) => (
+                                                                    <tr key={`b-${idx}`} style={{ borderBottom: '1px solid #f3f4f6' }}>
+                                                                        <td style={{ padding: '10px 8px', fontWeight: '800', color: '#111827', fontFamily: 'monospace' }}>{b.bagNumber}</td>
+                                                                        <td style={{ padding: '10px 8px', color: '#374151', fontSize: '12px' }}>{b.mawbRef || '—'}</td>
+                                                                        <td style={{ padding: '10px 8px' }}>
+                                                                            <span style={{ padding: '2px 8px', borderRadius: '4px', fontSize: '11px', fontWeight: '700', backgroundColor: b.targetPartner === 'PickMe' ? '#fef3c7' : b.targetPartner === 'Domex' ? '#dbeafe' : b.targetPartner === 'Pronto' ? '#e0e7ff' : '#f3f4f6', color: b.targetPartner === 'PickMe' ? '#b45309' : b.targetPartner === 'Domex' ? '#1d4ed8' : b.targetPartner === 'Pronto' ? '#4338ca' : '#374151' }}>
+                                                                                {b.targetPartner}
+                                                                            </span>
+                                                                        </td>
+                                                                        <td style={{ padding: '10px 8px', color: '#374151' }}>{b.destinationHub || b.targetPartner}</td>
+                                                                        <td style={{ padding: '10px 8px', fontWeight: '700' }}>{b.parcelCount} items</td>
+                                                                        <td style={{ padding: '10px 8px', color: '#4b5563' }}>{b.totalWeight ? `${b.totalWeight} kg` : '-'}</td>
+                                                                        <td style={{ padding: '10px 8px' }}>
+                                                                            <span style={{ padding: '2px 8px', borderRadius: '4px', fontSize: '11px', fontWeight: '700', backgroundColor: b.status === 'SEALED' ? '#fee2e2' : '#dcfce7', color: b.status === 'SEALED' ? '#dc2626' : '#15803d' }}>
+                                                                                {b.status === 'SEALED' ? 'SEALED' : 'OPEN'}
+                                                                            </span>
+                                                                        </td>
+                                                                        <td style={{ padding: '10px 8px', color: '#4b5563', fontSize: '11px' }}>
+                                                                            <div style={{ fontWeight: '600', color: '#111827' }}>{b.sealedBy && b.sealedBy !== '-' ? b.sealedBy : b.createdBy}</div>
+                                                                            <div style={{ color: '#6b7280', fontSize: '10px' }}>{b.sealedAt && b.sealedAt !== '-' ? new Date(b.sealedAt).toLocaleString() : b.createdAt ? new Date(b.createdAt).toLocaleString() : '-'}</div>
                                                                         </td>
                                                                     </tr>
-                                                                )}
-                                                        </tbody>
-                                                    </table>
+                                                                ))}
+                                                                {(dashboardData.bagsList || []).filter((b: any) => {
+                                                                    const q = dashSearchQuery.trim().toLowerCase();
+                                                                    return !q || (b.mawbRef && b.mawbRef.toLowerCase().includes(q)) || (b.bagNumber && b.bagNumber.toLowerCase().includes(q));
+                                                                }).length === 0 && (
+                                                                        <tr>
+                                                                            <td colSpan={8} style={{ padding: '20px', textAlign: 'center', color: '#9ca3af', fontSize: '13px' }}>
+                                                                                No LMD bags matched query "{dashSearchQuery}"
+                                                                            </td>
+                                                                        </tr>
+                                                                    )}
+                                                            </tbody>
+                                                        </table>
+                                                    </div>
+                                                </div>
+
+                                                {/* 3. MATCHED BOX UNSEALINGS */}
+                                                <div style={card}>
+                                                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
+                                                        <div style={label}>Matched Box Unsealings ({
+                                                            (dashboardData.unsealedBoxesList || []).filter((u: any) => {
+                                                                const q = dashSearchQuery.trim().toLowerCase();
+                                                                return !q || (u.mawbRef && u.mawbRef.toLowerCase().includes(q)) || (u.bagNumber && u.bagNumber.toLowerCase().includes(q));
+                                                            }).length
+                                                        })</div>
+                                                    </div>
+                                                    <div style={{ overflowX: 'auto' }}>
+                                                        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px', textAlign: 'left' }}>
+                                                            <thead>
+                                                                <tr style={{ borderBottom: '2px solid #e5e7eb', backgroundColor: '#f9fafb' }}>
+                                                                    {['Box Bag No', 'MAWB Ref', 'Scanned / Expected Count', 'Unsealed By', 'Timestamp'].map(h => (
+                                                                        <th key={h} style={{ padding: '10px 8px', color: '#6b7280', fontWeight: '700', fontSize: '11px', textTransform: 'uppercase' }}>{h}</th>
+                                                                    ))}
+                                                                </tr>
+                                                            </thead>
+                                                            <tbody>
+                                                                {(dashboardData.unsealedBoxesList || []).filter((u: any) => {
+                                                                    const q = dashSearchQuery.trim().toLowerCase();
+                                                                    return !q || (u.mawbRef && u.mawbRef.toLowerCase().includes(q)) || (u.bagNumber && u.bagNumber.toLowerCase().includes(q));
+                                                                }).map((u: any, idx: number) => (
+                                                                    <tr key={`ub-${idx}`} style={{ borderBottom: '1px solid #f3f4f6' }}>
+                                                                        <td style={{ padding: '10px 8px', fontWeight: '800', color: '#111827', fontFamily: 'monospace' }}>{u.bagNumber}</td>
+                                                                        <td style={{ padding: '10px 8px', color: '#374151' }}>{u.mawbRef || '—'}</td>
+                                                                        <td style={{ padding: '10px 8px', fontWeight: '700', color: u.scannedCount === u.expectedCount ? '#166534' : '#dc2626' }}>
+                                                                            {u.scannedCount} / {u.expectedCount}
+                                                                        </td>
+                                                                        <td style={{ padding: '10px 8px', color: '#4b5563' }}>{u.unsealedBy}</td>
+                                                                        <td style={{ padding: '10px 8px', color: '#6b7280', fontSize: '11px' }}>{u.createdAt ? new Date(u.createdAt).toLocaleString() : '-'}</td>
+                                                                    </tr>
+                                                                ))}
+                                                                {(dashboardData.unsealedBoxesList || []).filter((u: any) => {
+                                                                    const q = dashSearchQuery.trim().toLowerCase();
+                                                                    return !q || (u.mawbRef && u.mawbRef.toLowerCase().includes(q)) || (u.bagNumber && u.bagNumber.toLowerCase().includes(q));
+                                                                }).length === 0 && (
+                                                                        <tr>
+                                                                            <td colSpan={5} style={{ padding: '20px', textAlign: 'center', color: '#9ca3af', fontSize: '13px' }}>
+                                                                                No box unsealings matched query "{dashSearchQuery}"
+                                                                            </td>
+                                                                        </tr>
+                                                                    )}
+                                                            </tbody>
+                                                        </table>
+                                                    </div>
+                                                </div>
+
+                                                {/* 4. MATCHED PARCELS */}
+                                                <div style={card}>
+                                                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
+                                                        <div style={label}>Matched Parcels ({
+                                                            (dashboardData.receivedParcels || []).filter((p: any) => {
+                                                                const q = dashSearchQuery.trim().toLowerCase();
+                                                                return !q || (p.mawbReference && p.mawbReference.toLowerCase().includes(q)) || (p.referenceNumber && p.referenceNumber.toLowerCase().includes(q)) || (p.bagNumber && p.bagNumber.toLowerCase().includes(q));
+                                                            }).length
+                                                        })</div>
+                                                    </div>
+                                                    <div style={{ overflowX: 'auto' }}>
+                                                        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px', textAlign: 'left' }}>
+                                                            <thead>
+                                                                <tr style={{ borderBottom: '2px solid #e5e7eb', backgroundColor: '#f9fafb' }}>
+                                                                    {['Waybill / Ref', 'Temu Barcode', 'MAWB Ref', 'Assigned Bag #', 'Courier Partner', 'Destination City', 'Status'].map(h => (
+                                                                        <th key={h} style={{ padding: '10px 8px', color: '#6b7280', fontWeight: '700', fontSize: '11px', textTransform: 'uppercase' }}>{h}</th>
+                                                                    ))}
+                                                                </tr>
+                                                            </thead>
+                                                            <tbody>
+                                                                {(dashboardData.receivedParcels || []).filter((p: any) => {
+                                                                    const q = dashSearchQuery.trim().toLowerCase();
+                                                                    return !q || (p.mawbReference && p.mawbReference.toLowerCase().includes(q)) || (p.referenceNumber && p.referenceNumber.toLowerCase().includes(q)) || (p.bagNumber && p.bagNumber.toLowerCase().includes(q));
+                                                                }).slice(0, 100).map((p: any, idx: number) => (
+                                                                    <tr key={`mp-${idx}`} style={{ borderBottom: '1px solid #f3f4f6' }}>
+                                                                        <td style={{ padding: '10px 8px', fontWeight: '700', color: '#111827' }}>{p.referenceNumber}</td>
+                                                                        <td style={{ padding: '10px 8px', color: '#4b5563', fontFamily: 'monospace', fontSize: '12px' }}>{p.senderReference}</td>
+                                                                        <td style={{ padding: '10px 8px', color: '#374151', fontSize: '12px' }}>{p.mawbReference}</td>
+                                                                        <td style={{ padding: '10px 8px' }}>
+                                                                            {p.bagNumber ? (
+                                                                                <span style={{ padding: '2px 8px', borderRadius: '4px', fontSize: '11px', fontWeight: '700', backgroundColor: '#dcfce7', color: '#15803d', fontFamily: 'monospace' }}>
+                                                                                    {p.bagNumber}
+                                                                                </span>
+                                                                            ) : (
+                                                                                <span style={{ color: '#9ca3af', fontSize: '12px' }}>Unassigned</span>
+                                                                            )}
+                                                                        </td>
+                                                                        <td style={{ padding: '10px 8px', fontWeight: '600' }}>{p.deliveryAgentCode}</td>
+                                                                        <td style={{ padding: '10px 8px', color: '#374151' }}>{p.consigneeLocation || 'N/A'}</td>
+                                                                        <td style={{ padding: '10px 8px' }}>
+                                                                            <span style={{ padding: '2px 8px', borderRadius: '4px', fontSize: '11px', fontWeight: '700', backgroundColor: p.isSorted ? '#dcfce7' : '#fef3c7', color: p.isSorted ? '#15803d' : '#b45309' }}>
+                                                                                {p.isSorted ? 'LMD ALLOCATED' : 'RECEIVED'}
+                                                                            </span>
+                                                                        </td>
+                                                                    </tr>
+                                                                ))}
+                                                                {(dashboardData.receivedParcels || []).filter((p: any) => {
+                                                                    const q = dashSearchQuery.trim().toLowerCase();
+                                                                    return !q || (p.mawbReference && p.mawbReference.toLowerCase().includes(q)) || (p.referenceNumber && p.referenceNumber.toLowerCase().includes(q)) || (p.bagNumber && p.bagNumber.toLowerCase().includes(q));
+                                                                }).length === 0 && (
+                                                                        <tr>
+                                                                            <td colSpan={7} style={{ padding: '20px', textAlign: 'center', color: '#9ca3af', fontSize: '13px' }}>
+                                                                                No parcels matched query "{dashSearchQuery}"
+                                                                            </td>
+                                                                        </tr>
+                                                                    )}
+                                                            </tbody>
+                                                        </table>
+                                                    </div>
                                                 </div>
                                             </div>
-                                        </div>
-                                    )}
+                                        )}
 
-                                    {/* ═══════════════════════════════════════════════════════
+                                        {/* ═══════════════════════════════════════════════════════
                                         DETAIL TAB 6: EXCEPTIONS & DISCREPANCIES
                                     ═══════════════════════════════════════════════════════ */}
-                                    {dashboardSubTab === 'exceptions' && (
-                                        <div style={card}>
-                                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
-                                                <div style={label}>Operational Exceptions & Discrepancies Log</div>
-                                                <div style={{ fontSize: '12px', color: '#6b7280' }}>
-                                                    Total Exceptions: <strong>{(dashboardData.exceptionsList || []).length}</strong>
+                                        {dashboardSubTab === 'exceptions' && (
+                                            <div style={card}>
+                                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+                                                    <div style={label}>Operational Exceptions & Discrepancies Log</div>
+                                                    <div style={{ fontSize: '12px', color: '#6b7280' }}>
+                                                        Total Exceptions: <strong>{totalExc}</strong>
+                                                    </div>
                                                 </div>
-                                            </div>
 
-                                            {dashboardData.exceptionsList && dashboardData.exceptionsList.length > 0 ? (
+                                                {filteredExceptions.length > 0 ? (
+                                                    <div style={{ overflowX: 'auto' }}>
+                                                        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px', textAlign: 'left' }}>
+                                                            <thead>
+                                                                <tr style={{ borderBottom: '2px solid #e5e7eb', backgroundColor: '#f9fafb' }}>
+                                                                    {['#', 'Exception Type', 'Ref / Barcode / Bag #', 'Details', 'Scanned / Expected', 'Reported By', 'Timestamp'].map(h => (
+                                                                        <th key={h} style={{ padding: '10px 8px', color: '#6b7280', fontWeight: '700', fontSize: '11px', textTransform: 'uppercase' }}>{h}</th>
+                                                                    ))}
+                                                                </tr>
+                                                            </thead>
+                                                            <tbody>
+                                                                {filteredExceptions.filter((ex: any) => {
+                                                                    const q = dashSearchQuery.toLowerCase();
+                                                                    return !q || ex.type.toLowerCase().includes(q) || ex.refNumber.toLowerCase().includes(q) || ex.details.toLowerCase().includes(q);
+                                                                }).map((ex: any, idx: number) => (
+                                                                    <tr key={`ex-${idx}`} style={{ borderBottom: '1px solid #f3f4f6' }}>
+                                                                        <td style={{ padding: '10px 8px', color: '#9ca3af', fontSize: '11px' }}>{idx + 1}</td>
+                                                                        <td style={{ padding: '10px 8px' }}>
+                                                                            <span style={{ padding: '2px 8px', borderRadius: '4px', fontSize: '11px', fontWeight: '700', backgroundColor: ex.type.includes('Damaged') ? '#fee2e2' : '#fef3c7', color: ex.type.includes('Damaged') ? '#dc2626' : '#b45309' }}>
+                                                                                {ex.type}
+                                                                            </span>
+                                                                        </td>
+                                                                        <td style={{ padding: '10px 8px', fontWeight: '700', color: '#111827', fontFamily: 'monospace' }}>{ex.refNumber}</td>
+                                                                        <td style={{ padding: '10px 8px', color: '#374151' }}>{ex.details}</td>
+                                                                        <td style={{ padding: '10px 8px', fontWeight: '700', color: '#111827' }}>{ex.scannedVsExpected}</td>
+                                                                        <td style={{ padding: '10px 8px', color: '#4b5563' }}>{ex.reportedBy}</td>
+                                                                        <td style={{ padding: '10px 8px', color: '#6b7280', fontSize: '11px' }}>{ex.createdAt ? new Date(ex.createdAt).toLocaleString() : '-'}</td>
+                                                                    </tr>
+                                                                ))}
+                                                            </tbody>
+                                                        </table>
+                                                    </div>
+                                                ) : (
+                                                    <div style={{ textAlign: 'center', padding: '30px', color: '#9ca3af', fontSize: '13px' }}>No exception logs found.</div>
+                                                )}
+                                            </div>
+                                        )}
+
+                                        {/* ═══════════════════════════════════════════════════════
+                                        DETAIL TAB 7: USER PRODUCTIVITY PERFORMANCE
+                                    ═══════════════════════════════════════════════════════ */}
+                                        {dashboardSubTab === 'productivity' && (
+                                            <div style={card}>
+                                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+                                                    <div>
+                                                        <div style={label}>User Productivity Performance Overview</div>
+                                                        <p style={{ fontSize: '12px', color: '#6b7280', margin: '4px 0 0 0' }}>Real-time parcel sorting, bag sealing, and operational activity across all system operators.</p>
+                                                    </div>
+                                                    <div style={{ fontSize: '12px', color: '#6b7280' }}>
+                                                        Total System Operators: <strong>{(usersList || []).length || (dashboardData.userProductivity || []).length}</strong>
+                                                    </div>
+                                                </div>
+
                                                 <div style={{ overflowX: 'auto' }}>
                                                     <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px', textAlign: 'left' }}>
                                                         <thead>
                                                             <tr style={{ borderBottom: '2px solid #e5e7eb', backgroundColor: '#f9fafb' }}>
-                                                                {['#', 'Exception Type', 'Ref / Barcode / Bag #', 'Details', 'Scanned / Expected', 'Reported By', 'Timestamp'].map(h => (
-                                                                    <th key={h} style={{ padding: '10px 8px', color: '#6b7280', fontWeight: '700', fontSize: '11px', textTransform: 'uppercase' }}>{h}</th>
+                                                                {['#', 'Operator / User Name', 'Email Address', 'Role', 'Inbound Parcels Scanned', 'Outbound Bags Sealed', 'Manifest Sessions Closed', 'System Duty Status'].map(h => (
+                                                                    <th key={h} style={{ padding: '10px 12px', color: '#6b7280', fontWeight: '700', fontSize: '11px', textTransform: 'uppercase' }}>{h}</th>
                                                                 ))}
                                                             </tr>
                                                         </thead>
                                                         <tbody>
-                                                            {(dashboardData.exceptionsList || []).filter((ex: any) => {
-                                                                const q = dashSearchQuery.toLowerCase();
-                                                                return !q || ex.type.toLowerCase().includes(q) || ex.refNumber.toLowerCase().includes(q) || ex.details.toLowerCase().includes(q);
-                                                            }).map((ex: any, idx: number) => (
-                                                                <tr key={`ex-${idx}`} style={{ borderBottom: '1px solid #f3f4f6' }}>
-                                                                    <td style={{ padding: '10px 8px', color: '#9ca3af', fontSize: '11px' }}>{idx + 1}</td>
-                                                                    <td style={{ padding: '10px 8px' }}>
-                                                                        <span style={{ padding: '2px 8px', borderRadius: '4px', fontSize: '11px', fontWeight: '700', backgroundColor: ex.type.includes('Damaged') ? '#fee2e2' : '#fef3c7', color: ex.type.includes('Damaged') ? '#dc2626' : '#b45309' }}>
-                                                                            {ex.type}
-                                                                        </span>
-                                                                    </td>
-                                                                    <td style={{ padding: '10px 8px', fontWeight: '700', color: '#111827', fontFamily: 'monospace' }}>{ex.refNumber}</td>
-                                                                    <td style={{ padding: '10px 8px', color: '#374151' }}>{ex.details}</td>
-                                                                    <td style={{ padding: '10px 8px', fontWeight: '700', color: '#111827' }}>{ex.scannedVsExpected}</td>
-                                                                    <td style={{ padding: '10px 8px', color: '#4b5563' }}>{ex.reportedBy}</td>
-                                                                    <td style={{ padding: '10px 8px', color: '#6b7280', fontSize: '11px' }}>{ex.createdAt ? new Date(ex.createdAt).toLocaleString() : '-'}</td>
-                                                                </tr>
-                                                            ))}
+                                                            {(usersList && usersList.length > 0
+                                                                ? usersList
+                                                                : (dashboardData.userProductivity || []).map((p: any) => ({ first_name: p.operator, last_name: '', email: `${p.operator.toLowerCase().replace(/\s+/g, '.')}@skynet.lk`, role: 'Operator', is_active: true }))
+                                                            ).map((user: any, idx: number) => {
+                                                                const fullName = `${user.first_name || ''} ${user.last_name || ''}`.trim() || user.name || user.email || 'Operator';
+                                                                const prod = (dashboardData.userProductivity || []).find((p: any) =>
+                                                                    p.operator?.toLowerCase().includes(fullName.toLowerCase()) ||
+                                                                    p.operator?.toLowerCase().includes((user.first_name || '').toLowerCase())
+                                                                );
+
+                                                                const scanned = prod ? prod.scanned : 0;
+                                                                const bagsSealed = prod ? prod.bagsSealed : 0;
+                                                                const manifestsClosed = prod ? prod.manifestsClosed : 0;
+
+                                                                return (
+                                                                    <tr key={`u-prod-${user.id || idx}`} style={{ borderBottom: '1px solid #f3f4f6' }}>
+                                                                        <td style={{ padding: '10px 12px', color: '#9ca3af', fontSize: '11px' }}>{idx + 1}</td>
+                                                                        <td style={{ padding: '10px 12px', fontWeight: '700', color: '#111827' }}>
+                                                                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                                                                <div style={{ width: '28px', height: '28px', borderRadius: '50%', backgroundColor: '#f3f4f6', border: '1px solid #d1d5db', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: '700', fontSize: '11px', color: '#374151' }}>
+                                                                                    {(user.first_name || user.name || user.email || 'O')[0].toUpperCase()}
+                                                                                </div>
+                                                                                <span>{fullName}</span>
+                                                                            </div>
+                                                                        </td>
+                                                                        <td style={{ padding: '10px 12px', color: '#4b5563', fontSize: '12px', fontFamily: 'monospace' }}>{user.email || '—'}</td>
+                                                                        <td style={{ padding: '10px 12px' }}>
+                                                                            <span style={{ padding: '2px 8px', borderRadius: '4px', fontSize: '11px', fontWeight: '700', backgroundColor: '#eff6ff', color: '#1d4ed8' }}>
+                                                                                {user.role || 'Operator'}
+                                                                            </span>
+                                                                        </td>
+                                                                        <td style={{ padding: '10px 12px', fontWeight: '800', color: '#166534' }}>{scanned} parcels</td>
+                                                                        <td style={{ padding: '10px 12px', fontWeight: '700', color: '#111827' }}>{bagsSealed} bags</td>
+                                                                        <td style={{ padding: '10px 12px', fontWeight: '700', color: '#374151' }}>{manifestsClosed} manifests</td>
+                                                                        <td style={{ padding: '10px 12px' }}>
+                                                                            <span style={{ padding: '2px 8px', borderRadius: '4px', fontSize: '11px', fontWeight: '700', backgroundColor: '#dcfce7', color: '#15803d' }}>
+                                                                                ● Active On-Duty
+                                                                            </span>
+                                                                        </td>
+                                                                    </tr>
+                                                                );
+                                                            })}
                                                         </tbody>
                                                     </table>
                                                 </div>
-                                            ) : (
-                                                <div style={{ textAlign: 'center', padding: '30px', color: '#9ca3af', fontSize: '13px' }}>No exception logs found.</div>
-                                            )}
-                                        </div>
-                                    )}
-
-                                    {/* ═══════════════════════════════════════════════════════
-                                        DETAIL TAB 7: USER PRODUCTIVITY PERFORMANCE
-                                    ═══════════════════════════════════════════════════════ */}
-                                    {dashboardSubTab === 'productivity' && (
-                                        <div style={card}>
-                                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
-                                                <div>
-                                                    <div style={label}>User Productivity Performance Overview</div>
-                                                    <p style={{ fontSize: '12px', color: '#6b7280', margin: '4px 0 0 0' }}>Real-time parcel sorting, bag sealing, and operational activity across all system operators.</p>
-                                                </div>
-                                                <div style={{ fontSize: '12px', color: '#6b7280' }}>
-                                                    Total System Operators: <strong>{(usersList || []).length || (dashboardData.userProductivity || []).length}</strong>
-                                                </div>
                                             </div>
+                                        )}
 
-                                            <div style={{ overflowX: 'auto' }}>
+                                        {/* ═══════════════════════════════════════════════════════
+                                        DETAIL TAB 8: COURIER PARTNER DISTRIBUTION
+                                    ═══════════════════════════════════════════════════════ */}
+                                        {dashboardSubTab === 'partner' && (
+                                            <div style={card}>
+                                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+                                                    <div style={label}>Courier Partner Allocation Distribution</div>
+                                                    <div style={{ fontSize: '12px', color: '#6b7280' }}>Total Inbound: <strong>{dashboardData.totalReceived} parcels</strong></div>
+                                                </div>
+
                                                 <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px', textAlign: 'left' }}>
                                                     <thead>
                                                         <tr style={{ borderBottom: '2px solid #e5e7eb', backgroundColor: '#f9fafb' }}>
-                                                            {['#', 'Operator / User Name', 'Email Address', 'Role', 'Inbound Parcels Scanned', 'Outbound Bags Sealed', 'Manifest Sessions Closed', 'System Duty Status'].map(h => (
-                                                                <th key={h} style={{ padding: '10px 12px', color: '#6b7280', fontWeight: '700', fontSize: '11px', textTransform: 'uppercase' }}>{h}</th>
-                                                            ))}
+                                                            <th style={{ padding: '12px 10px', color: '#6b7280', fontWeight: '700', fontSize: '11px', textTransform: 'uppercase' }}>Partner Name</th>
+                                                            <th style={{ padding: '12px 10px', color: '#6b7280', fontWeight: '700', fontSize: '11px', textTransform: 'uppercase' }}>No. of Parcels</th>
+                                                            <th style={{ padding: '12px 10px', color: '#6b7280', fontWeight: '700', fontSize: '11px', textTransform: 'uppercase' }}>Allocated Parcels</th>
+                                                            <th style={{ padding: '12px 10px', color: '#6b7280', fontWeight: '700', fontSize: '11px', textTransform: 'uppercase' }}>Pending / Search Parcels</th>
+                                                            <th style={{ padding: '12px 10px', color: '#6b7280', fontWeight: '700', fontSize: '11px', textTransform: 'uppercase' }}>No. of Bags</th>
+                                                            <th style={{ padding: '12px 10px', color: '#6b7280', fontWeight: '700', fontSize: '11px', textTransform: 'uppercase', width: '180px' }}>Allocation %</th>
                                                         </tr>
                                                     </thead>
                                                     <tbody>
-                                                        {(usersList && usersList.length > 0
-                                                            ? usersList
-                                                            : (dashboardData.userProductivity || []).map((p: any) => ({ first_name: p.operator, last_name: '', email: `${p.operator.toLowerCase().replace(/\s+/g, '.')}@skynet.lk`, role: 'Operator', is_active: true }))
-                                                        ).map((user: any, idx: number) => {
-                                                            const fullName = `${user.first_name || ''} ${user.last_name || ''}`.trim() || user.name || user.email || 'Operator';
-                                                            const prod = (dashboardData.userProductivity || []).find((p: any) =>
-                                                                p.operator?.toLowerCase().includes(fullName.toLowerCase()) ||
-                                                                p.operator?.toLowerCase().includes((user.first_name || '').toLowerCase())
-                                                            );
-
-                                                            const scanned = prod ? prod.scanned : 0;
-                                                            const bagsSealed = prod ? prod.bagsSealed : 0;
-                                                            const manifestsClosed = prod ? prod.manifestsClosed : 0;
-
+                                                        {(dashboardData.partnerDetails || [
+                                                            { partnerName: 'PickMe', totalParcels: dashboardData.partnerDistribution?.PickMe || 0, allocatedParcels: dashboardData.partnerDistribution?.PickMe || 0, pendingParcels: 0, totalBags: dashboardData.bagPartnerCounts?.PickMe || 0 },
+                                                            { partnerName: 'Domex', totalParcels: dashboardData.partnerDistribution?.Domex || 0, allocatedParcels: dashboardData.partnerDistribution?.Domex || 0, pendingParcels: 0, totalBags: dashboardData.bagPartnerCounts?.Domex || 0 },
+                                                            { partnerName: 'Pronto', totalParcels: dashboardData.partnerDistribution?.Pronto || 0, allocatedParcels: dashboardData.partnerDistribution?.Pronto || 0, pendingParcels: 0, totalBags: dashboardData.bagPartnerCounts?.Pronto || 0 },
+                                                            { partnerName: 'Other', totalParcels: dashboardData.partnerDistribution?.Other || 0, allocatedParcels: dashboardData.partnerDistribution?.Other || 0, pendingParcels: 0, totalBags: dashboardData.bagPartnerCounts?.General || 0 }
+                                                        ]).map((partner: any) => {
+                                                            const pct = dashboardData.totalReceived > 0 ? Math.round((partner.totalParcels / dashboardData.totalReceived) * 100) : 0;
                                                             return (
-                                                                <tr key={`u-prod-${user.id || idx}`} style={{ borderBottom: '1px solid #f3f4f6' }}>
-                                                                    <td style={{ padding: '10px 12px', color: '#9ca3af', fontSize: '11px' }}>{idx + 1}</td>
-                                                                    <td style={{ padding: '10px 12px', fontWeight: '700', color: '#111827' }}>
+                                                                <tr key={partner.partnerName} style={{ borderBottom: '1px solid #f3f4f6' }}>
+                                                                    <td style={{ padding: '12px 10px', fontWeight: '700', color: '#111827', fontSize: '13px' }}>
+                                                                        {partner.partnerName}
+                                                                    </td>
+                                                                    <td style={{ padding: '12px 10px', fontWeight: '700', color: '#111827' }}>
+                                                                        {partner.totalParcels} parcels
+                                                                    </td>
+                                                                    <td style={{ padding: '12px 10px', fontWeight: '700', color: '#166534' }}>
+                                                                        {partner.allocatedParcels} allocated
+                                                                    </td>
+                                                                    <td style={{ padding: '12px 10px', fontWeight: '700', color: '#b45309' }}>
+                                                                        {partner.pendingParcels} pending
+                                                                    </td>
+                                                                    <td style={{ padding: '12px 10px', fontWeight: '700', color: '#111827' }}>
+                                                                        {partner.totalBags} bags
+                                                                    </td>
+                                                                    <td style={{ padding: '12px 10px' }}>
                                                                         <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                                                                            <div style={{ width: '28px', height: '28px', borderRadius: '50%', backgroundColor: '#f3f4f6', border: '1px solid #d1d5db', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: '700', fontSize: '11px', color: '#374151' }}>
-                                                                                {(user.first_name || user.name || user.email || 'O')[0].toUpperCase()}
+                                                                            <div style={{ flex: 1, height: '8px', backgroundColor: '#f3f4f6', borderRadius: '4px', overflow: 'hidden' }}>
+                                                                                <div style={{ width: `${pct}%`, height: '100%', backgroundColor: '#111827', borderRadius: '4px', transition: 'width 0.5s ease' }} />
                                                                             </div>
-                                                                            <span>{fullName}</span>
+                                                                            <span style={{ fontWeight: '700', color: '#374151', fontSize: '12px', minWidth: '35px' }}>{pct}%</span>
                                                                         </div>
-                                                                    </td>
-                                                                    <td style={{ padding: '10px 12px', color: '#4b5563', fontSize: '12px', fontFamily: 'monospace' }}>{user.email || '—'}</td>
-                                                                    <td style={{ padding: '10px 12px' }}>
-                                                                        <span style={{ padding: '2px 8px', borderRadius: '4px', fontSize: '11px', fontWeight: '700', backgroundColor: '#eff6ff', color: '#1d4ed8' }}>
-                                                                            {user.role || 'Operator'}
-                                                                        </span>
-                                                                    </td>
-                                                                    <td style={{ padding: '10px 12px', fontWeight: '800', color: '#166534' }}>{scanned} parcels</td>
-                                                                    <td style={{ padding: '10px 12px', fontWeight: '700', color: '#111827' }}>{bagsSealed} bags</td>
-                                                                    <td style={{ padding: '10px 12px', fontWeight: '700', color: '#374151' }}>{manifestsClosed} manifests</td>
-                                                                    <td style={{ padding: '10px 12px' }}>
-                                                                        <span style={{ padding: '2px 8px', borderRadius: '4px', fontSize: '11px', fontWeight: '700', backgroundColor: '#dcfce7', color: '#15803d' }}>
-                                                                            ● Active On-Duty
-                                                                        </span>
                                                                     </td>
                                                                 </tr>
                                                             );
@@ -5958,72 +6763,10 @@ export default function WorkstationDashboard() {
                                                     </tbody>
                                                 </table>
                                             </div>
-                                        </div>
-                                    )}
-
-                                    {/* ═══════════════════════════════════════════════════════
-                                        DETAIL TAB 8: COURIER PARTNER DISTRIBUTION
-                                    ═══════════════════════════════════════════════════════ */}
-                                    {dashboardSubTab === 'partner' && (
-                                        <div style={card}>
-                                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
-                                                <div style={label}>Courier Partner Allocation Distribution</div>
-                                                <div style={{ fontSize: '12px', color: '#6b7280' }}>Total Inbound: <strong>{dashboardData.totalReceived} parcels</strong></div>
-                                            </div>
-
-                                            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px', textAlign: 'left' }}>
-                                                <thead>
-                                                    <tr style={{ borderBottom: '2px solid #e5e7eb', backgroundColor: '#f9fafb' }}>
-                                                        <th style={{ padding: '12px 10px', color: '#6b7280', fontWeight: '700', fontSize: '11px', textTransform: 'uppercase' }}>Partner Name</th>
-                                                        <th style={{ padding: '12px 10px', color: '#6b7280', fontWeight: '700', fontSize: '11px', textTransform: 'uppercase' }}>No. of Parcels</th>
-                                                        <th style={{ padding: '12px 10px', color: '#6b7280', fontWeight: '700', fontSize: '11px', textTransform: 'uppercase' }}>Allocated Parcels</th>
-                                                        <th style={{ padding: '12px 10px', color: '#6b7280', fontWeight: '700', fontSize: '11px', textTransform: 'uppercase' }}>Pending / Search Parcels</th>
-                                                        <th style={{ padding: '12px 10px', color: '#6b7280', fontWeight: '700', fontSize: '11px', textTransform: 'uppercase' }}>No. of Bags</th>
-                                                        <th style={{ padding: '12px 10px', color: '#6b7280', fontWeight: '700', fontSize: '11px', textTransform: 'uppercase', width: '180px' }}>Allocation %</th>
-                                                    </tr>
-                                                </thead>
-                                                <tbody>
-                                                    {(dashboardData.partnerDetails || [
-                                                        { partnerName: 'PickMe', totalParcels: dashboardData.partnerDistribution?.PickMe || 0, allocatedParcels: dashboardData.partnerDistribution?.PickMe || 0, pendingParcels: 0, totalBags: dashboardData.bagPartnerCounts?.PickMe || 0 },
-                                                        { partnerName: 'Domex', totalParcels: dashboardData.partnerDistribution?.Domex || 0, allocatedParcels: dashboardData.partnerDistribution?.Domex || 0, pendingParcels: 0, totalBags: dashboardData.bagPartnerCounts?.Domex || 0 },
-                                                        { partnerName: 'Pronto', totalParcels: dashboardData.partnerDistribution?.Pronto || 0, allocatedParcels: dashboardData.partnerDistribution?.Pronto || 0, pendingParcels: 0, totalBags: dashboardData.bagPartnerCounts?.Pronto || 0 },
-                                                        { partnerName: 'Other', totalParcels: dashboardData.partnerDistribution?.Other || 0, allocatedParcels: dashboardData.partnerDistribution?.Other || 0, pendingParcels: 0, totalBags: dashboardData.bagPartnerCounts?.General || 0 }
-                                                    ]).map((partner: any) => {
-                                                        const pct = dashboardData.totalReceived > 0 ? Math.round((partner.totalParcels / dashboardData.totalReceived) * 100) : 0;
-                                                        return (
-                                                            <tr key={partner.partnerName} style={{ borderBottom: '1px solid #f3f4f6' }}>
-                                                                <td style={{ padding: '12px 10px', fontWeight: '700', color: '#111827', fontSize: '13px' }}>
-                                                                    {partner.partnerName}
-                                                                </td>
-                                                                <td style={{ padding: '12px 10px', fontWeight: '700', color: '#111827' }}>
-                                                                    {partner.totalParcels} parcels
-                                                                </td>
-                                                                <td style={{ padding: '12px 10px', fontWeight: '700', color: '#166534' }}>
-                                                                    {partner.allocatedParcels} allocated
-                                                                </td>
-                                                                <td style={{ padding: '12px 10px', fontWeight: '700', color: '#b45309' }}>
-                                                                    {partner.pendingParcels} pending
-                                                                </td>
-                                                                <td style={{ padding: '12px 10px', fontWeight: '700', color: '#111827' }}>
-                                                                    {partner.totalBags} bags
-                                                                </td>
-                                                                <td style={{ padding: '12px 10px' }}>
-                                                                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                                                                        <div style={{ flex: 1, height: '8px', backgroundColor: '#f3f4f6', borderRadius: '4px', overflow: 'hidden' }}>
-                                                                            <div style={{ width: `${pct}%`, height: '100%', backgroundColor: '#111827', borderRadius: '4px', transition: 'width 0.5s ease' }} />
-                                                                        </div>
-                                                                        <span style={{ fontWeight: '700', color: '#374151', fontSize: '12px', minWidth: '35px' }}>{pct}%</span>
-                                                                    </div>
-                                                                </td>
-                                                            </tr>
-                                                        );
-                                                    })}
-                                                </tbody>
-                                            </table>
-                                        </div>
-                                    )}
-                                </>
-                            ) : (
+                                        )}
+                                    </>
+                                );
+                            })() : (
                                 <div style={{ textAlign: 'center', padding: '40px', backgroundColor: '#ffffff', borderRadius: '12px', border: '1px solid #e5e7eb' }}>
                                     <p style={{ color: '#6b7280', fontSize: '14px', margin: '0 0 16px 0' }}>Metrics have not loaded yet.</p>
                                     <button onClick={fetchDashboard} style={{ ...btnPrimary, backgroundColor: '#111827', color: '#ffffff' }}>
@@ -8435,6 +9178,118 @@ export default function WorkstationDashboard() {
                                 }}
                             >
                                 No, close this bag
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* DAMAGED PARCEL PHOTOS FULL VIEW MODAL */}
+            {damagedSelectedPhotosModal && (
+                <div style={{
+                    position: 'fixed',
+                    top: 0,
+                    left: 0,
+                    right: 0,
+                    bottom: 0,
+                    backgroundColor: 'rgba(0, 0, 0, 0.75)',
+                    zIndex: 99999,
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    padding: '20px'
+                }}>
+                    <div style={{
+                        backgroundColor: '#ffffff',
+                        borderRadius: '16px',
+                        maxWidth: '900px',
+                        width: '100%',
+                        maxHeight: '90vh',
+                        overflowY: 'auto',
+                        padding: '24px',
+                        boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.3)',
+                        position: 'relative'
+                    }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', borderBottom: '1px solid #e5e7eb', paddingBottom: '14px', marginBottom: '18px' }}>
+                            <div>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                    <h3 style={{ margin: 0, fontSize: '18px', color: '#111827', fontWeight: '800' }}>
+                                        Damaged Parcel Photos Inspection
+                                    </h3>
+                                </div>
+                                <div style={{ fontSize: '13px', color: '#4b5563', marginTop: '4px' }}>
+                                    Tracking No: <strong style={{ color: '#dc2626' }}>{damagedSelectedPhotosModal.trackingNumber}</strong>
+                                    {damagedSelectedPhotosModal.temuBarcode && <span> | Temu: <strong>{damagedSelectedPhotosModal.temuBarcode}</strong></span>}
+                                </div>
+                            </div>
+                            <button
+                                onClick={() => setDamagedSelectedPhotosModal(null)}
+                                style={{ backgroundColor: '#f3f4f6', border: '1px solid #d1d5db', borderRadius: '50%', width: '32px', height: '32px', fontSize: '16px', cursor: 'pointer', fontWeight: 'bold' }}
+                            >
+                                ✕
+                            </button>
+                        </div>
+
+                        {/* Category & Severity Badges */}
+                        <div style={{ display: 'flex', gap: '10px', marginBottom: '18px', flexWrap: 'wrap' }}>
+                            <span style={{ backgroundColor: '#ffffff', color: '#000000', border: '1px solid #dc2626', padding: '4px 12px', borderRadius: '6px', fontSize: '12px', fontWeight: '700' }}>
+                                Category: {damagedSelectedPhotosModal.damageType}
+                            </span>
+                            <span style={{ backgroundColor: '#ffffff', color: '#000000', border: '1px solid #dc2626', padding: '4px 12px', borderRadius: '6px', fontSize: '12px', fontWeight: '700' }}>
+                                Severity: {damagedSelectedPhotosModal.severity}
+                            </span>
+                            {damagedSelectedPhotosModal.status && (
+                                <span style={{ backgroundColor: '#ffffff', color: '#000000', border: '1px solid #dc2626', padding: '4px 12px', borderRadius: '6px', fontSize: '12px', fontWeight: '700' }}>
+                                    Status: {damagedSelectedPhotosModal.status}
+                                </span>
+                            )}
+                        </div>
+
+                        {damagedSelectedPhotosModal.remarks && (
+                            <div style={{ backgroundColor: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '8px', padding: '12px 16px', marginBottom: '18px', fontSize: '13px', color: '#334155' }}>
+                                <strong>Remarks:</strong> "{damagedSelectedPhotosModal.remarks}"
+                            </div>
+                        )}
+
+                        {/* Dual Photos Side-by-Side View */}
+                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px', marginBottom: '20px' }}>
+                            <div style={{ border: '1px solid #e5e7eb', borderRadius: '12px', padding: '12px', backgroundColor: '#f9fafb', textAlign: 'center' }}>
+                                <div style={{ fontSize: '13px', fontWeight: '800', color: '#374151', marginBottom: '8px' }}>
+                                    Photo 1: Parcel Outer Box Condition
+                                </div>
+                                {damagedSelectedPhotosModal.imageUrl1 ? (
+                                    <img
+                                        src={damagedSelectedPhotosModal.imageUrl1}
+                                        alt="Photo 1"
+                                        style={{ width: '100%', maxHeight: '350px', objectFit: 'contain', borderRadius: '8px', border: '1px solid #d1d5db', backgroundColor: '#000000' }}
+                                    />
+                                ) : (
+                                    <div style={{ padding: '40px', color: '#9ca3af' }}>No Photo 1 provided</div>
+                                )}
+                            </div>
+
+                            <div style={{ border: '1px solid #e5e7eb', borderRadius: '12px', padding: '12px', backgroundColor: '#f9fafb', textAlign: 'center' }}>
+                                <div style={{ fontSize: '13px', fontWeight: '800', color: '#374151', marginBottom: '8px' }}>
+                                    Photo 2: Shipping Label / Barcode Condition
+                                </div>
+                                {damagedSelectedPhotosModal.imageUrl2 ? (
+                                    <img
+                                        src={damagedSelectedPhotosModal.imageUrl2}
+                                        alt="Photo 2"
+                                        style={{ width: '100%', maxHeight: '350px', objectFit: 'contain', borderRadius: '8px', border: '1px solid #d1d5db', backgroundColor: '#000000' }}
+                                    />
+                                ) : (
+                                    <div style={{ padding: '40px', color: '#9ca3af' }}>No Photo 2 provided</div>
+                                )}
+                            </div>
+                        </div>
+
+                        <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+                            <button
+                                onClick={() => setDamagedSelectedPhotosModal(null)}
+                                style={btnPrimary}
+                            >
+                                Close Inspection View
                             </button>
                         </div>
                     </div>

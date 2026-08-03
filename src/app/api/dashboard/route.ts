@@ -58,7 +58,7 @@ export async function GET(request: Request) {
         }
 
         // Fetch all tables concurrently using Promise.allSettled
-        const [shipResult, bagResult, manResult, damResult, unsealResult, spaResult, spResult, spAllocResult] = await Promise.allSettled([
+        const [shipResult, bagResult, manResult, damResult, unsealResult, spaResult, spResult, spAllocResult, mawbResult] = await Promise.allSettled([
             fetchAllSupabaseRows('shipments', 'reference_number,sender_reference,mawb_reference,delivery_agent_code,bag_number,consignee_location_name,created_at,weight', sb),
             fetchAllSupabaseRows('outbound_lmd_bags', 'id,bag_number,mawb_ref,target_partner,destination_hub,status,parcel_count,total_weight,created_by,sealed_by,created_at,sealed_at', sb),
             fetchAllSupabaseRows('manifest_sessions', 'id,manifest_id,mawb_ref,status,total_bags,total_parcels,closed_by,created_at,closed_at', sb),
@@ -66,7 +66,8 @@ export async function GET(request: Request) {
             fetchAllSupabaseRows('bag_unsealing', 'id,bag_number,mawb_ref,status,unsealed_by,scanned_count,expected_count,created_at,scanned_parcels', sb),
             fetchAllSupabaseRows('service_provider_allocation', 'id', sb),
             fetchAllSupabaseRows('service_providers', 'id,name,code', sb),
-            fetchAllSupabaseRows('service_provider_allocation', 'shipment_ref,service_provider,unsealed,scan_status', sb)
+            fetchAllSupabaseRows('service_provider_allocation', 'shipment_ref,service_provider,unsealed,scan_status,mawb_ref', sb),
+            fetchAllSupabaseRows('mawb', 'id,mawb_reference,carrier,declared_bags,declared_wt,mawb_created,shipper_name,notes', sb)
         ]);
 
         const shipData = shipResult.status === 'fulfilled' ? shipResult.value : [];
@@ -77,6 +78,15 @@ export async function GET(request: Request) {
         const spaData = spaResult.status === 'fulfilled' ? spaResult.value : [];
         const spData = spResult.status === 'fulfilled' ? spResult.value : [];
         const spAllocData = spAllocResult.status === 'fulfilled' ? spAllocResult.value : [];
+        const mawbData = mawbResult.status === 'fulfilled' ? mawbResult.value : [];
+
+        // Build UUID -> MAWB reference string lookup map (shipments.mawb_reference stores mawb.id as UUID)
+        const mawbUuidToRef: Record<string, string> = {};
+        mawbData.forEach((m: any) => {
+            if (m.id && m.mawb_reference) {
+                mawbUuidToRef[String(m.id).trim().toLowerCase()] = m.mawb_reference.trim();
+            }
+        });
 
         // Build Service Provider Map (id -> Normalized Name)
         const providerMap: Record<number, string> = { 1: 'PickMe', 2: 'Domex' };
@@ -106,23 +116,25 @@ export async function GET(request: Request) {
 
         // Build Shipment Ref -> Partner Name + Scan Status Map from service_provider_allocation
         const shipmentToPartnerMap: Record<string, string> = {};
-        const shipmentToScanStatusMap: Record<string, { firstScanDone: boolean; scanStatus: string }> = {};
+        const shipmentToScanStatusMap: Record<string, { firstScanDone: boolean; scanStatus: string; unsealed: boolean }> = {};
+
         spAllocData.forEach((alloc: any) => {
             if (alloc.shipment_ref && alloc.service_provider) {
                 const spNum = Number(alloc.service_provider);
                 const partnerName = providerMap[spNum] || providerMap[alloc.service_provider] || 'Other';
                 shipmentToPartnerMap[alloc.shipment_ref] = partnerName;
+                shipmentToPartnerMap[String(alloc.shipment_ref).trim().toLowerCase()] = partnerName;
             }
             if (alloc.shipment_ref) {
                 const refLower = String(alloc.shipment_ref).trim().toLowerCase();
-                const isUnsealed = alloc.unsealed === true || (alloc.scan_status && alloc.scan_status !== 'PENDING');
-                if (isUnsealed) {
-                    unsealedParcelRefsSet.add(refLower);
-                }
-                shipmentToScanStatusMap[alloc.shipment_ref] = {
-                    firstScanDone: isUnsealed,
-                    scanStatus: alloc.scan_status || (isUnsealed ? 'UNSEALED' : 'PENDING')
+                // Store the raw scan_status exactly from service_provider_allocation
+                const scanObj = {
+                    firstScanDone: alloc.scan_status === '1ST_SCAN_DONE',
+                    unsealed: alloc.unsealed === true,
+                    scanStatus: alloc.scan_status || 'PENDING'
                 };
+                shipmentToScanStatusMap[alloc.shipment_ref] = scanObj;
+                shipmentToScanStatusMap[refLower] = scanObj;
             }
         });
 
@@ -141,16 +153,29 @@ export async function GET(request: Request) {
 
         const receivedParcels = shipData.map(s => {
             const refLower = String(s.reference_number || '').trim().toLowerCase();
-            const hasBagNumber = Boolean(s.bag_number && String(s.bag_number).trim() !== '');
-            const hasUnsealRecord = unsealedParcelRefsSet.has(refLower);
-            const scanInfo = shipmentToScanStatusMap[s.reference_number];
+            const scanInfo = shipmentToScanStatusMap[s.reference_number] || shipmentToScanStatusMap[refLower];
 
-            // Parcels Sorted = all parcels where 1st scan (Box Unsealing) is done
-            const isSorted = hasBagNumber || hasUnsealRecord || scanInfo?.firstScanDone === true;
+            // Parcels Sorted = STRICTLY only parcels where service_provider_allocation.scan_status = '1ST_SCAN_DONE'
+            const isSorted = scanInfo?.scanStatus === '1ST_SCAN_DONE';
             if (isSorted) totalSorted++;
-            
+
+            // Allocation Status Stage Breakdown:
+            // Stage 2: 2nd Scan Done
+            // Stage 1: 1st Scan Done (scan_status = '1ST_SCAN_DONE' in service_provider_allocation)
+            // Stage 0: Pending 1st Scan
+            let allocationStage: 'PENDING_1ST_SCAN' | '1ST_SCAN_DONE' | '2ND_SCAN_DONE' = 'PENDING_1ST_SCAN';
+            let allocationStatusLabel = 'Pending 1st Scan';
+
+            if (scanInfo?.scanStatus === '2ND_SCAN_DONE' || scanInfo?.scanStatus === 'COMPLETED' || scanInfo?.scanStatus === 'ALLOCATED') {
+                allocationStage = '2ND_SCAN_DONE';
+                allocationStatusLabel = '2nd Scan Done';
+            } else if (scanInfo?.scanStatus === '1ST_SCAN_DONE') {
+                allocationStage = '1ST_SCAN_DONE';
+                allocationStatusLabel = '1st Scan Done';
+            }
+
             // Resolve LMD Courier Partner strictly via service_provider_allocation table
-            let rawPartner = shipmentToPartnerMap[s.reference_number] || '';
+            let rawPartner = shipmentToPartnerMap[s.reference_number] || shipmentToPartnerMap[refLower] || s.delivery_agent_code || '';
             let pName = 'Other';
             if (rawPartner.toLowerCase().includes('pickme')) pName = 'PickMe';
             else if (rawPartner.toLowerCase().includes('domex')) pName = 'Domex';
@@ -170,10 +195,17 @@ export async function GET(request: Request) {
                 partnerDetailsMap[pName].pendingParcels++;
             }
 
+            // Resolve UUID stored in shipments.mawb_reference to the real MAWB reference string
+            const rawMawbRef = s.mawb_reference || '';
+            const isUuidRef = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(rawMawbRef.trim());
+            const resolvedMawbRef = isUuidRef
+                ? (mawbUuidToRef[rawMawbRef.trim().toLowerCase()] || '-')
+                : (rawMawbRef.trim() || '-');
+
             return {
                 referenceNumber: s.reference_number || 'N/A',
                 senderReference: s.sender_reference || '-',
-                mawbReference: s.mawb_reference || '-',
+                mawbReference: resolvedMawbRef,
                 deliveryAgentCode: pName,
                 bagNumber: s.bag_number || '',
                 consigneeLocation: s.consignee_location_name || 'N/A',
@@ -181,7 +213,10 @@ export async function GET(request: Request) {
                 createdAt: s.created_at || new Date().toISOString(),
                 isSorted,
                 firstScanDone: isSorted,
-                status: scanInfo?.scanStatus || (isSorted ? 'UNSEALED' : 'PENDING')
+                scanStatus: scanInfo?.scanStatus || (isSorted ? '1ST_SCAN_DONE' : 'PENDING_1ST_SCAN'),
+                allocationStage,
+                allocationStatusLabel,
+                status: scanInfo?.scanStatus || allocationStatusLabel
             };
         });
 
@@ -229,7 +264,15 @@ export async function GET(request: Request) {
 
         const partnerDetails = Object.values(partnerDetailsMap);
 
-        // 3. Manifest Metrics & Structured List
+        const isUuid = (val: string) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(val);
+        const isValidMawbRef = (ref: any) => {
+            if (!ref || typeof ref !== 'string') return false;
+            const clean = ref.trim();
+            if (clean === '' || clean === '-' || clean.toUpperCase() === 'N/A' || clean.startsWith('MNF-')) return false;
+            if (isUuid(clean)) return false;
+            return true;
+        };
+
         let totalManifests = manData.length;
         let openManifests = 0;
         let closedManifests = 0;
@@ -239,10 +282,12 @@ export async function GET(request: Request) {
             if (isClosed) closedManifests++;
             else openManifests++;
 
+            const cleanMawb = isValidMawbRef(m.mawb_ref) ? m.mawb_ref.trim() : (isValidMawbRef(m.manifest_id) ? m.manifest_id.trim() : '');
+
             return {
                 id: m.id,
                 manifestId: m.manifest_id || m.mawb_ref || `MNF-${m.id}`,
-                mawbRef: m.mawb_ref || m.manifest_id || '',
+                mawbRef: cleanMawb,
                 status: m.status || 'OPEN',
                 totalBags: m.total_bags || 0,
                 totalParcels: m.total_parcels || 0,
@@ -272,8 +317,8 @@ export async function GET(request: Request) {
 
         unsealData.forEach(u => {
             const isDiscrepancy = (u.discrepancy && u.discrepancy !== 0) ||
-                                 (u.scanned_count !== undefined && u.expected_count !== undefined && u.scanned_count !== u.expected_count) ||
-                                 (u.status && (u.status.toLowerCase().includes('shortage') || u.status.toLowerCase().includes('overage') || u.status.toLowerCase().includes('discrepancy')));
+                (u.scanned_count !== undefined && u.expected_count !== undefined && u.scanned_count !== u.expected_count) ||
+                (u.status && (u.status.toLowerCase().includes('shortage') || u.status.toLowerCase().includes('overage') || u.status.toLowerCase().includes('discrepancy')));
             if (isDiscrepancy) {
                 discrepancyCount++;
             }
@@ -340,6 +385,44 @@ export async function GET(request: Request) {
 
         const userProductivity = Object.values(userProductivityMap).sort((a, b) => b.scanned - a.scanned);
 
+        const mawbTableList = mawbData
+            .filter((m: any) => isValidMawbRef(m.mawb_reference))
+            .map((m: any) => ({
+                mawbReference: m.mawb_reference.trim(),
+                carrier: m.carrier || 'N/A',
+                declaredBags: m.declared_bags || 0,
+                declaredWeight: m.declared_wt || 0,
+                createdAt: m.mawb_created || '',
+                shipperName: m.shipper_name || '',
+                notes: m.notes || ''
+            }));
+
+        const mawbWiseMap: Record<string, { mawbReference: string; totalReceived: number; totalSorted: number; pendingParcels: number; sortedParcels: any[]; receivedParcels: any[] }> = {};
+
+        receivedParcels.forEach((p: any) => {
+            const mawb = (p.mawbReference && p.mawbReference !== '-' && p.mawbReference.trim() !== '') ? p.mawbReference.trim() : 'UNASSIGNED';
+            if (!mawbWiseMap[mawb]) {
+                mawbWiseMap[mawb] = {
+                    mawbReference: mawb,
+                    totalReceived: 0,
+                    totalSorted: 0,
+                    pendingParcels: 0,
+                    sortedParcels: [],
+                    receivedParcels: []
+                };
+            }
+            mawbWiseMap[mawb].totalReceived++;
+            mawbWiseMap[mawb].receivedParcels.push(p);
+            if (p.isSorted) {
+                mawbWiseMap[mawb].totalSorted++;
+                mawbWiseMap[mawb].sortedParcels.push(p);
+            } else {
+                mawbWiseMap[mawb].pendingParcels++;
+            }
+        });
+
+        const mawbWiseSummary = Object.values(mawbWiseMap).sort((a, b) => a.mawbReference.localeCompare(b.mawbReference));
+
         return NextResponse.json({
             success: true,
             dashboard: {
@@ -349,7 +432,7 @@ export async function GET(request: Request) {
                 totalBagsCreated,
                 openBags,
                 sealedBags,
-                totalManifests,
+                totalManifests: Math.max(totalManifests, mawbTableList.length),
                 openManifests,
                 closedManifests,
                 totalDispatched,
@@ -363,8 +446,10 @@ export async function GET(request: Request) {
                 partnerDetails,
                 userProductivity,
                 receivedParcels,
+                mawbWiseSummary,
                 bagsList,
                 manifestsList,
+                mawbTableList,
                 unsealedBoxesList,
                 exceptionsList
             }
