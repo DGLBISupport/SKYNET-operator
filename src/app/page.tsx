@@ -3404,7 +3404,7 @@ export default function WorkstationDashboard() {
                                                 }
                                                 if (scn < exp) {
                                                     return (
-                                                        <span style={{ fontSize: '11px', fontWeight: '700', color: '#oooooo', backgroundColor: '#ffffff', border: '1px solid #dc2626', padding: '3px 8px', borderRadius: '4px' }}>
+                                                        <span style={{ fontSize: '11px', fontWeight: '700', color: '#000000', backgroundColor: '#ffffff', border: '1px solid #dc2626', padding: '3px 8px', borderRadius: '4px' }}>
                                                             Remaining: {exp - scn} left
                                                         </span>
                                                     );

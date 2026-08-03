@@ -32,6 +32,7 @@ interface TrackingData {
 
 export default function TrackingTab() {
     const [searchQuery, setSearchQuery] = useState('');
+    const [lastScanned, setLastScanned] = useState('');
     const [activeQuery, setActiveQuery] = useState('');
     const [loading, setLoading] = useState(false);
     const [data, setData] = useState<TrackingData | null>(null);
@@ -39,6 +40,7 @@ export default function TrackingTab() {
     const [timeFormat, setTimeFormat] = useState<'12H' | '24H'>('12H');
     const [timezone, setTimezone] = useState('Asia/Colombo');
     const [activeSectionTab, setActiveSectionTab] = useState<'all' | 'details' | 'manifest' | 'shipment'>('all');
+    const trackingInputRef = React.useRef<HTMLInputElement>(null);
 
     const fetchTracking = async (queryToSearch: string) => {
         if (!queryToSearch.trim()) return;
@@ -69,11 +71,18 @@ export default function TrackingTab() {
 
     const handleSearchSubmit = (e: React.FormEvent) => {
         e.preventDefault();
-        fetchTracking(searchQuery);
+        const query = searchQuery.trim();
+        if (!query) return;
+        setLastScanned(query);
+        fetchTracking(query);
+        setTimeout(() => {
+            trackingInputRef.current?.select();
+        }, 50);
     };
 
     const handleQuickSample = (barcode: string) => {
         setSearchQuery(barcode);
+        setLastScanned(barcode);
         fetchTracking(barcode);
     };
 
@@ -83,36 +92,6 @@ export default function TrackingTab() {
     return (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '20px', fontFamily: 'Inter, system-ui, -apple-system, sans-serif' }}>
 
-            {/* Page Header Title & Print Control
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#ffffff', padding: '16px 20px', borderRadius: '10px', border: '1px solid #e5e7eb', boxShadow: '0 1px 3px rgba(0,0,0,0.04)' }}>
-                <div>
-                    <div style={{ fontSize: '12px', color: '#6b7280', marginBottom: '4px', fontWeight: '500' }}>
-                        Home &nbsp;/&nbsp; Tracking &nbsp;/&nbsp; <span style={{ color: '#e21b22', fontWeight: '600' }}>Tracking Enquiry</span>
-                    </div>
-                    {/* <h1 style={{ fontSize: '20px', fontWeight: '700', color: '#111827', margin: 0, display: 'flex', alignItems: 'center', gap: '10px' }}>
-                        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#e21b22" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                            <circle cx="11" cy="11" r="8" />
-                            <line x1="21" y1="21" x2="16.65" y2="16.65" />
-                            <path d="M11 8v6l4 2" />
-                        </svg>
-                        Parcel Tracking Enquiry
-                    </h1> 
-                </div>
-                <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
-                    <button
-                        onClick={() => window.print()}
-                        style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '8px 14px', backgroundColor: '#f3f4f6', border: '1px solid #d1d5db', borderRadius: '6px', fontSize: '13px', fontWeight: '600', color: '#374151', cursor: 'pointer' }}
-                    >
-                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                            <polyline points="6 9 6 2 18 2 18 9" />
-                            <path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2" />
-                            <rect x="6" y="14" width="12" height="8" />
-                        </svg>
-                        Print Details
-                    </button>
-                </div>
-            </div> */}
-
             {/* Search Header Card (Real Database Querying) */}
             <div style={{ backgroundColor: '#ffffff', padding: '20px', borderRadius: '10px', border: '1px solid #e5e7eb', boxShadow: '0 1px 3px rgba(0,0,0,0.04)' }}>
                 <p style={{ fontSize: '13px', color: '#4b5563', marginTop: 0, marginBottom: '12px' }}>
@@ -121,10 +100,21 @@ export default function TrackingTab() {
 
                 <form onSubmit={handleSearchSubmit} style={{ display: 'flex', gap: '10px', alignItems: 'center', flexWrap: 'wrap' }}>
                     <input
+                        ref={trackingInputRef}
                         type="text"
                         value={searchQuery}
-                        onChange={(e) => setSearchQuery(e.target.value)}
+                        onChange={(e) => {
+                            const val = e.target.value;
+                            if (lastScanned && val.startsWith(lastScanned) && val.length > lastScanned.length) {
+                                setSearchQuery(val.slice(lastScanned.length));
+                                setLastScanned('');
+                            } else {
+                                setSearchQuery(val);
+                            }
+                        }}
+                        onFocus={(e) => e.target.select()}
                         placeholder="Enter parcel barcode or tracking number..."
+                        className="scan-input-blink"
                         style={{
                             flex: 1,
                             minWidth: '280px',
