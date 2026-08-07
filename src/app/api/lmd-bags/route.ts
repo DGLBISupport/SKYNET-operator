@@ -175,7 +175,7 @@ export async function GET(request: Request) {
 
     return NextResponse.json({
         success: true,
-        bags: Array.from(outboundBagsMap.values()),
+        bags: Array.from(outboundBagsMap.values()).sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()),
         manifests: Array.from(manifestsMap.values())
     });
 }
@@ -184,34 +184,34 @@ export async function POST(request: Request) {
     try {
         const body = await request.json();
         const { action, mawbRef, bagNumber, partner, destinationHub, operator, parcelCount, totalWeight, parcels } = body;
-
-        if (!mawbRef) {
-            return NextResponse.json({ success: false, error: 'Missing mawbRef parameter' }, { status: 400 });
-        }
+        const effectiveMawbRef = mawbRef || 'GENERAL';
 
         const sb = getSupabaseConfig();
 
         // Check if manifest is closed
-        const manifestSession = manifestsMap.get(mawbRef);
-        if (manifestSession && manifestSession.status === 'CLOSED' && action === 'create') {
-            return NextResponse.json({
-                success: false,
-                error: `Manifest "${mawbRef}" is CLOSED. No additional bags can be created under this manifest.`
-            }, { status: 400 });
+        if (mawbRef) {
+            const manifestSession = manifestsMap.get(mawbRef);
+            if (manifestSession && manifestSession.status === 'CLOSED' && action === 'create') {
+                return NextResponse.json({
+                    success: false,
+                    error: `Manifest "${mawbRef}" is CLOSED. No additional bags can be created under this manifest.`
+                }, { status: 400 });
+            }
         }
 
         // ACTION: CREATE NEW LMD OUTBOUND BAG
         if (action === 'create') {
-            const existingBags = Array.from(outboundBagsMap.values()).filter(b => b.mawbRef.toLowerCase() === mawbRef.toLowerCase());
+            const existingBags = Array.from(outboundBagsMap.values()).filter(b => (b.mawbRef || 'GENERAL').toLowerCase() === effectiveMawbRef.toLowerCase());
             const nextIndex = existingBags.length + 1;
             const formattedIndex = String(nextIndex).padStart(2, '0');
             const partnerCode = partner && partner !== 'ALL' ? `-${partner.toUpperCase()}` : '';
-            const defaultBagNumber = `${mawbRef}${partnerCode}-BAG-${formattedIndex}`;
+            const mawbPrefix = mawbRef ? mawbRef : 'LMD';
+            const defaultBagNumber = `${mawbPrefix}${partnerCode}-BAG-${formattedIndex}`;
             const newBagNumber = (body.customBagNumber || body.bagNumber || defaultBagNumber).trim();
 
             const newBag: OutboundBag = {
                 bagNumber: newBagNumber,
-                mawbRef,
+                mawbRef: effectiveMawbRef,
                 targetPartner: partner || 'ALL',
                 destinationHub: destinationHub || (partner && partner !== 'ALL' ? `${partner}` : 'Main Sort Hub'),
                 status: 'OPEN',
@@ -223,7 +223,7 @@ export async function POST(request: Request) {
             };
 
             outboundBagsMap.set(newBagNumber, newBag);
-            if (!manifestsMap.has(mawbRef)) {
+            if (mawbRef && !manifestsMap.has(mawbRef)) {
                 manifestsMap.set(mawbRef, { mawbRef, status: 'OPEN' });
             }
 
@@ -234,7 +234,7 @@ export async function POST(request: Request) {
                         method: 'POST',
                         headers: sb.headers,
                         body: JSON.stringify({
-                            mawb_ref: mawbRef,
+                            mawb_ref: effectiveMawbRef,
                             bag_number: newBagNumber,
                             target_partner: partner || 'ALL',
                             destination_hub: newBag.destinationHub,
@@ -245,14 +245,16 @@ export async function POST(request: Request) {
                         })
                     });
 
-                    await fetch(`${sb.url}/rest/v1/manifest_sessions`, {
-                        method: 'POST',
-                        headers: { ...sb.headers, "Prefer": "resolution=merge-duplicates" },
-                        body: JSON.stringify({
-                            mawb_ref: mawbRef,
-                            status: 'OPEN'
-                        })
-                    });
+                    if (mawbRef) {
+                        await fetch(`${sb.url}/rest/v1/manifest_sessions`, {
+                            method: 'POST',
+                            headers: { ...sb.headers, "Prefer": "resolution=merge-duplicates" },
+                            body: JSON.stringify({
+                                mawb_ref: mawbRef,
+                                status: 'OPEN'
+                            })
+                        });
+                    }
                 } catch (err) {
                     console.error("Supabase insert outbound_lmd_bags error:", err);
                 }

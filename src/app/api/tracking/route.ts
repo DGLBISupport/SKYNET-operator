@@ -371,7 +371,7 @@ export async function GET(request: Request) {
         const manifestInfo = [
             {
                 date: step1Dt.date !== '-' ? `${step1Dt.date} ${step1Dt.time}` : '-',
-                docketNo: shipment.bag_number || shipment.mawb_reference || refNum,
+                docketNo: shipment.mawb_reference || shipment.bag_number || refNum,
                 senderNo: shipment.shipper_code || shipment.consignor_name || 'Skynet Ingestion',
                 receiver: `${shipment.consignee_name || 'Recipient'} (${shipment.dest_location_name || 'Colombo'})`,
                 from: shipment.origin_country_name || shipment.origin_location_name || 'Origin',

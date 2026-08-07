@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import { AllocationResponse, SkyNetParcelData } from '@/types';
 import { toast } from 'sonner';
 import TrackingTab from '@/app/components/TrackingTab';
+import PaginationControl from '@/app/components/PaginationControl';
 
 // SVG Code 128 Barcode Generator
 function generateCode128SVG(text: string): string {
@@ -192,12 +193,17 @@ export default function WorkstationDashboard() {
         }
     };
 
-    const [activeTab, setActiveTab] = useState<'first-scan' | 'second-scan' | 'damaged-barcode' | 'verify' | 'config' | 'reports' | 'search' | 'dashboard' | 'tracking'>('first-scan');
+    const [activeTab, setActiveTab] = useState<'first-scan' | 'second-scan' | 'damaged-barcode' | 'verify' | 'config' | 'reports' | 'search' | 'dashboard' | 'tracking' | 'manifest-tracking'>('first-scan');
     const [isSidebarExpanded, setIsSidebarExpanded] = useState<boolean>(true);
     const [scannedToday, setScannedToday] = useState<number>(0);
     const [timeString, setTimeString] = useState<string>('');
     const [scannerConnected, setScannerConnected] = useState<boolean | null>(null); // null = unknown, true = connected, false = no scanner
     const [operatorMenuOpen, setOperatorMenuOpen] = useState<boolean>(false);
+
+    // Tab: Manifest & Bag Tracking State
+    const [manifestTrackingMawb, setManifestTrackingMawb] = useState<string>('');
+    const [manifestTrackingExpandedBag, setManifestTrackingExpandedBag] = useState<string | null>(null);
+    const [manifestTrackingSearch, setManifestTrackingSearch] = useState<string>('');
 
     // Device Manager states
     const [isDeviceManagerOpen, setIsDeviceManagerOpen] = useState(false);
@@ -217,8 +223,14 @@ export default function WorkstationDashboard() {
     const [firstScanLastScanned, setFirstScanLastScanned] = useState('');
     const [firstScanHistory, setFirstScanHistory] = useState<Array<{ trackingNumber: string; skynetTrackingNumber?: string; senderReference?: string; isTemuScan?: boolean; recipientName: string; city: string; timestamp: string; assignedPartner?: string; assignedZone?: string }>>([]);
     const [firstScanCurrentScan, setFirstScanCurrentScan] = useState<{ assignedPartner?: string; assignedZone?: string; parcel?: any } | null>(null);
+    const [firstScanBagParcels, setFirstScanBagParcels] = useState<any[]>([]);
+    const [missingParcelReasons, setMissingParcelReasons] = useState<Record<string, string>>({});
     const [firstScanStatus, setFirstScanStatus] = useState<'READY' | 'FETCHING' | 'SUCCESS' | 'ERROR'>('READY');
     const [firstScanError, setFirstScanError] = useState('');
+    const [firstScanHistoryPage, setFirstScanHistoryPage] = useState<number>(1);
+    const [firstScanBagsPage, setFirstScanBagsPage] = useState<number>(1);
+    const [firstScanHistoryRowsPerPage, setFirstScanHistoryRowsPerPage] = useState<number>(5);
+    const [firstScanBagsRowsPerPage, setFirstScanBagsRowsPerPage] = useState<number>(5);
     const [unsealedBoxes, setUnsealedBoxes] = useState<Array<{
         mawb: string;
         bagNumber?: string;
@@ -381,6 +393,51 @@ export default function WorkstationDashboard() {
         city?: string;
     }>>([]);
 
+    // Dispatch Verification Daily Progress & Calendar States
+    const [verifySelectedDate, setVerifySelectedDate] = useState<string>(() => new Date().toISOString().split('T')[0]);
+    const [verifyDailyStats, setVerifyDailyStats] = useState({
+        totalScannedAll: 0,
+        unsealed1stScanDone: 0,
+        verified2ndScanDone: 0,
+        pickMeScanned: 0,
+        domexScanned: 0,
+        prontoScanned: 0,
+        otherScanned: 0
+    });
+    const [verifyOutboundBags, setVerifyOutboundBags] = useState<any[]>([]);
+    const [verifyLoadingStats, setVerifyLoadingStats] = useState(false);
+
+    const fetchVerifyDailyStats = useCallback(async (dateStr: string) => {
+        setVerifyLoadingStats(true);
+        try {
+            const res = await fetch(`/api/dispatch-verify-stats?date=${encodeURIComponent(dateStr)}&_t=${Date.now()}`);
+            const result = await res.json();
+            if (result.success && result.stats) {
+                setVerifyDailyStats(result.stats);
+            }
+            if (result.success && Array.isArray(result.outboundBags)) {
+                setVerifyOutboundBags(result.outboundBags);
+            }
+        } catch (err) {
+            console.error("Failed to fetch dispatch verify daily stats:", err);
+        } finally {
+            setVerifyLoadingStats(false);
+        }
+    }, []);
+
+    useEffect(() => {
+        let intervalId: NodeJS.Timeout | null = null;
+        if (activeTab === 'verify') {
+            fetchVerifyDailyStats(verifySelectedDate);
+            intervalId = setInterval(() => {
+                fetchVerifyDailyStats(verifySelectedDate);
+            }, 10000);
+        }
+        return () => {
+            if (intervalId) clearInterval(intervalId);
+        };
+    }, [activeTab, verifySelectedDate, fetchVerifyDailyStats]);
+
     // Tab: Damaged Barcode (Temu Scan) & Photo Upload Reporting
     const [damagedBarcodeInput, setDamagedBarcodeInput] = useState('');
     const [damagedLastScanned, setDamagedLastScanned] = useState('');
@@ -440,6 +497,20 @@ export default function WorkstationDashboard() {
     const [dashPartnerFilter, setDashPartnerFilter] = useState('ALL');
     const [dashMawbFilter, setDashMawbFilter] = useState('');
     const [dashStatusFilter, setDashStatusFilter] = useState('ALL');
+    const [dashTablePage, setDashTablePage] = useState<number>(1);
+    const [dashTableRowsPerPage, setDashTableRowsPerPage] = useState<number>(10);
+    const [manifestSessionsPage, setManifestSessionsPage] = useState<number>(1);
+    const [manifestBagsPage, setManifestBagsPage] = useState<number>(1);
+    const [manifestUnsealsPage, setManifestUnsealsPage] = useState<number>(1);
+    const [manifestParcelsPage, setManifestParcelsPage] = useState<number>(1);
+
+    useEffect(() => {
+        setDashTablePage(1);
+        setManifestSessionsPage(1);
+        setManifestBagsPage(1);
+        setManifestUnsealsPage(1);
+        setManifestParcelsPage(1);
+    }, [dashboardSubTab, dashSearchQuery, dashPartnerFilter, dashMawbFilter]);
 
     const fetchDashboard = async () => {
         setIsLoadingDashboard(true);
@@ -588,6 +659,8 @@ export default function WorkstationDashboard() {
             setBagBarcodeInput('');
             setFirstScanHistory([]);
             setFirstScanCurrentScan(null);
+            setFirstScanBagParcels([]);
+            setMissingParcelReasons({});
             setIsBagsLoading(false);
             return;
         }
@@ -599,6 +672,10 @@ export default function WorkstationDashboard() {
         setBagBarcodeInput('');
         setFirstScanHistory([]);
         setFirstScanCurrentScan(null);
+        setFirstScanBagParcels([]);
+        setMissingParcelReasons({});
+        setFirstScanBagsPage(1);
+        setFirstScanHistoryPage(1);
         setIsBagsLoading(true);
 
         const fetchBags = async () => {
@@ -622,16 +699,21 @@ export default function WorkstationDashboard() {
 
     // Update expected count when bag is selected
     useEffect(() => {
+        setFirstScanHistoryPage(1);
         if (!firstScanSelectedBag) {
             setFirstScanExpected('');
             setFirstScanHistory([]);
             setFirstScanCurrentScan(null);
+            setFirstScanBagParcels([]);
+            setMissingParcelReasons({});
             return;
         }
 
         // Always reset scanned history so operator scans each parcel manually
         setFirstScanHistory([]);
         setFirstScanCurrentScan(null);
+        setFirstScanBagParcels([]);
+        setMissingParcelReasons({});
 
         const selected = firstScanBags.find(b => b.bagNumber === firstScanSelectedBag);
         if (selected && selected.expectedCount > 0) {
@@ -648,6 +730,7 @@ export default function WorkstationDashboard() {
                     const actualCount = data.count !== undefined ? data.count : data.parcels.length;
                     setFirstScanExpected(actualCount);
                     setFirstScanBags(prev => prev.map(b => b.bagNumber === firstScanSelectedBag ? { ...b, expectedCount: actualCount } : b));
+                    setFirstScanBagParcels(data.parcels);
                 }
             } catch (err) {
                 console.error("Failed to fetch bag parcel count:", err);
@@ -722,6 +805,19 @@ export default function WorkstationDashboard() {
         const noteText = unallocatedBagNote.trim() || `Unsealed with ${unallocatedBagUnsealModal.unallocatedCount} unallocated parcel(s)`;
         const finalStatus = `${baseStatus} | UNALLOCATED NOTE: ${noteText}`;
 
+        // Compute missing parcels list & statuses for database sync
+        const scannedRefs = new Set(firstScanHistory.map(p => (p.skynetTrackingNumber || p.trackingNumber || '').trim().toUpperCase()));
+        const missingList = (firstScanBagParcels || []).filter(p => !scannedRefs.has((p.skynetTrackingNumber || p.trackingNumber || '').trim().toUpperCase()));
+        const missingParcelsPayload = missingList.map(p => {
+            const ref = p.skynetTrackingNumber || p.trackingNumber;
+            const specificReason = missingParcelReasons[ref] || (discrepancyReason === 'Other (Custom Note)' ? customDiscrepancyNote.trim() : discrepancyReason) || 'Missing Parcels';
+            return {
+                trackingNumber: ref,
+                reason: specificReason,
+                status: `SHORTAGE: ${specificReason}`
+            };
+        });
+
         try {
             setFirstScanStatus('FETCHING');
             const response = await fetch('/api/allocate', {
@@ -735,7 +831,8 @@ export default function WorkstationDashboard() {
                     scannedCount: firstScanHistory.length,
                     status: finalStatus,
                     operator: currentUser ? `${currentUser.firstName} ${currentUser.lastName}` : 'System',
-                    scannedParcels: firstScanHistory
+                    scannedParcels: firstScanHistory,
+                    missingParcels: missingParcelsPayload
                 }),
             });
             const data = await response.json();
@@ -806,6 +903,19 @@ export default function WorkstationDashboard() {
             }
         }
 
+        // Compute missing parcels list & statuses for database sync
+        const scannedRefs = new Set(firstScanHistory.map(p => (p.skynetTrackingNumber || p.trackingNumber || '').trim().toUpperCase()));
+        const missingList = (firstScanBagParcels || []).filter(p => !scannedRefs.has((p.skynetTrackingNumber || p.trackingNumber || '').trim().toUpperCase()));
+        const missingParcelsPayload = missingList.map(p => {
+            const ref = p.skynetTrackingNumber || p.trackingNumber;
+            const specificReason = missingParcelReasons[ref] || (discrepancyReason === 'Other (Custom Note)' ? customDiscrepancyNote.trim() : discrepancyReason) || 'Missing Parcels';
+            return {
+                trackingNumber: ref,
+                reason: specificReason,
+                status: `SHORTAGE: ${specificReason}`
+            };
+        });
+
         try {
             setFirstScanStatus('FETCHING');
             const response = await fetch('/api/allocate', {
@@ -819,7 +929,8 @@ export default function WorkstationDashboard() {
                     scannedCount: firstScanHistory.length,
                     status: finalStatus,
                     operator: currentUser ? `${currentUser.firstName} ${currentUser.lastName}` : 'System',
-                    scannedParcels: firstScanHistory
+                    scannedParcels: firstScanHistory,
+                    missingParcels: missingParcelsPayload
                 }),
             });
             const data = await response.json();
@@ -1709,6 +1820,8 @@ export default function WorkstationDashboard() {
         setFirstScanInput('');
         setFirstScanLastScanned('');
         setFirstScanHistory([]);
+        setFirstScanBagParcels([]);
+        setMissingParcelReasons({});
         setFirstScanStatus('READY');
         setFirstScanError('');
         setFirstScanCurrentScan(null);
@@ -1785,7 +1898,10 @@ export default function WorkstationDashboard() {
         }
     };
 
-    const handleCloseManifest = async () => {
+    const handleCloseManifest = async (targetMawb?: string) => {
+        const mawbToClose = targetMawb || selectedSecondScanMawb || manifestTrackingMawb;
+        if (!mawbToClose) return;
+
         const activeOperator = currentUser
             ? `${currentUser.firstName || ''} ${currentUser.lastName || ''}`.trim() || currentUser.username || currentUser.email
             : 'Staff';
@@ -1796,7 +1912,9 @@ export default function WorkstationDashboard() {
         let generalBags = 0, generalParcels = 0;
         let totalParcels = 0, totalWeight = 0;
 
-        (outboundBags || []).forEach((b) => {
+        const relevantBags = (outboundBags || []).filter(b => !mawbToClose || (b.mawbRef || '').toLowerCase() === mawbToClose.toLowerCase());
+
+        relevantBags.forEach((b) => {
             const bn = (b.bagNumber || '').toUpperCase();
             const p = b.targetPartner || (bn.includes('PICKME') ? 'PickMe' : bn.includes('DOMEX') ? 'Domex' : bn.includes('PRONTO') ? 'Pronto' : 'ALL');
             const count = b.parcelCount || (b.parcels ? b.parcels.length : 0);
@@ -1826,7 +1944,7 @@ export default function WorkstationDashboard() {
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     action: 'close-manifest',
-                    mawbRef: selectedSecondScanMawb,
+                    mawbRef: mawbToClose,
                     operator: activeOperator
                 })
             });
@@ -1834,10 +1952,10 @@ export default function WorkstationDashboard() {
             if (data.success) {
                 setSecondScanManifestStatus('CLOSED');
                 setManifestClosedModal({
-                    mawbRef: selectedSecondScanMawb,
+                    mawbRef: mawbToClose,
                     closedBy: activeOperator,
                     closedAt: new Date().toLocaleString(),
-                    totalBags: (outboundBags || []).length,
+                    totalBags: relevantBags.length,
                     pickmeBags,
                     pickmeParcels,
                     domexBags,
@@ -2499,7 +2617,7 @@ export default function WorkstationDashboard() {
                     { lbl: 'Weight', val: `${parcel.weight.toFixed(3)} kg` },
                     { lbl: 'Value', val: parcel.value || 'LKR 0.00' },
                     { lbl: 'Account', val: parcel.account || '—' },
-                    { lbl: 'API sync', val: <span style={{ color: '#16a34a', fontWeight: '600' }}>✓ {parcel.apiSync || 'Synced'}</span> },
+                    //{ lbl: 'API sync', val: <span style={{ color: '#16a34a', fontWeight: '600' }}>✓ {parcel.apiSync || 'Synced'}</span> },
                 ].map(({ lbl, val }) => (
                     <div key={lbl}>
                         <div style={{ color: '#6b7280', marginBottom: '4px', fontSize: '12px', fontWeight: '500' }}>{lbl}</div>
@@ -2586,6 +2704,11 @@ export default function WorkstationDashboard() {
                 return {
                     title: 'LMD Verification & Allocation (2nd Scan)',
                     description: 'Verify 2nd scan status, assign LMD courier partners & zones, and manage outbound bagging.'
+                };
+            case 'manifest-tracking':
+                return {
+                    title: 'Manifest & Outbound Bag Tracking',
+                    description: 'Select a manifest to view all created outbound bags, inspect parcels inside each bag, and track allocation breakdowns.'
                 };
             case 'damaged-barcode':
                 return {
@@ -2774,6 +2897,19 @@ export default function WorkstationDashboard() {
                                     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                                         <path d="M3.85 8.62a4 4 0 0 1 4.78-4.77 4 4 0 0 1 6.74 0 4 4 0 0 1 4.78 4.78 4 4 0 0 1 0 6.74 4 4 0 0 1-4.77 4.78 4 4 0 0 1-6.75 0 4 4 0 0 1-4.78-4.77 4 4 0 0 1 0-6.76Z" />
                                         <path d="m9 12 2 2 4-4" />
+                                    </svg>
+                                )
+                            },
+                            {
+                                id: 'manifest-tracking',
+                                label: 'Manifest Tracking',
+                                icon: (
+                                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                        <path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z" />
+                                        <polyline points="14 2 14 8 20 8" />
+                                        <line x1="16" y1="13" x2="8" y2="13" />
+                                        <line x1="16" y1="17" x2="8" y2="17" />
+                                        <line x1="10" y1="9" x2="8" y2="9" />
                                     </svg>
                                 )
                             },
@@ -3601,7 +3737,7 @@ export default function WorkstationDashboard() {
                                             {firstScanSelectedBag && <span>Bag: {firstScanSelectedBag}</span>}
                                         </div>
                                     </div>
-                                    <div style={{ maxHeight: '380px', overflowY: 'auto' }}>
+                                    <div style={{ minHeight: '250px' }}>
                                         <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px', textAlign: 'left' }}>
                                             <thead>
                                                 <tr style={{ borderBottom: '2px solid #e5e7eb' }}>
@@ -3611,7 +3747,7 @@ export default function WorkstationDashboard() {
                                                 </tr>
                                             </thead>
                                             <tbody>
-                                                {firstScanHistory.map((item, idx) => (
+                                                {firstScanHistory.slice((firstScanHistoryPage - 1) * firstScanHistoryRowsPerPage, firstScanHistoryPage * firstScanHistoryRowsPerPage).map((item, idx) => (
                                                     <tr key={`first-${idx}`} style={{ borderBottom: '1px solid #f3f4f6' }}>
                                                         <td style={{ padding: '8px', color: '#6b7280' }}>{item.timestamp}</td>
                                                         <td style={{ padding: '8px', fontWeight: '600', color: '#111827' }}>{item.trackingNumber}</td>
@@ -3651,6 +3787,13 @@ export default function WorkstationDashboard() {
                                             </tbody>
                                         </table>
                                     </div>
+                                    <PaginationControl
+                                        currentPage={firstScanHistoryPage}
+                                        totalItems={firstScanHistory.length}
+                                        rowsPerPage={firstScanHistoryRowsPerPage}
+                                        onPageChange={(page) => setFirstScanHistoryPage(page)}
+                                        onRowsPerPageChange={(rows) => setFirstScanHistoryRowsPerPage(rows)}
+                                    />
                                 </div>
 
                                 {/* Right Side: Bags Progress Overview & Replacement Sticker Preview */}
@@ -3663,19 +3806,21 @@ export default function WorkstationDashboard() {
                                             </div>
 
                                             {/* Mawb summary metrics */}
-                                            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '10px', marginBottom: '16px' }}>
-                                                <div style={{ backgroundColor: '#f9fafb', border: '1px solid #e5e7eb', borderRadius: '8px', padding: '10px 6px', textAlign: 'center' }}>
-                                                    <div style={{ fontSize: '10px', color: '#6b7280', textTransform: 'uppercase', fontWeight: '700' }}>Total Bags</div>
-                                                    <div style={{ fontSize: '18px', fontWeight: '800', color: '#111827', marginTop: '2px' }}>{firstScanBags.length}</div>
+                                            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '8px', marginBottom: '16px' }}>
+                                                <div style={{ backgroundColor: '#fef2f2', border: '1px solid #fca5a5', borderRadius: '8px', padding: '10px 6px', textAlign: 'center' }}>
+                                                    <div style={{ fontSize: '9.5px', color: '#991b1b', textTransform: 'uppercase', fontWeight: '700' }}>Declared Bags</div>
+                                                    <div style={{ fontSize: '18px', fontWeight: '800', color: '#dc2626', marginTop: '2px' }}>
+                                                        {mawbsList.find((m: any) => m.mawb_reference === firstScanMawb)?.declared_bags ?? 0}
+                                                    </div>
                                                 </div>
                                                 <div style={{ backgroundColor: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: '8px', padding: '10px 6px', textAlign: 'center' }}>
-                                                    <div style={{ fontSize: '10px', color: '#166534', textTransform: 'uppercase', fontWeight: '700' }}>Completed</div>
+                                                    <div style={{ fontSize: '9.5px', color: '#166534', textTransform: 'uppercase', fontWeight: '700' }}>Completed</div>
                                                     <div style={{ fontSize: '18px', fontWeight: '800', color: '#166534', marginTop: '2px' }}>
                                                         {firstScanBags.filter(b => getBagStatus(b.bagNumber, b.expectedCount) === 'COMPLETED').length}
                                                     </div>
                                                 </div>
                                                 <div style={{ backgroundColor: '#f3f4f6', border: '1px solid #d1d5db', borderRadius: '8px', padding: '10px 6px', textAlign: 'center' }}>
-                                                    <div style={{ fontSize: '10px', color: '#374151', textTransform: 'uppercase', fontWeight: '700' }}>Remaining</div>
+                                                    <div style={{ fontSize: '9.5px', color: '#374151', textTransform: 'uppercase', fontWeight: '700' }}>Remaining</div>
                                                     <div style={{ fontSize: '18px', fontWeight: '800', color: '#374151', marginTop: '2px' }}>
                                                         {firstScanBags.filter(b => getBagStatus(b.bagNumber, b.expectedCount) !== 'COMPLETED').length}
                                                     </div>
@@ -3693,119 +3838,137 @@ export default function WorkstationDashboard() {
                                             )}
 
                                             {/* Bags list */}
-                                            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', maxHeight: '350px', overflowY: 'auto', paddingRight: '4px' }}>
-                                                {getSortedBags().map((bag) => {
-                                                    const expected = bag.expectedCount;
-                                                    const scanned = getBagScannedCount(bag.bagNumber);
-                                                    const status = getBagStatus(bag.bagNumber, expected);
-                                                    const remaining = expected - scanned;
-                                                    const unsealed = unsealedBoxes.find(ub => ub.mawb?.toLowerCase() === firstScanMawb?.toLowerCase() && ub.bagNumber?.toLowerCase() === bag.bagNumber?.toLowerCase());
+                                            {(() => {
+                                                const sortedBags = getSortedBags();
+                                                const paginatedSortedBags = sortedBags.slice(
+                                                    (firstScanBagsPage - 1) * firstScanBagsRowsPerPage,
+                                                    firstScanBagsPage * firstScanBagsRowsPerPage
+                                                );
+                                                return (
+                                                    <>
+                                                        <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', minHeight: '200px' }}>
+                                                            {paginatedSortedBags.map((bag) => {
+                                                                const expected = bag.expectedCount;
+                                                                const scanned = getBagScannedCount(bag.bagNumber);
+                                                                const status = getBagStatus(bag.bagNumber, expected);
+                                                                const remaining = expected - scanned;
+                                                                const unsealed = unsealedBoxes.find(ub => ub.mawb?.toLowerCase() === firstScanMawb?.toLowerCase() && ub.bagNumber?.toLowerCase() === bag.bagNumber?.toLowerCase());
 
-                                                    let bgColor = '#ffffff';
-                                                    let borderColor = '#e5e7eb';
-                                                    let textColor = '#374151';
-                                                    let descColor = '#6b7280';
-                                                    let statusText = 'Pending';
-                                                    let statusColor = '#6b7280';
-                                                    let statusBg = '#f3f4f6';
+                                                                let bgColor = '#ffffff';
+                                                                let borderColor = '#e5e7eb';
+                                                                let textColor = '#374151';
+                                                                let descColor = '#6b7280';
+                                                                let statusText = 'Pending';
+                                                                let statusColor = '#6b7280';
+                                                                let statusBg = '#f3f4f6';
 
-                                                    if (status === 'COMPLETED') {
-                                                        bgColor = '#f0fdf4';
-                                                        borderColor = '#bbf7d0';
-                                                        textColor = '#166534';
-                                                        descColor = '#15803d';
-                                                        statusText = 'Completed';
-                                                        statusColor = '#15803d';
-                                                        statusBg = '#dcfce7';
-                                                    } else if (status === 'ONGOING') {
-                                                        bgColor = '#ffffff';
-                                                        borderColor = '#111827';
-                                                        textColor = '#111827';
-                                                        descColor = '#374151';
-                                                        statusText = 'Scanning';
-                                                        statusColor = '#111827';
-                                                        statusBg = '#e5e7eb';
-                                                    }
-
-                                                    return (
-                                                        <div
-                                                            key={bag.bagNumber}
-                                                            onClick={() => {
                                                                 if (status === 'COMPLETED') {
-                                                                    setInvalidBagParcelModal({
-                                                                        barcode: bag.bagNumber,
-                                                                        expectedBag: bag.bagNumber,
-                                                                        actualBag: null,
-                                                                        reason: 'BAG_ALREADY_COMPLETED'
-                                                                    });
-                                                                } else {
-                                                                    setFirstScanSelectedBag(bag.bagNumber);
-                                                                    // Refocus scan input
-                                                                    setTimeout(() => firstScanInputRef.current?.focus(), 50);
+                                                                    bgColor = '#f0fdf4';
+                                                                    borderColor = '#bbf7d0';
+                                                                    textColor = '#166534';
+                                                                    descColor = '#15803d';
+                                                                    statusText = 'Completed';
+                                                                    statusColor = '#15803d';
+                                                                    statusBg = '#dcfce7';
+                                                                } else if (status === 'ONGOING') {
+                                                                    bgColor = '#ffffff';
+                                                                    borderColor = '#111827';
+                                                                    textColor = '#111827';
+                                                                    descColor = '#374151';
+                                                                    statusText = 'Scanning';
+                                                                    statusColor = '#111827';
+                                                                    statusBg = '#e5e7eb';
                                                                 }
-                                                            }}
-                                                            style={{
-                                                                backgroundColor: bgColor,
-                                                                border: status === 'ONGOING' ? '2.5px solid #111827' : `1px solid ${borderColor}`,
-                                                                borderRadius: '8px',
-                                                                padding: '12px 14px',
-                                                                display: 'flex',
-                                                                justifyContent: 'space-between',
-                                                                alignItems: 'center',
-                                                                boxShadow: status === 'ONGOING' ? '0 4px 12px rgba(0, 0, 0, 0.08)' : 'none',
-                                                                cursor: status === 'COMPLETED' ? 'default' : 'pointer',
-                                                                transition: 'all 0.15s ease'
-                                                            }}
-                                                        >
-                                                            <div style={{ display: 'flex', flexDirection: 'column', gap: '2px', maxWidth: '65%' }}>
-                                                                <span style={{ fontWeight: '700', fontSize: '13px', color: textColor }}>
-                                                                    Bag: {bag.bagNumber}
-                                                                </span>
-                                                                <span style={{ fontSize: '11px', color: descColor, wordBreak: 'break-word' }}>
-                                                                    {status === 'COMPLETED'
-                                                                        ? (unsealed && unsealed.status && unsealed.status !== 'COUNTED'
-                                                                            ? `Unsealed with note: ${unsealed.status}`
-                                                                            : 'Unsealed successfully')
-                                                                        : status === 'ONGOING'
-                                                                            ? `${remaining} parcels remaining`
-                                                                            : `Awaiting unsealing (${expected} expected)`
-                                                                    }
-                                                                </span>
-                                                            </div>
 
-                                                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                                                                {scanned !== expected && status === 'COMPLETED' && (
-                                                                    <span style={{
-                                                                        fontSize: '10px',
-                                                                        fontWeight: '700',
-                                                                        color: scanned < expected ? '#dc2626' : '#ea580c',
-                                                                        backgroundColor: scanned < expected ? '#fee2e2' : '#ffedd5',
-                                                                        padding: '2px 6px',
-                                                                        borderRadius: '4px',
-                                                                        whiteSpace: 'nowrap'
-                                                                    }}>
-                                                                        {scanned < expected ? `-${expected - scanned} Missing` : `+${scanned - expected} Extra`}
-                                                                    </span>
-                                                                )}
-                                                                <span style={{ fontWeight: '700', fontSize: '12px', color: textColor }}>
-                                                                    {scanned} / {expected}
-                                                                </span>
-                                                                <span style={{
-                                                                    backgroundColor: statusBg,
-                                                                    color: statusColor,
-                                                                    padding: '2px 6px',
-                                                                    borderRadius: '4px',
-                                                                    fontSize: '9px',
-                                                                    fontWeight: '700',
-                                                                    textTransform: 'uppercase'
-                                                                }}>
-                                                                    {statusText}
-                                                                </span>
-                                                            </div>
+                                                                return (
+                                                                    <div
+                                                                        key={bag.bagNumber}
+                                                                        onClick={() => {
+                                                                            if (status === 'COMPLETED') {
+                                                                                setInvalidBagParcelModal({
+                                                                                    barcode: bag.bagNumber,
+                                                                                    expectedBag: bag.bagNumber,
+                                                                                    actualBag: null,
+                                                                                    reason: 'BAG_ALREADY_COMPLETED'
+                                                                                });
+                                                                            } else {
+                                                                                setFirstScanSelectedBag(bag.bagNumber);
+                                                                                // Refocus scan input
+                                                                                setTimeout(() => firstScanInputRef.current?.focus(), 50);
+                                                                            }
+                                                                        }}
+                                                                        style={{
+                                                                            backgroundColor: bgColor,
+                                                                            border: status === 'ONGOING' ? '2.5px solid #111827' : `1px solid ${borderColor}`,
+                                                                            borderRadius: '8px',
+                                                                            padding: '12px 14px',
+                                                                            display: 'flex',
+                                                                            justifyContent: 'space-between',
+                                                                            alignItems: 'center',
+                                                                            boxShadow: status === 'ONGOING' ? '0 4px 12px rgba(0, 0, 0, 0.08)' : 'none',
+                                                                            cursor: status === 'COMPLETED' ? 'default' : 'pointer',
+                                                                            transition: 'all 0.15s ease'
+                                                                        }}
+                                                                    >
+                                                                        <div style={{ display: 'flex', flexDirection: 'column', gap: '2px', maxWidth: '65%' }}>
+                                                                            <span style={{ fontWeight: '700', fontSize: '13px', color: textColor }}>
+                                                                                Bag: {bag.bagNumber}
+                                                                            </span>
+                                                                            <span style={{ fontSize: '11px', color: descColor, wordBreak: 'break-word' }}>
+                                                                                {status === 'COMPLETED'
+                                                                                    ? (unsealed && unsealed.status && unsealed.status !== 'COUNTED'
+                                                                                        ? `Unsealed with note: ${unsealed.status}`
+                                                                                        : 'Unsealed successfully')
+                                                                                    : status === 'ONGOING'
+                                                                                        ? `${remaining} parcels remaining`
+                                                                                        : `Awaiting unsealing (${expected} expected)`
+                                                                                }
+                                                                            </span>
+                                                                        </div>
+
+                                                                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                                                            {scanned !== expected && status === 'COMPLETED' && (
+                                                                                <span style={{
+                                                                                    fontSize: '10px',
+                                                                                    fontWeight: '700',
+                                                                                    color: scanned < expected ? '#dc2626' : '#ea580c',
+                                                                                    backgroundColor: scanned < expected ? '#fee2e2' : '#ffedd5',
+                                                                                    padding: '2px 6px',
+                                                                                    borderRadius: '4px',
+                                                                                    whiteSpace: 'nowrap'
+                                                                                }}>
+                                                                                    {scanned < expected ? `-${expected - scanned} Missing` : `+${scanned - expected} Extra`}
+                                                                                </span>
+                                                                            )}
+                                                                            <span style={{ fontWeight: '700', fontSize: '12px', color: textColor }}>
+                                                                                {scanned} / {expected}
+                                                                            </span>
+                                                                            <span style={{
+                                                                                backgroundColor: statusBg,
+                                                                                color: statusColor,
+                                                                                padding: '2px 6px',
+                                                                                borderRadius: '4px',
+                                                                                fontSize: '9px',
+                                                                                fontWeight: '700',
+                                                                                textTransform: 'uppercase'
+                                                                            }}>
+                                                                                {statusText}
+                                                                            </span>
+                                                                        </div>
+                                                                    </div>
+                                                                );
+                                                            })}
                                                         </div>
-                                                    );
-                                                })}
-                                            </div>
+                                                        <PaginationControl
+                                                            currentPage={firstScanBagsPage}
+                                                            totalItems={sortedBags.length}
+                                                            rowsPerPage={firstScanBagsRowsPerPage}
+                                                            onPageChange={(page) => setFirstScanBagsPage(page)}
+                                                            onRowsPerPageChange={(rows) => setFirstScanBagsRowsPerPage(rows)}
+                                                        />
+                                                    </>
+                                                );
+                                            })()}
                                         </div>
                                     )}
 
@@ -3991,14 +4154,14 @@ export default function WorkstationDashboard() {
                                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '12px' }}>
                                         <div style={{ flex: 1, minWidth: '280px' }}>
                                             <label style={{ fontSize: '12px', fontWeight: '600', color: '#374151', display: 'block', marginBottom: '6px' }}>
-                                                Select Active MAWB (Master Air Waybill) *
+                                                Select Active MAWB (Master Air Waybill) (Optional)
                                             </label>
                                             <select
                                                 value={selectedSecondScanMawb}
                                                 onChange={(e) => setSelectedSecondScanMawb(e.target.value)}
                                                 style={{ ...inputStyle, width: '100%', backgroundColor: '#ffffff', color: '#111827', fontWeight: '600' }}
                                             >
-                                                <option value="">-- Choose active MAWB --</option>
+                                                <option value="">-- All Manifests / Multi-Manifest --</option>
                                                 {mawbsList.map(m => (
                                                     <option key={m.mawb_reference} value={m.mawb_reference}>
                                                         {m.mawb_reference} ({m.carrier || 'MAWB'})
@@ -4010,26 +4173,27 @@ export default function WorkstationDashboard() {
                                         <div style={{ display: 'flex', gap: '10px', alignItems: 'flex-end', paddingTop: '18px' }}>
                                             <button
                                                 onClick={() => {
+                                                    const mawbPrefix = selectedSecondScanMawb ? selectedSecondScanMawb : 'LMD';
                                                     const partnerCode = newBagPartner && newBagPartner !== 'ALL' ? `-${newBagPartner.toUpperCase()}` : '';
-                                                    setCustomBagNumber(`${selectedSecondScanMawb}${partnerCode}-BAG-${String((outboundBags?.length || 0) + 1).padStart(2, '0')}`);
+                                                    setCustomBagNumber(`${mawbPrefix}${partnerCode}-BAG-${String((outboundBags?.length || 0) + 1).padStart(2, '0')}`);
                                                     setCreateBagModalOpen(true);
                                                 }}
-                                                disabled={secondScanManifestStatus === 'CLOSED'}
+                                                disabled={Boolean(selectedSecondScanMawb && secondScanManifestStatus === 'CLOSED')}
                                                 style={{
-                                                    backgroundColor: secondScanManifestStatus === 'CLOSED' ? '#9ca3af' : '#ffffff',
-                                                    color: secondScanManifestStatus === 'CLOSED' ? '#ffffff' : '#374151',
-                                                    border: secondScanManifestStatus === 'CLOSED' ? '1px solid #9ca3af' : '1px solid #d1d5db',
+                                                    backgroundColor: (selectedSecondScanMawb && secondScanManifestStatus === 'CLOSED') ? '#9ca3af' : '#ffffff',
+                                                    color: (selectedSecondScanMawb && secondScanManifestStatus === 'CLOSED') ? '#ffffff' : '#374151',
+                                                    border: (selectedSecondScanMawb && secondScanManifestStatus === 'CLOSED') ? '1px solid #9ca3af' : '1px solid #d1d5db',
                                                     borderRadius: '8px',
                                                     padding: '10px 14px',
                                                     fontSize: '12px',
                                                     fontWeight: '600',
-                                                    cursor: secondScanManifestStatus === 'CLOSED' ? 'not-allowed' : 'pointer'
+                                                    cursor: (selectedSecondScanMawb && secondScanManifestStatus === 'CLOSED') ? 'not-allowed' : 'pointer'
                                                 }}
                                             >
                                                 + Create New Outbound Bag
                                             </button>
 
-                                            {secondScanManifestStatus === 'OPEN' && (
+                                            {selectedSecondScanMawb && secondScanManifestStatus === 'OPEN' && (
                                                 <button
                                                     onClick={() => {
                                                         setCustomConfirmModal({
@@ -5223,233 +5387,354 @@ export default function WorkstationDashboard() {
                     TAB 2 — DISPATCH VERIFY
                 ═══════════════════════════════════════════════════════ */}
                     {activeTab === 'verify' && (
-                        <div>
-                            {/* Stats Row */}
-                            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '16px', marginBottom: '16px' }}>
-                                {[
-                                    { count: verifiedCount, label: 'Verified', color: '#111827', bg: '#ffffff', border: '#e5e7eb', success: true },
-                                    { count: mismatchCount, label: 'Mismatches', color: '#e21b22', bg: '#fff1f2', border: '#fca5a5' },
-                                    { count: pendingDispatch, label: 'Pending dispatch', color: '#111827', bg: '#ffffff', border: '#e5e7eb' }
-                                ].map(({ count, label: lbl, color, bg, border, success }) => (
-                                    <div key={lbl} style={{ backgroundColor: bg, border: `1px solid ${border}`, borderRadius: '10px', padding: '18px', textAlign: 'center', boxShadow: '0 1px 3px rgba(0,0,0,0.04)', position: 'relative' }}>
-                                        {success && (
-                                            <div style={{ position: 'absolute', top: '10px', right: '10px', width: '8px', height: '8px', borderRadius: '50%', backgroundColor: '#16a34a' }} />
-                                        )}
-                                        <div style={{ fontSize: '32px', fontWeight: '700', color, marginBottom: '4px' }}>{count}</div>
-                                        <div style={{ fontSize: '12px', color, fontWeight: '600', textTransform: 'uppercase', letterSpacing: '0.4px' }}>{lbl}</div>
-                                    </div>
-                                ))}
-                            </div>
+                        <div style={{ fontFamily: 'var(--font-sans, "Inter", "Inter Fallback", sans-serif)' }}>
+                            {/* Page Title & Subtitle Matching Screenshot Style */}
+                            {/* <div style={{ marginBottom: '20px' }}>
+                                <h1 style={{ margin: 0, fontSize: '28px', fontWeight: '800', color: '#09090b', letterSpacing: '-0.5px', fontFamily: 'var(--font-sans, "Inter", "Inter Fallback", sans-serif)' }}>
+                                    Dispatch Verification
+                                </h1>
+                                <p style={{ margin: '4px 0 0 0', fontSize: '14px', fontWeight: '500', color: '#71717a', fontFamily: 'var(--font-sans, "Inter", "Inter Fallback", sans-serif)' }}>
+                                    View daily progress counts, unsealed 1st scan, verified 2nd scan, and partner allocations.
+                                </p>
+                            </div> */}
 
-                            {/* Step 1: Select Bin */}
-                            <div style={{ ...card, marginBottom: '16px' }}>
-                                <div style={label}>Select Active Dispatch Bin</div>
-                                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '12px' }}>
-                                    {(['PickMe', 'Domex'] as const).map((bin) => (
-                                        <button
-                                            key={bin}
-                                            onClick={() => setSelectedBin(bin)}
-                                            style={{
-                                                backgroundColor: selectedBin === bin
-                                                    ? bin === 'PickMe'
-                                                        ? '#ffcc00'
-                                                        : bin === 'Domex'
-                                                            ? '#7b0f1a'
-                                                            : '#ea580c'
-                                                    : '#f9fafb',
-                                                color: selectedBin === bin
-                                                    ? bin === 'PickMe' ? '#000000' : '#ffffff'
-                                                    : '#111827',
-                                                border: selectedBin === bin
-                                                    ? bin === 'PickMe'
-                                                        ? '2px solid #ffcc00'
-                                                        : bin === 'Domex'
-                                                            ? '2px solid #7b0f1a'
-                                                            : '2px solid #ea580c'
-                                                    : '1px solid #e5e7eb',
-                                                borderRadius: '8px',
-                                                padding: '16px',
-                                                cursor: 'pointer',
-                                                textAlign: 'center',
-                                                transition: 'all 0.15s ease'
-                                            }}
-                                        >
-                                            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '6px' }}>
-                                                {bin === 'PickMe' && (
-                                                    <div style={{
-                                                        backgroundColor: '#ffffff',
-                                                        padding: '4px 8px',
-                                                        borderRadius: '4px',
-                                                        height: '24px',
-                                                        display: 'flex',
-                                                        alignItems: 'center',
-                                                        justifyContent: 'center',
-                                                        width: '80px'
-                                                    }}>
-                                                        <img src="/pick_me_logo.png" alt="PickMe" style={{ maxHeight: '100%', maxWidth: '100%', objectFit: 'contain' }} />
-                                                    </div>
-                                                )}
-                                                {bin === 'Domex' && (
-                                                    <div style={{
-                                                        backgroundColor: '#ffffff',
-                                                        padding: '4px 8px',
-                                                        borderRadius: '4px',
-                                                        height: '24px',
-                                                        display: 'flex',
-                                                        alignItems: 'center',
-                                                        justifyContent: 'center',
-                                                        width: '80px'
-                                                    }}>
-                                                        <img src="/domex_logo.png" alt="Domex" style={{ maxHeight: '100%', maxWidth: '100%', objectFit: 'contain' }} />
-                                                    </div>
-                                                )}
-                                                <div style={{ fontSize: '11px', opacity: 0.8, marginTop: '2px' }}>
-                                                    {binCounts[bin] === 0 ? 'Empty' : `${binCounts[bin]} parcels`}
-                                                </div>
-                                            </div>
-                                        </button>
-                                    ))}
-                                </div>
-                            </div>
-
-                            {/* Notice Banner */}
+                            {/* Date Parameter Calendar Header Card */}
                             <div style={{
-                                border: '1px dashed #d1d5db',
-                                borderRadius: '8px',
-                                padding: '12px 16px',
-                                marginBottom: '16px',
-                                fontSize: '13px',
-                                color: selectedBin
-                                    ? selectedBin === 'PickMe'
-                                        ? '#854d0e' // dark yellow
-                                        : selectedBin === 'Domex'
-                                            ? '#991b1b' // dark red
-                                            : '#c2410c' // dark orange
-                                    : '#b45309',
-                                backgroundColor: selectedBin
-                                    ? selectedBin === 'PickMe'
-                                        ? '#fef9c3' // light yellow
-                                        : selectedBin === 'Domex'
-                                            ? '#fee2e2' // light red
-                                            : '#ffedd5' // light orange
-                                    : '#fffbeb',
-                                fontWeight: '500'
+                                backgroundColor: '#ffffff',
+                                border: '1px solid #e4e4e7',
+                                borderRadius: '12px',
+                                padding: '16px 20px',
+                                marginBottom: '20px',
+                                display: 'flex',
+                                justifyContent: 'space-between',
+                                alignItems: 'center',
+                                flexWrap: 'wrap',
+                                gap: '12px',
+                                boxShadow: '0 1px 3px rgba(0,0,0,0.03)',
+                                fontFamily: 'var(--font-sans, "Inter", "Inter Fallback", sans-serif)'
                             }}>
-                                {selectedBin ? `Active bin: ${selectedBin} — Scan barcodes below to verify routing.` : 'Select a dispatch bin first, then scan parcels'}
-                            </div>
-
-                            {/* Step 2: Scan + Log */}
-                            <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 1fr', gap: '16px', marginBottom: '16px' }}>
-                                {/* Scan Card */}
-                                <div style={card}>
-                                    <div style={label}> Scan Parcel Barcode</div>
-                                    <form onSubmit={handleVerifySubmit} style={{ display: 'flex', gap: '8px', marginBottom: '18px' }}>
+                                <div>
+                                    <h3 style={{ margin: 0, fontSize: '15px', fontWeight: '700', color: '#09090b', display: 'flex', alignItems: 'center', gap: '8px', fontFamily: 'var(--font-sans, "Inter", "Inter Fallback", sans-serif)' }}>
+                                        Daily Dispatch & Scan Progress Overview
+                                    </h3>
+                                    <p style={{ margin: '2px 0 0 0', fontSize: '12.5px', color: '#71717a', fontFamily: 'var(--font-sans, "Inter", "Inter Fallback", sans-serif)' }}>
+                                        Select date parameter below to view progress report for selected day.
+                                    </p>
+                                </div>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                                    <label style={{ fontSize: '13px', fontWeight: '600', color: '#27272a', display: 'flex', alignItems: 'center', gap: '6px', fontFamily: 'var(--font-sans, "Inter", "Inter Fallback", sans-serif)' }}>
+                                        Select Date:
                                         <input
-                                            ref={verifyInputRef}
-                                            type="text"
-                                            value={verifyBarcodeInput}
+                                            type="date"
+                                            value={verifySelectedDate}
                                             onChange={(e) => {
                                                 const val = e.target.value;
-                                                if (lastVerifyScanned && val.startsWith(lastVerifyScanned) && val.length > lastVerifyScanned.length) {
-                                                    setVerifyBarcodeInput(val.slice(lastVerifyScanned.length));
-                                                    setLastVerifyScanned('');
-                                                } else {
-                                                    setVerifyBarcodeInput(val);
-                                                }
+                                                if (val) setVerifySelectedDate(val);
                                             }}
-                                            onFocus={(e) => e.target.select()}
-                                            placeholder={selectedBin ? 'Scan barcode...' : 'Select a bin first...'}
-                                            disabled={!selectedBin}
-                                            className={!selectedBin ? '' : 'scan-input-blink'}
-                                            style={{ ...inputStyle, flex: 1, backgroundColor: selectedBin ? '#f9fafb' : '#f3f4f6', cursor: selectedBin ? 'text' : 'not-allowed' }}
+                                            style={{
+                                                padding: '8px 12px',
+                                                borderRadius: '8px',
+                                                border: '1px solid #e4e4e7',
+                                                fontSize: '13px',
+                                                fontWeight: '600',
+                                                color: '#09090b',
+                                                outline: 'none',
+                                                cursor: 'pointer',
+                                                fontFamily: 'var(--font-sans, "Inter", "Inter Fallback", sans-serif)'
+                                            }}
                                         />
-                                    </form>
-                                    {rowItem('Active bin', <span style={{ color: selectedBin ? '#15803d' : '#b45309', fontWeight: '700' }}>{selectedBin || 'None selected'}</span>)}
-                                    {rowItem('Last scanned', verifyScan?.parcel?.trackingNumber || '—')}
-                                    {rowItem('Assigned to', verifyScan?.assignedPartner || '—')}
-                                    {rowItem('Destination', verifyScan?.parcel?.city || '—')}
-                                    {rowItem('Result',
-                                        <span style={{ color: verifyStatus === 'MATCH' ? '#15803d' : verifyStatus === 'MISMATCH' ? '#dc2626' : '#374151', fontWeight: '700' }}>
-                                            {verifyStatus === 'MATCH' ? 'MATCH' : verifyStatus === 'MISMATCH' ? 'MISMATCH' : '—'}
-                                        </span>, true)}
-                                </div>
-
-                                {/* Scan Log Card */}
-                                <div style={{ ...card, display: 'flex', flexDirection: 'column' }}>
-                                    <div style={label}>Scan Log — This Session</div>
-                                    <div style={{ flex: 1, maxHeight: '230px', overflowY: 'auto' }}>
-                                        {verifyHistory.length === 0 ? (
-                                            <p style={{ margin: '0', color: '#9ca3af', fontSize: '13px' }}>No scans yet</p>
-                                        ) : (
-                                            <ul style={{ listStyleType: 'none', padding: '0', margin: '0', display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                                                {verifyHistory.map((item, idx) => (
-                                                    <li key={idx} style={{ backgroundColor: '#f9fafb', borderRadius: '6px', padding: '8px 12px', fontSize: '12px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderLeft: `3px solid ${item.isMatch ? '#16a34a' : '#dc2626'}` }}>
-                                                        <div>
-                                                            <span style={{ fontWeight: '600', color: '#111827', marginRight: '6px' }}>{item.trackingNumber}</span>
-                                                            <span style={{ color: '#6b7280' }}>{item.assignedPartner}</span>
-                                                        </div>
-                                                        <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
-                                                            <span style={{ color: item.isMatch ? '#16a34a' : '#dc2626', fontWeight: '700', fontSize: '11px' }}>{item.isMatch ? 'OK' : 'MISMATCH'}</span>
-                                                            <span style={{ color: '#9ca3af', fontSize: '11px' }}>{item.timestamp}</span>
-                                                        </div>
-                                                    </li>
-                                                ))}
-                                            </ul>
-                                        )}
-                                    </div>
-                                </div>
-                            </div>
-
-                            {/* Parcel Details (after scan in verify tab) */}
-                            {verifyScan?.parcel && (
-                                <div style={{ ...card, marginBottom: '16px' }}>
-                                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px' }}>
-                                        <div style={label}>Scanned Parcel Details</div>
-                                        <span style={{
-                                            backgroundColor: verifyStatus === 'MATCH' ? '#f0fdf4' : '#fef2f2',
-                                            color: verifyStatus === 'MATCH' ? '#15803d' : '#dc2626',
-                                            border: `1px solid ${verifyStatus === 'MATCH' ? '#86efac' : '#fca5a5'}`,
-                                            padding: '3px 10px',
-                                            borderRadius: '4px',
-                                            fontSize: '11px',
+                                    </label>
+                                    <button
+                                        onClick={() => setVerifySelectedDate(new Date().toISOString().split('T')[0])}
+                                        style={{
+                                            backgroundColor: verifySelectedDate === new Date().toISOString().split('T')[0] ? '#b91c1c' : '#f4f4f5',
+                                            color: verifySelectedDate === new Date().toISOString().split('T')[0] ? '#ffffff' : '#27272a',
+                                            border: '1px solid #e4e4e7',
+                                            padding: '8px 16px',
+                                            borderRadius: '8px',
+                                            fontSize: '12.5px',
                                             fontWeight: '700',
-                                            textTransform: 'uppercase',
-                                            letterSpacing: '0.5px'
-                                        }}>
-                                            {verifyStatus === 'MATCH' ? 'Match Approved' : 'Mismatch Warning'}
-                                        </span>
-                                    </div>
-                                    {parcelDetailsGrid(verifyScan.parcel)}
-                                </div>
-                            )}
-
-                            {/* Step 3: Confirm Dispatch */}
-                            <div style={card}>
-                                <div style={label}>Step 3 — Confirm Dispatch Batch</div>
-                                <p style={{ margin: '0 0 6px 0', fontSize: '14px', color: '#374151' }}>
-                                    Confirm all verified parcels in the active bin are ready to dispatch.
-                                </p>
-                                {verifiedCount === 0 && (
-                                    <p style={{ margin: '0 0 16px 0', fontSize: '13px', color: '#b45309', fontWeight: '500' }}>
-                                        Select a bin and scan parcels before confirming dispatch.
-                                    </p>
-                                )}
-                                <div style={{ display: 'flex', gap: '10px', marginTop: '14px' }}>
-                                    <button onClick={() => alert('Printing Batch Manifest PDF...')} style={btnSecondary}>
-                                        Print manifest
+                                            cursor: 'pointer',
+                                            transition: 'all 0.15s',
+                                            fontFamily: 'var(--font-sans, "Inter", "Inter Fallback", sans-serif)'
+                                        }}
+                                    >
+                                        Today
                                     </button>
                                     <button
-                                        onClick={() => {
-                                            alert(`Dispatch confirmed for ${verifiedCount} parcels!`);
-                                            setVerifiedCount(0); setVerifyScan(null); setVerifyStatus('READY'); setVerifyHistory([]);
+                                        onClick={() => fetchVerifyDailyStats(verifySelectedDate)}
+                                        disabled={verifyLoadingStats}
+                                        style={{
+                                            backgroundColor: '#ffffff',
+                                            color: '#b91c1c',
+                                            border: '1px solid #b91c1c',
+                                            padding: '8px 14px',
+                                            borderRadius: '8px',
+                                            fontSize: '12.5px',
+                                            fontWeight: '700',
+                                            cursor: 'pointer',
+                                            fontFamily: 'var(--font-sans, "Inter", "Inter Fallback", sans-serif)'
                                         }}
-                                        disabled={verifiedCount === 0}
-                                        style={{ ...btnPrimary, opacity: verifiedCount > 0 ? 1 : 0.5, cursor: verifiedCount > 0 ? 'pointer' : 'not-allowed' }}
                                     >
-                                        Confirm dispatch
+                                        {verifyLoadingStats ? 'Loading...' : 'Refresh'}
                                     </button>
                                 </div>
                             </div>
+
+                            {/* Daily Progress Stats Cards Grid — Styled matching Parcel Operations Dashboard */}
+                            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: '14px', marginBottom: '20px', fontFamily: 'var(--font-sans, "Inter", "Inter Fallback", sans-serif)' }}>
+                                {/* 1. Daily Total Scanned All */}
+                                <div
+                                    onMouseOver={(e) => { e.currentTarget.style.outline = '2px solid #e21b22'; e.currentTarget.style.outlineOffset = '-2px'; }}
+                                    onMouseOut={(e) => { e.currentTarget.style.outline = 'none'; }}
+                                    style={{
+                                        backgroundColor: '#ffffff',
+                                        border: '1px solid #e5e7eb',
+                                        borderRadius: '10px',
+                                        padding: '14px 10px',
+                                        textAlign: 'center',
+                                        boxShadow: '0 1px 3px rgba(0,0,0,0.05)',
+                                        cursor: 'pointer',
+                                        transition: 'all 0.15s ease-in-out'
+                                    }}
+                                >
+                                    <div style={{ fontSize: '10.5px', fontWeight: '700', color: '#6b7280', letterSpacing: '0.5px', fontFamily: 'var(--font-sans, "Inter", "Inter Fallback", sans-serif)' }}>
+                                        Total Scanned (All)
+                                    </div>
+                                    <div style={{ fontSize: '26px', fontWeight: '800', color: '#991b1b', marginTop: '4px', fontFamily: 'var(--font-sans, "Inter", "Inter Fallback", sans-serif)' }}>
+                                        {verifyLoadingStats ? '...' : verifyDailyStats.totalScannedAll}
+                                    </div>
+                                    <div style={{ fontSize: '11px', color: '#6b7280', marginTop: '4px', fontFamily: 'var(--font-sans, "Inter", "Inter Fallback", sans-serif)' }}>
+                                        For {verifySelectedDate}
+                                    </div>
+                                </div>
+
+                                {/* 2. Unsealed Parcels (1st Scan Done) */}
+                                <div
+                                    onMouseOver={(e) => { e.currentTarget.style.outline = '2px solid #e21b22'; e.currentTarget.style.outlineOffset = '-2px'; }}
+                                    onMouseOut={(e) => { e.currentTarget.style.outline = 'none'; }}
+                                    style={{
+                                        backgroundColor: '#ffffff',
+                                        border: '1px solid #e5e7eb',
+                                        borderRadius: '10px',
+                                        padding: '14px 10px',
+                                        textAlign: 'center',
+                                        boxShadow: '0 1px 3px rgba(0,0,0,0.05)',
+                                        cursor: 'pointer',
+                                        transition: 'all 0.15s ease-in-out'
+                                    }}
+                                >
+                                    <div style={{ fontSize: '10.5px', fontWeight: '700', color: '#6b7280', letterSpacing: '0.5px', fontFamily: 'var(--font-sans, "Inter", "Inter Fallback", sans-serif)' }}>
+                                        Unsealed (1st Scan)
+                                    </div>
+                                    <div style={{ fontSize: '26px', fontWeight: '800', color: '#991b1b', marginTop: '4px', fontFamily: 'var(--font-sans, "Inter", "Inter Fallback", sans-serif)' }}>
+                                        {verifyLoadingStats ? '...' : verifyDailyStats.unsealed1stScanDone}
+                                    </div>
+                                    <div style={{ fontSize: '11px', color: '#6b7280', marginTop: '4px', fontFamily: 'var(--font-sans, "Inter", "Inter Fallback", sans-serif)' }}>
+                                        Unsealing Floor
+                                    </div>
+                                </div>
+
+                                {/* 3. Verified Parcels (2nd Scan Done) */}
+                                <div
+                                    onMouseOver={(e) => { e.currentTarget.style.outline = '2px solid #e21b22'; e.currentTarget.style.outlineOffset = '-2px'; }}
+                                    onMouseOut={(e) => { e.currentTarget.style.outline = 'none'; }}
+                                    style={{
+                                        backgroundColor: '#ffffff',
+                                        border: '1px solid #e5e7eb',
+                                        borderRadius: '10px',
+                                        padding: '14px 10px',
+                                        textAlign: 'center',
+                                        boxShadow: '0 1px 3px rgba(0,0,0,0.05)',
+                                        cursor: 'pointer',
+                                        transition: 'all 0.15s ease-in-out'
+                                    }}
+                                >
+                                    <div style={{ fontSize: '10.5px', fontWeight: '700', color: '#6b7280', letterSpacing: '0.5px', fontFamily: 'var(--font-sans, "Inter", "Inter Fallback", sans-serif)' }}>
+                                        Verified (2nd Scan)
+                                    </div>
+                                    <div style={{ fontSize: '26px', fontWeight: '800', color: '#991b1b', marginTop: '4px', fontFamily: 'var(--font-sans, "Inter", "Inter Fallback", sans-serif)' }}>
+                                        {verifyLoadingStats ? '...' : verifyDailyStats.verified2ndScanDone}
+                                    </div>
+                                    <div style={{ fontSize: '11px', color: '#6b7280', marginTop: '4px', fontFamily: 'var(--font-sans, "Inter", "Inter Fallback", sans-serif)' }}>
+                                        LMD Station
+                                    </div>
+                                </div>
+
+                                {/* 4. PickMe Allocated (Scanned) */}
+                                <div
+                                    onMouseOver={(e) => { e.currentTarget.style.outline = '2px solid #e21b22'; e.currentTarget.style.outlineOffset = '-2px'; }}
+                                    onMouseOut={(e) => { e.currentTarget.style.outline = 'none'; }}
+                                    style={{
+                                        backgroundColor: '#ffffff',
+                                        border: '1px solid #e5e7eb',
+                                        borderRadius: '10px',
+                                        padding: '14px 10px',
+                                        textAlign: 'center',
+                                        boxShadow: '0 1px 3px rgba(0,0,0,0.05)',
+                                        cursor: 'pointer',
+                                        transition: 'all 0.15s ease-in-out'
+                                    }}
+                                >
+                                    <div style={{ fontSize: '10.5px', fontWeight: '700', color: '#6b7280', letterSpacing: '0.5px', fontFamily: 'var(--font-sans, "Inter", "Inter Fallback", sans-serif)' }}>
+                                        PickMe Allocated
+                                    </div>
+                                    <div style={{ fontSize: '26px', fontWeight: '800', color: '#991b1b', marginTop: '4px', fontFamily: 'var(--font-sans, "Inter", "Inter Fallback", sans-serif)' }}>
+                                        {verifyLoadingStats ? '...' : verifyDailyStats.pickMeScanned}
+                                    </div>
+                                    <div style={{ fontSize: '11px', color: '#6b7280', marginTop: '4px', fontFamily: 'var(--font-sans, "Inter", "Inter Fallback", sans-serif)' }}>
+                                        Scanned Partner
+                                    </div>
+                                </div>
+
+                                {/* 5. Domex Allocated (Scanned) */}
+                                <div
+                                    onMouseOver={(e) => { e.currentTarget.style.outline = '2px solid #e21b22'; e.currentTarget.style.outlineOffset = '-2px'; }}
+                                    onMouseOut={(e) => { e.currentTarget.style.outline = 'none'; }}
+                                    style={{
+                                        backgroundColor: '#ffffff',
+                                        border: '1px solid #e5e7eb',
+                                        borderRadius: '10px',
+                                        padding: '14px 10px',
+                                        textAlign: 'center',
+                                        boxShadow: '0 1px 3px rgba(0,0,0,0.05)',
+                                        cursor: 'pointer',
+                                        transition: 'all 0.15s ease-in-out'
+                                    }}
+                                >
+                                    <div style={{ fontSize: '10.5px', fontWeight: '700', color: '#6b7280', letterSpacing: '0.5px', fontFamily: 'var(--font-sans, "Inter", "Inter Fallback", sans-serif)' }}>
+                                        Domex Allocated
+                                    </div>
+                                    <div style={{ fontSize: '26px', fontWeight: '800', color: '#991b1b', marginTop: '4px', fontFamily: 'var(--font-sans, "Inter", "Inter Fallback", sans-serif)' }}>
+                                        {verifyLoadingStats ? '...' : verifyDailyStats.domexScanned}
+                                    </div>
+                                    <div style={{ fontSize: '11px', color: '#6b7280', marginTop: '4px', fontFamily: 'var(--font-sans, "Inter", "Inter Fallback", sans-serif)' }}>
+                                        Scanned Partner
+                                    </div>
+                                </div>
+                            </div>
+
+                            {/* Step 1: Select Bin & Provider Outbound LMD Bags for Manifest */}
+                            <div style={{ ...card, marginBottom: '20px', fontFamily: 'var(--font-sans, "Inter", "Inter Fallback", sans-serif)' }}>
+                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
+                                    <div style={label}>Select Active Dispatch Bin & Provider Outbound LMD Bags</div>
+                                    <span style={{ fontSize: '12px', color: '#6b7280', fontWeight: '600' }}>
+                                        {verifyOutboundBags.length} Outbound LMD Bags Created
+                                    </span>
+                                </div>
+                                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '12px', marginBottom: '16px' }}>
+                                    {(['PickMe', 'Domex', 'Pronto'] as const).map((bin) => {
+                                        const partnerBags = verifyOutboundBags.filter(b => (b.targetPartner || '').toLowerCase() === bin.toLowerCase());
+                                        const isSelected = selectedBin === bin;
+
+                                        return (
+                                            <button
+                                                key={bin}
+                                                onClick={() => setSelectedBin(bin)}
+                                                onMouseOver={(e) => { e.currentTarget.style.outline = '2px solid #e21b22'; e.currentTarget.style.outlineOffset = '-2px'; }}
+                                                onMouseOut={(e) => { e.currentTarget.style.outline = 'none'; }}
+                                                style={{
+                                                    backgroundColor: '#ffffff',
+                                                    color: '#111827',
+                                                    border: isSelected ? '2px solid #e21b22' : '1px solid #e5e7eb',
+                                                    borderRadius: '10px',
+                                                    padding: '14px',
+                                                    cursor: 'pointer',
+                                                    textAlign: 'center',
+                                                    transition: 'all 0.15s ease-in-out',
+                                                    transform: isSelected ? 'translateY(-2px)' : 'none',
+                                                    boxShadow: isSelected ? '0 4px 12px rgba(226, 27, 34, 0.15)' : '0 1px 3px rgba(0,0,0,0.05)',
+                                                    fontFamily: 'var(--font-sans, "Inter", "Inter Fallback", sans-serif)'
+                                                }}
+                                            >
+                                                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '6px' }}>
+                                                    {bin === 'PickMe' && (
+                                                        <div style={{ backgroundColor: '#ffffff', padding: '4px 8px', borderRadius: '4px', height: '24px', display: 'flex', alignItems: 'center', justifyContent: 'center', width: '80px' }}>
+                                                            <img src="/pick_me_logo.png" alt="PickMe" style={{ maxHeight: '100%', maxWidth: '100%', objectFit: 'contain' }} />
+                                                        </div>
+                                                    )}
+                                                    {bin === 'Domex' && (
+                                                        <div style={{ backgroundColor: '#ffffff', padding: '4px 8px', borderRadius: '4px', height: '24px', display: 'flex', alignItems: 'center', justifyContent: 'center', width: '80px' }}>
+                                                            <img src="/domex_logo.png" alt="Domex" style={{ maxHeight: '100%', maxWidth: '100%', objectFit: 'contain' }} />
+                                                        </div>
+                                                    )}
+                                                    {bin === 'Pronto' && (
+                                                        <div style={{ backgroundColor: '#ffffff', padding: '4px 8px', borderRadius: '4px', height: '24px', display: 'flex', alignItems: 'center', justifyContent: 'center', width: '80px', fontWeight: '900', color: '#ea580c', fontSize: '13px' }}>
+                                                            PRONTO
+                                                        </div>
+                                                    )}
+                                                    <div style={{ fontSize: '12px', fontWeight: '700', marginTop: '2px', color: isSelected ? '#e21b22' : '#111827', fontFamily: 'var(--font-sans, "Inter", "Inter Fallback", sans-serif)' }}>
+                                                        {verifyLoadingStats ? '...' : (bin === 'PickMe' ? verifyDailyStats.pickMeScanned : bin === 'Domex' ? verifyDailyStats.domexScanned : verifyDailyStats.prontoScanned)} Allocated Parcels | {partnerBags.length} LMD Bags
+                                                    </div>
+                                                </div>
+                                            </button>
+                                        );
+                                    })}
+                                </div>
+
+                                {/* Outbound LMD Bags for Manifest Table */}
+                                <div style={{ backgroundColor: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '8px', padding: '14px' }}>
+                                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
+                                        <div style={{ fontSize: '13px', fontWeight: '800', color: '#1e293b', fontFamily: 'var(--font-sans, "Inter", "Inter Fallback", sans-serif)' }}>
+                                            {selectedBin || 'All Providers'} | Outbound LMD Bags for Manifest (LMD Verification)
+                                        </div>
+                                        <span style={{ fontSize: '11.5px', color: '#64748b', fontWeight: '600', fontFamily: 'var(--font-sans, "Inter", "Inter Fallback", sans-serif)' }}>
+                                            Showing LMD verification bags created in system
+                                        </span>
+                                    </div>
+
+                                    {verifyOutboundBags.filter(b => !selectedBin || (b.targetPartner || '').toLowerCase() === selectedBin.toLowerCase()).length > 0 ? (
+                                        <div style={{ overflowX: 'auto' }}>
+                                            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px', textAlign: 'left', fontFamily: 'var(--font-sans, "Inter", "Inter Fallback", sans-serif)' }}>
+                                                <thead>
+                                                    <tr style={{ borderBottom: '2px solid #cbd5e1', backgroundColor: '#ffffff' }}>
+                                                        {['LMD Bag No.', 'Manifest / MAWB Ref', 'Courier Partner', 'Destination Hub', 'Parcels', 'Total Weight', 'Bag Status', 'Created Date'].map(h => (
+                                                            <th key={h} style={{ padding: '8px 10px', color: '#475569', fontWeight: '700', fontSize: '11px', textTransform: 'uppercase', fontFamily: 'var(--font-sans, "Inter", "Inter Fallback", sans-serif)' }}>{h}</th>
+                                                        ))}
+                                                    </tr>
+                                                </thead>
+                                                <tbody>
+                                                    {verifyOutboundBags
+                                                        .filter(b => !selectedBin || (b.targetPartner || '').toLowerCase() === selectedBin.toLowerCase())
+                                                        .map((bag, bIdx) => (
+                                                            <tr key={bag.id || bIdx} style={{ borderBottom: '1px solid #e2e8f0', backgroundColor: bIdx % 2 === 0 ? '#ffffff' : '#f8fafc' }}>
+                                                                <td style={{ padding: '8px 10px', fontWeight: '800', color: '#dc2626' }}>{bag.bagNumber}</td>
+                                                                <td style={{ padding: '8px 10px', fontWeight: '600', color: '#1e293b' }}>{bag.mawbRef}</td>
+                                                                <td style={{ padding: '8px 10px', fontWeight: '700', color: bag.targetPartner === 'PickMe' ? '#a16207' : bag.targetPartner === 'Domex' ? '#991b1b' : '#c2410c' }}>
+                                                                    {bag.targetPartner}
+                                                                </td>
+                                                                <td style={{ padding: '8px 10px', color: '#334155' }}>{bag.destinationHub}</td>
+                                                                <td style={{ padding: '8px 10px', fontWeight: '700', color: '#0f172a' }}>{bag.parcelCount} pcs</td>
+                                                                <td style={{ padding: '8px 10px', color: '#475569' }}>{bag.totalWeight} kg</td>
+                                                                <td style={{ padding: '8px 10px' }}>
+                                                                    <span style={{
+                                                                        backgroundColor: '#ffffff',
+                                                                        color: '#000000',
+                                                                        border: '1px solid #dc2626',
+                                                                        padding: '2px 8px',
+                                                                        borderRadius: '4px',
+                                                                        fontSize: '10.5px',
+                                                                        fontWeight: '700'
+                                                                    }}>
+                                                                        {bag.status}
+                                                                    </span>
+                                                                </td>
+                                                                <td style={{ padding: '8px 10px', color: '#64748b', fontSize: '11px' }}>
+                                                                    {bag.createdAt ? new Date(bag.createdAt).toLocaleDateString('en-GB') : '-'}
+                                                                </td>
+                                                            </tr>
+                                                        ))}
+                                                </tbody>
+                                            </table>
+                                        </div>
+                                    ) : (
+                                        <div style={{ textAlign: 'center', padding: '16px', color: '#64748b', fontSize: '12.5px', fontFamily: 'Inter, system-ui, -apple-system, sans-serif' }}>
+                                            No LMD outbound bags created yet for {selectedBin || 'the selected provider'}.
+                                        </div>
+                                    )}
+                                </div>
+                            </div>
+
                         </div>
                     )}
 
@@ -6068,72 +6353,88 @@ export default function WorkstationDashboard() {
                                         {/* ═══════════════════════════════════════════════════════
                                         DETAIL TAB 1: TOTAL RECEIVED (INBOUND PARCELS)
                                     ═══════════════════════════════════════════════════════ */}
+                                        {/* ═══════════════════════════════════════════════════════
+                                        DETAIL TAB 1: TOTAL RECEIVED (INBOUND PARCELS)
+                                    ═══════════════════════════════════════════════════════ */}
                                         {dashboardSubTab === 'total_received' && (
                                             <div style={card}>
                                                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
                                                     <div style={label}>Total Received Inbound Parcels</div>
                                                     <div style={{ fontSize: '12px', color: '#6b7280' }}>
-                                                        Showing <strong>{filteredParcels.filter((p: any) => {
-                                                            const q = dashSearchQuery.toLowerCase();
-                                                            const matchQ = !q || p.referenceNumber.toLowerCase().includes(q) || p.senderReference.toLowerCase().includes(q) || (p.mawbReference && p.mawbReference.toLowerCase().includes(q)) || (p.consigneeLocation && p.consigneeLocation.toLowerCase().includes(q));
-                                                            const matchP = dashPartnerFilter === 'ALL' || p.deliveryAgentCode === dashPartnerFilter;
-                                                            return matchQ && matchP;
-                                                        }).length}</strong> of {totalRec} parcels
+                                                        Total Received: <strong>{totalRec} parcels</strong>
                                                     </div>
                                                 </div>
 
-                                                {filteredParcels.length > 0 ? (
-                                                    <div style={{ overflowX: 'auto' }}>
-                                                        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px', textAlign: 'left' }}>
-                                                            <thead>
-                                                                <tr style={{ borderBottom: '2px solid #e5e7eb', backgroundColor: '#f9fafb' }}>
-                                                                    {['#', 'Parcel Reference', 'Temu Barcode', 'Courier Partner', 'Destination City', 'Weight', 'Allocation Status', 'Received Date'].map(h => (
-                                                                        <th key={h} style={{ padding: '10px 8px', color: '#6b7280', fontWeight: '700', fontSize: '11px', textTransform: 'uppercase' }}>{h}</th>
-                                                                    ))}
-                                                                </tr>
-                                                            </thead>
-                                                            <tbody>
-                                                                {filteredParcels.filter((p: any) => {
-                                                                    const q = dashSearchQuery.toLowerCase();
-                                                                    const matchQ = !q || p.referenceNumber.toLowerCase().includes(q) || p.senderReference.toLowerCase().includes(q) || (p.mawbReference && p.mawbReference.toLowerCase().includes(q)) || (p.consigneeLocation && p.consigneeLocation.toLowerCase().includes(q));
-                                                                    const matchP = dashPartnerFilter === 'ALL' || p.deliveryAgentCode === dashPartnerFilter;
-                                                                    return matchQ && matchP;
-                                                                }).slice(0, 100).map((p: any, idx: number) => (
-                                                                    <tr key={`rec-${idx}`} style={{ borderBottom: '1px solid #f3f4f6' }}>
-                                                                        <td style={{ padding: '10px 8px', color: '#9ca3af', fontSize: '11px' }}>{idx + 1}</td>
-                                                                        <td style={{ padding: '10px 8px', fontWeight: '700', color: '#111827' }}>{p.referenceNumber}</td>
-                                                                        <td style={{ padding: '10px 8px', color: '#4b5563', fontFamily: 'monospace', fontSize: '12px' }}>{p.senderReference}</td>
-                                                                        <td style={{ padding: '10px 8px' }}>
-                                                                            <span style={{ padding: '2px 8px', borderRadius: '4px', fontSize: '11px', fontWeight: '700', backgroundColor: p.deliveryAgentCode === 'PickMe' ? '#fef3c7' : p.deliveryAgentCode === 'Domex' ? '#dbeafe' : p.deliveryAgentCode === 'Pronto' ? '#e0e7ff' : '#f3f4f6', color: p.deliveryAgentCode === 'PickMe' ? '#b45309' : p.deliveryAgentCode === 'Domex' ? '#1d4ed8' : p.deliveryAgentCode === 'Pronto' ? '#4338ca' : '#374151' }}>
-                                                                                {p.deliveryAgentCode}
-                                                                            </span>
-                                                                        </td>
-                                                                        <td style={{ padding: '10px 8px', color: '#374151' }}>{p.consigneeLocation || 'N/A'}</td>
-                                                                        <td style={{ padding: '10px 8px', color: '#6b7280' }}>{p.weight}</td>
-                                                                        <td style={{ padding: '10px 8px' }}>
-                                                                            {p.allocationStage === '2ND_SCAN_DONE' || p.bagNumber ? (
-                                                                                <span style={{ padding: '3px 8px', borderRadius: '4px', fontSize: '11px', fontWeight: '700', backgroundColor: '#dcfce7', color: '#15803d' }}>
-                                                                                    2nd Scan Done {/* {p.bagNumber ? `(${p.bagNumber})` : ''} */}
-                                                                                </span>
-                                                                            ) : p.allocationStage === '1ST_SCAN_DONE' || p.isSorted ? (
-                                                                                <span style={{ padding: '3px 8px', borderRadius: '4px', fontSize: '11px', fontWeight: '700', backgroundColor: '#e0f2fe', color: '#0369a1' }}>
-                                                                                    1st Scan Done
-                                                                                </span>
-                                                                            ) : (
-                                                                                <span style={{ padding: '3px 8px', borderRadius: '4px', fontSize: '11px', fontWeight: '700', backgroundColor: '#fef3c7', color: '#b45309' }}>
-                                                                                    Pending 1st Scan
-                                                                                </span>
-                                                                            )}
-                                                                        </td>
-                                                                        <td style={{ padding: '10px 8px', color: '#6b7280', fontSize: '11px' }}>{p.createdAt ? new Date(p.createdAt).toLocaleDateString() : '-'}</td>
-                                                                    </tr>
-                                                                ))}
-                                                            </tbody>
-                                                        </table>
-                                                    </div>
-                                                ) : (
-                                                    <div style={{ textAlign: 'center', padding: '30px', color: '#9ca3af', fontSize: '13px' }}>No received parcels found matching your criteria.</div>
-                                                )}
+                                                {(() => {
+                                                    const list = filteredParcels.filter((p: any) => {
+                                                        const q = dashSearchQuery.toLowerCase();
+                                                        const matchQ = !q || p.referenceNumber.toLowerCase().includes(q) || p.senderReference.toLowerCase().includes(q) || (p.mawbReference && p.mawbReference.toLowerCase().includes(q)) || (p.consigneeLocation && p.consigneeLocation.toLowerCase().includes(q));
+                                                        const matchP = dashPartnerFilter === 'ALL' || p.deliveryAgentCode === dashPartnerFilter;
+                                                        return matchQ && matchP;
+                                                    });
+                                                    const paginatedList = list.slice((dashTablePage - 1) * dashTableRowsPerPage, dashTablePage * dashTableRowsPerPage);
+                                                    return (
+                                                        <>
+                                                            {list.length > 0 ? (
+                                                                <div style={{ overflowX: 'auto' }}>
+                                                                    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px', textAlign: 'left' }}>
+                                                                        <thead>
+                                                                            <tr style={{ borderBottom: '2px solid #e5e7eb', backgroundColor: '#f9fafb' }}>
+                                                                                {['#', 'Parcel Reference', 'Temu Barcode', 'Courier Partner', 'Destination City', 'Weight', 'Allocation Status', 'Received Date'].map(h => (
+                                                                                    <th key={h} style={{ padding: '10px 8px', color: '#6b7280', fontWeight: '700', fontSize: '11px', textTransform: 'uppercase' }}>{h}</th>
+                                                                                ))}
+                                                                            </tr>
+                                                                        </thead>
+                                                                        <tbody>
+                                                                            {paginatedList.map((p: any, idx: number) => {
+                                                                                const globalIdx = (dashTablePage - 1) * dashTableRowsPerPage + idx + 1;
+                                                                                return (
+                                                                                    <tr key={`rec-${idx}`} style={{ borderBottom: '1px solid #f3f4f6' }}>
+                                                                                        <td style={{ padding: '10px 8px', color: '#9ca3af', fontSize: '11px' }}>{globalIdx}</td>
+                                                                                        <td style={{ padding: '10px 8px', fontWeight: '700', color: '#111827' }}>{p.referenceNumber}</td>
+                                                                                        <td style={{ padding: '10px 8px', color: '#4b5563', fontFamily: 'monospace', fontSize: '12px' }}>{p.senderReference}</td>
+                                                                                        <td style={{ padding: '10px 8px' }}>
+                                                                                            <span style={{ padding: '2px 8px', borderRadius: '4px', fontSize: '11px', fontWeight: '700', backgroundColor: p.deliveryAgentCode === 'PickMe' ? '#fef3c7' : p.deliveryAgentCode === 'Domex' ? '#dbeafe' : p.deliveryAgentCode === 'Pronto' ? '#e0e7ff' : '#f3f4f6', color: p.deliveryAgentCode === 'PickMe' ? '#b45309' : p.deliveryAgentCode === 'Domex' ? '#1d4ed8' : p.deliveryAgentCode === 'Pronto' ? '#4338ca' : '#374151' }}>
+                                                                                                {p.deliveryAgentCode}
+                                                                                            </span>
+                                                                                        </td>
+                                                                                        <td style={{ padding: '10px 8px', color: '#374151' }}>{p.consigneeLocation || 'N/A'}</td>
+                                                                                        <td style={{ padding: '10px 8px', color: '#6b7280' }}>{p.weight}</td>
+                                                                                        <td style={{ padding: '10px 8px' }}>
+                                                                                            {p.allocationStage === '2ND_SCAN_DONE' || p.bagNumber ? (
+                                                                                                <span style={{ padding: '3px 8px', borderRadius: '8px', fontSize: '10px', fontWeight: '700', backgroundColor: '#ffffff', color: '#b91c1c', border: '1px solid #b91c1c' }}>
+                                                                                                    2nd Scan Done
+                                                                                                </span>
+                                                                                            ) : p.allocationStage === '1ST_SCAN_DONE' || p.isSorted ? (
+                                                                                                <span style={{ padding: '3px 8px', borderRadius: '4px', fontSize: '11px', fontWeight: '700', backgroundColor: '#e0f2fe', color: '#0369a1' }}>
+                                                                                                    1st Scan Done
+                                                                                                </span>
+                                                                                            ) : (
+                                                                                                <span style={{ padding: '3px 8px', borderRadius: '4px', fontSize: '11px', fontWeight: '700', backgroundColor: '#fef3c7', color: '#b45309' }}>
+                                                                                                    Pending 1st Scan
+                                                                                                </span>
+                                                                                            )}
+                                                                                        </td>
+                                                                                        <td style={{ padding: '10px 8px', color: '#6b7280', fontSize: '11px' }}>{p.createdAt ? new Date(p.createdAt).toLocaleDateString() : '-'}</td>
+                                                                                    </tr>
+                                                                                );
+                                                                            })}
+                                                                        </tbody>
+                                                                    </table>
+                                                                </div>
+                                                            ) : (
+                                                                <div style={{ textAlign: 'center', padding: '30px', color: '#9ca3af', fontSize: '13px' }}>No received parcels found matching your criteria.</div>
+                                                            )}
+                                                            <PaginationControl
+                                                                currentPage={dashTablePage}
+                                                                totalItems={list.length}
+                                                                rowsPerPage={dashTableRowsPerPage}
+                                                                onPageChange={(page) => setDashTablePage(page)}
+                                                                onRowsPerPageChange={(rows) => setDashTableRowsPerPage(rows)}
+                                                            />
+                                                        </>
+                                                    );
+                                                })()}
                                             </div>
                                         )}
 
@@ -6149,53 +6450,71 @@ export default function WorkstationDashboard() {
                                                     </div>
                                                 </div>
 
-                                                {filteredParcels.filter((p: any) => p.isSorted).length > 0 ? (
-                                                    <div style={{ overflowX: 'auto' }}>
-                                                        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px', textAlign: 'left' }}>
-                                                            <thead>
-                                                                <tr style={{ borderBottom: '2px solid #e5e7eb', backgroundColor: '#f9fafb' }}>
-                                                                    {['#', 'Parcel Reference', 'Assigned Bag #', 'Courier Partner', 'Destination City', 'Weight', 'Status'].map(h => (
-                                                                        <th key={h} style={{ padding: '10px 8px', color: '#6b7280', fontWeight: '700', fontSize: '11px', textTransform: 'uppercase' }}>{h}</th>
-                                                                    ))}
-                                                                </tr>
-                                                            </thead>
-                                                            <tbody>
-                                                                {filteredParcels.filter((p: any) => p.isSorted).filter((p: any) => {
-                                                                    const q = dashSearchQuery.toLowerCase();
-                                                                    const matchQ = !q || p.referenceNumber.toLowerCase().includes(q) || (p.bagNumber && p.bagNumber.toLowerCase().includes(q)) || (p.consigneeLocation && p.consigneeLocation.toLowerCase().includes(q));
-                                                                    const matchP = dashPartnerFilter === 'ALL' || p.deliveryAgentCode === dashPartnerFilter;
-                                                                    return matchQ && matchP;
-                                                                }).slice(0, 100).map((p: any, idx: number) => (
-                                                                    <tr key={`sorted-${idx}`} style={{ borderBottom: '1px solid #f3f4f6' }}>
-                                                                        <td style={{ padding: '10px 8px', color: '#9ca3af', fontSize: '11px' }}>{idx + 1}</td>
-                                                                        <td style={{ padding: '10px 8px', fontWeight: '700', color: '#111827' }}>{p.referenceNumber}</td>
-                                                                        <td style={{ padding: '10px 8px' }}>
-                                                                            <span style={{ padding: '3px 8px', borderRadius: '4px', fontSize: '12px', fontWeight: '700', backgroundColor: '#dcfce7', color: '#15803d', fontFamily: 'monospace' }}>
-                                                                                {p.bagNumber || 'Allocated'}
-                                                                            </span>
-                                                                        </td>
-                                                                        <td style={{ padding: '10px 8px', fontWeight: '600' }}>{p.deliveryAgentCode}</td>
-                                                                        <td style={{ padding: '10px 8px', color: '#374151' }}>{p.consigneeLocation || 'N/A'}</td>
-                                                                        <td style={{ padding: '10px 8px', color: '#6b7280' }}>{p.weight}</td>
-                                                                        <td style={{ padding: '10px 8px' }}>
-                                                                            {p.allocationStage === '2ND_SCAN_DONE' || p.bagNumber ? (
-                                                                                <span style={{ padding: '3px 8px', borderRadius: '4px', fontSize: '11px', fontWeight: '700', backgroundColor: '#dcfce7', color: '#15803d' }}>
-                                                                                    2nd Scan Done
-                                                                                </span>
-                                                                            ) : (
-                                                                                <span style={{ padding: '3px 8px', borderRadius: '4px', fontSize: '11px', fontWeight: '700', backgroundColor: '#e0f2fe', color: '#0369a1' }}>
-                                                                                    1st Scan Done
-                                                                                </span>
-                                                                            )}
-                                                                        </td>
-                                                                    </tr>
-                                                                ))}
-                                                            </tbody>
-                                                        </table>
-                                                    </div>
-                                                ) : (
-                                                    <div style={{ textAlign: 'center', padding: '30px', color: '#9ca3af', fontSize: '13px' }}>No sorted parcels found matching criteria.</div>
-                                                )}
+                                                {(() => {
+                                                    const list = filteredParcels.filter((p: any) => p.isSorted).filter((p: any) => {
+                                                        const q = dashSearchQuery.toLowerCase();
+                                                        const matchQ = !q || p.referenceNumber.toLowerCase().includes(q) || (p.bagNumber && p.bagNumber.toLowerCase().includes(q)) || (p.consigneeLocation && p.consigneeLocation.toLowerCase().includes(q));
+                                                        const matchP = dashPartnerFilter === 'ALL' || p.deliveryAgentCode === dashPartnerFilter;
+                                                        return matchQ && matchP;
+                                                    });
+                                                    const paginatedList = list.slice((dashTablePage - 1) * dashTableRowsPerPage, dashTablePage * dashTableRowsPerPage);
+                                                    return (
+                                                        <>
+                                                            {list.length > 0 ? (
+                                                                <div style={{ overflowX: 'auto' }}>
+                                                                    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px', textAlign: 'left' }}>
+                                                                        <thead>
+                                                                            <tr style={{ borderBottom: '2px solid #e5e7eb', backgroundColor: '#f9fafb' }}>
+                                                                                {['#', 'Parcel Reference', 'Assigned Bag #', 'Courier Partner', 'Destination City', 'Weight', 'Status'].map(h => (
+                                                                                    <th key={h} style={{ padding: '10px 8px', color: '#6b7280', fontWeight: '700', fontSize: '11px', textTransform: 'uppercase' }}>{h}</th>
+                                                                                ))}
+                                                                            </tr>
+                                                                        </thead>
+                                                                        <tbody>
+                                                                            {paginatedList.map((p: any, idx: number) => {
+                                                                                const globalIdx = (dashTablePage - 1) * dashTableRowsPerPage + idx + 1;
+                                                                                return (
+                                                                                    <tr key={`sorted-${idx}`} style={{ borderBottom: '1px solid #f3f4f6' }}>
+                                                                                        <td style={{ padding: '10px 8px', color: '#9ca3af', fontSize: '11px' }}>{globalIdx}</td>
+                                                                                        <td style={{ padding: '10px 8px', fontWeight: '700', color: '#111827' }}>{p.referenceNumber}</td>
+                                                                                        <td style={{ padding: '10px 8px' }}>
+                                                                                            <span style={{ padding: '3px 8px', borderRadius: '4px', fontSize: '12px', fontWeight: '700', backgroundColor: '#dcfce7', color: '#15803d', fontFamily: 'monospace' }}>
+                                                                                                {p.bagNumber || 'Allocated'}
+                                                                                            </span>
+                                                                                        </td>
+                                                                                        <td style={{ padding: '10px 8px', fontWeight: '600' }}>{p.deliveryAgentCode}</td>
+                                                                                        <td style={{ padding: '10px 8px', color: '#374151' }}>{p.consigneeLocation || 'N/A'}</td>
+                                                                                        <td style={{ padding: '10px 8px', color: '#6b7280' }}>{p.weight}</td>
+                                                                                        <td style={{ padding: '10px 8px' }}>
+                                                                                            {p.allocationStage === '2ND_SCAN_DONE' || p.bagNumber ? (
+                                                                                                <span style={{ padding: '3px 8px', borderRadius: '4px', fontSize: '11px', fontWeight: '700', backgroundColor: '#dcfce7', color: '#15803d' }}>
+                                                                                                    2nd Scan Done
+                                                                                                </span>
+                                                                                            ) : (
+                                                                                                <span style={{ padding: '3px 8px', borderRadius: '4px', fontSize: '11px', fontWeight: '700', backgroundColor: '#e0f2fe', color: '#0369a1' }}>
+                                                                                                    1st Scan Done
+                                                                                                </span>
+                                                                                            )}
+                                                                                        </td>
+                                                                                    </tr>
+                                                                                );
+                                                                            })}
+                                                                        </tbody>
+                                                                    </table>
+                                                                </div>
+                                                            ) : (
+                                                                <div style={{ textAlign: 'center', padding: '30px', color: '#9ca3af', fontSize: '13px' }}>No sorted parcels found matching criteria.</div>
+                                                            )}
+                                                            <PaginationControl
+                                                                currentPage={dashTablePage}
+                                                                totalItems={list.length}
+                                                                rowsPerPage={dashTableRowsPerPage}
+                                                                onPageChange={(page) => setDashTablePage(page)}
+                                                                onRowsPerPageChange={(rows) => setDashTableRowsPerPage(rows)}
+                                                            />
+                                                        </>
+                                                    );
+                                                })()}
                                             </div>
                                         )}
 
@@ -6211,43 +6530,61 @@ export default function WorkstationDashboard() {
                                                     </div>
                                                 </div>
 
-                                                {filteredParcels.filter((p: any) => !p.isSorted).length > 0 ? (
-                                                    <div style={{ overflowX: 'auto' }}>
-                                                        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px', textAlign: 'left' }}>
-                                                            <thead>
-                                                                <tr style={{ borderBottom: '2px solid #e5e7eb', backgroundColor: '#f9fafb' }}>
-                                                                    {['#', 'Parcel Reference', 'Temu Barcode', 'Target Partner', 'Destination City', 'Allocation Status', 'Received Date'].map(h => (
-                                                                        <th key={h} style={{ padding: '10px 8px', color: '#6b7280', fontWeight: '700', fontSize: '11px', textTransform: 'uppercase' }}>{h}</th>
-                                                                    ))}
-                                                                </tr>
-                                                            </thead>
-                                                            <tbody>
-                                                                {filteredParcels.filter((p: any) => !p.isSorted).filter((p: any) => {
-                                                                    const q = dashSearchQuery.toLowerCase();
-                                                                    const matchQ = !q || p.referenceNumber.toLowerCase().includes(q) || p.senderReference.toLowerCase().includes(q) || (p.consigneeLocation && p.consigneeLocation.toLowerCase().includes(q));
-                                                                    const matchP = dashPartnerFilter === 'ALL' || p.deliveryAgentCode === dashPartnerFilter;
-                                                                    return matchQ && matchP;
-                                                                }).slice(0, 100).map((p: any, idx: number) => (
-                                                                    <tr key={`pend-${idx}`} style={{ borderBottom: '1px solid #f3f4f6' }}>
-                                                                        <td style={{ padding: '10px 8px', color: '#9ca3af', fontSize: '11px' }}>{idx + 1}</td>
-                                                                        <td style={{ padding: '10px 8px', fontWeight: '700', color: '#111827' }}>{p.referenceNumber}</td>
-                                                                        <td style={{ padding: '10px 8px', color: '#4b5563', fontFamily: 'monospace', fontSize: '12px' }}>{p.senderReference}</td>
-                                                                        <td style={{ padding: '10px 8px', fontWeight: '600' }}>{p.deliveryAgentCode}</td>
-                                                                        <td style={{ padding: '10px 8px', color: '#374151' }}>{p.consigneeLocation || 'N/A'}</td>
-                                                                        <td style={{ padding: '10px 8px' }}>
-                                                                            <span style={{ padding: '3px 8px', borderRadius: '4px', fontSize: '11px', fontWeight: '700', backgroundColor: '#fef3c7', color: '#b45309' }}>
-                                                                                Pending 1st Scan
-                                                                            </span>
-                                                                        </td>
-                                                                        <td style={{ padding: '10px 8px', color: '#6b7280', fontSize: '11px' }}>{p.createdAt ? new Date(p.createdAt).toLocaleDateString() : '-'}</td>
-                                                                    </tr>
-                                                                ))}
-                                                            </tbody>
-                                                        </table>
-                                                    </div>
-                                                ) : (
-                                                    <div style={{ textAlign: 'center', padding: '30px', color: '#9ca3af', fontSize: '13px' }}>No pending parcels awaiting sorting.</div>
-                                                )}
+                                                {(() => {
+                                                    const list = filteredParcels.filter((p: any) => !p.isSorted).filter((p: any) => {
+                                                        const q = dashSearchQuery.toLowerCase();
+                                                        const matchQ = !q || p.referenceNumber.toLowerCase().includes(q) || p.senderReference.toLowerCase().includes(q) || (p.consigneeLocation && p.consigneeLocation.toLowerCase().includes(q));
+                                                        const matchP = dashPartnerFilter === 'ALL' || p.deliveryAgentCode === dashPartnerFilter;
+                                                        return matchQ && matchP;
+                                                    });
+                                                    const paginatedList = list.slice((dashTablePage - 1) * dashTableRowsPerPage, dashTablePage * dashTableRowsPerPage);
+                                                    return (
+                                                        <>
+                                                            {list.length > 0 ? (
+                                                                <div style={{ overflowX: 'auto' }}>
+                                                                    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px', textAlign: 'left' }}>
+                                                                        <thead>
+                                                                            <tr style={{ borderBottom: '2px solid #e5e7eb', backgroundColor: '#f9fafb' }}>
+                                                                                {['#', 'Parcel Reference', 'Temu Barcode', 'Target Partner', 'Destination City', 'Allocation Status', 'Received Date'].map(h => (
+                                                                                    <th key={h} style={{ padding: '10px 8px', color: '#6b7280', fontWeight: '700', fontSize: '11px', textTransform: 'uppercase' }}>{h}</th>
+                                                                                ))}
+                                                                            </tr>
+                                                                        </thead>
+                                                                        <tbody>
+                                                                            {paginatedList.map((p: any, idx: number) => {
+                                                                                const globalIdx = (dashTablePage - 1) * dashTableRowsPerPage + idx + 1;
+                                                                                return (
+                                                                                    <tr key={`pend-${idx}`} style={{ borderBottom: '1px solid #f3f4f6' }}>
+                                                                                        <td style={{ padding: '10px 8px', color: '#9ca3af', fontSize: '11px' }}>{globalIdx}</td>
+                                                                                        <td style={{ padding: '10px 8px', fontWeight: '700', color: '#111827' }}>{p.referenceNumber}</td>
+                                                                                        <td style={{ padding: '10px 8px', color: '#4b5563', fontFamily: 'monospace', fontSize: '12px' }}>{p.senderReference}</td>
+                                                                                        <td style={{ padding: '10px 8px', fontWeight: '600' }}>{p.deliveryAgentCode}</td>
+                                                                                        <td style={{ padding: '10px 8px', color: '#374151' }}>{p.consigneeLocation || 'N/A'}</td>
+                                                                                        <td style={{ padding: '10px 8px' }}>
+                                                                                            <span style={{ padding: '3px 8px', borderRadius: '4px', fontSize: '11px', fontWeight: '700', backgroundColor: '#fef3c7', color: '#b45309' }}>
+                                                                                                Pending 1st Scan
+                                                                                            </span>
+                                                                                        </td>
+                                                                                        <td style={{ padding: '10px 8px', color: '#6b7280', fontSize: '11px' }}>{p.createdAt ? new Date(p.createdAt).toLocaleDateString() : '-'}</td>
+                                                                                    </tr>
+                                                                                );
+                                                                            })}
+                                                                        </tbody>
+                                                                    </table>
+                                                                </div>
+                                                            ) : (
+                                                                <div style={{ textAlign: 'center', padding: '30px', color: '#9ca3af', fontSize: '13px' }}>No pending parcels awaiting sorting.</div>
+                                                            )}
+                                                            <PaginationControl
+                                                                currentPage={dashTablePage}
+                                                                totalItems={list.length}
+                                                                rowsPerPage={dashTableRowsPerPage}
+                                                                onPageChange={(page) => setDashTablePage(page)}
+                                                                onRowsPerPageChange={(rows) => setDashTableRowsPerPage(rows)}
+                                                            />
+                                                        </>
+                                                    );
+                                                })()}
                                             </div>
                                         )}
 
@@ -6263,44 +6600,62 @@ export default function WorkstationDashboard() {
                                                     </div>
                                                 </div>
 
-                                                {filteredBags.length > 0 ? (
-                                                    <div style={{ overflowX: 'auto' }}>
-                                                        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px', textAlign: 'left' }}>
-                                                            <thead>
-                                                                <tr style={{ borderBottom: '2px solid #e5e7eb', backgroundColor: '#f9fafb' }}>
-                                                                    {['#', 'Bag Number', 'Target Partner', 'Status', 'Parcels Inside', 'Created By', 'Sealed By', 'Created Date'].map(h => (
-                                                                        <th key={h} style={{ padding: '10px 8px', color: '#6b7280', fontWeight: '700', fontSize: '11px', textTransform: 'uppercase' }}>{h}</th>
-                                                                    ))}
-                                                                </tr>
-                                                            </thead>
-                                                            <tbody>
-                                                                {filteredBags.filter((b: any) => {
-                                                                    const q = dashSearchQuery.toLowerCase();
-                                                                    const matchQ = !q || b.bagNumber.toLowerCase().includes(q) || (b.createdBy && b.createdBy.toLowerCase().includes(q));
-                                                                    const matchP = dashPartnerFilter === 'ALL' || b.targetPartner === dashPartnerFilter;
-                                                                    return matchQ && matchP;
-                                                                }).map((b: any, idx: number) => (
-                                                                    <tr key={`bag-${idx}`} style={{ borderBottom: '1px solid #f3f4f6' }}>
-                                                                        <td style={{ padding: '10px 8px', color: '#9ca3af', fontSize: '11px' }}>{idx + 1}</td>
-                                                                        <td style={{ padding: '10px 8px', fontWeight: '800', color: '#111827', fontFamily: 'monospace' }}>{b.bagNumber}</td>
-                                                                        <td style={{ padding: '10px 8px', fontWeight: '600' }}>{b.targetPartner}</td>
-                                                                        <td style={{ padding: '10px 8px' }}>
-                                                                            <span style={{ padding: '2px 8px', borderRadius: '4px', fontSize: '11px', fontWeight: '700', color: b.status === 'SEALED' ? '#dc2626' : '#15803d' }}>
-                                                                                {b.status === 'SEALED' ? 'SEALED' : 'OPEN'}
-                                                                            </span>
-                                                                        </td>
-                                                                        <td style={{ padding: '10px 8px', fontWeight: '700', color: '#111827' }}>{b.parcelCount} parcels</td>
-                                                                        <td style={{ padding: '10px 8px', color: '#374151' }}>{b.createdBy}</td>
-                                                                        <td style={{ padding: '10px 8px', color: '#6b7280' }}>{b.sealedBy}</td>
-                                                                        <td style={{ padding: '10px 8px', color: '#6b7280', fontSize: '11px' }}>{b.createdAt ? new Date(b.createdAt).toLocaleDateString() : '-'}</td>
-                                                                    </tr>
-                                                                ))}
-                                                            </tbody>
-                                                        </table>
-                                                    </div>
-                                                ) : (
-                                                    <div style={{ textAlign: 'center', padding: '30px', color: '#9ca3af', fontSize: '13px' }}>No bags created yet today.</div>
-                                                )}
+                                                {(() => {
+                                                    const list = filteredBags.filter((b: any) => {
+                                                        const q = dashSearchQuery.toLowerCase();
+                                                        const matchQ = !q || b.bagNumber.toLowerCase().includes(q) || (b.createdBy && b.createdBy.toLowerCase().includes(q));
+                                                        const matchP = dashPartnerFilter === 'ALL' || b.targetPartner === dashPartnerFilter;
+                                                        return matchQ && matchP;
+                                                    });
+                                                    const paginatedList = list.slice((dashTablePage - 1) * dashTableRowsPerPage, dashTablePage * dashTableRowsPerPage);
+                                                    return (
+                                                        <>
+                                                            {list.length > 0 ? (
+                                                                <div style={{ overflowX: 'auto' }}>
+                                                                    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px', textAlign: 'left' }}>
+                                                                        <thead>
+                                                                            <tr style={{ borderBottom: '2px solid #e5e7eb', backgroundColor: '#f9fafb' }}>
+                                                                                {['#', 'Bag Number', 'Target Partner', 'Status', 'Parcels Inside', 'Created By', 'Sealed By', 'Created Date'].map(h => (
+                                                                                    <th key={h} style={{ padding: '10px 8px', color: '#6b7280', fontWeight: '700', fontSize: '11px', textTransform: 'uppercase' }}>{h}</th>
+                                                                                ))}
+                                                                            </tr>
+                                                                        </thead>
+                                                                        <tbody>
+                                                                            {paginatedList.map((b: any, idx: number) => {
+                                                                                const globalIdx = (dashTablePage - 1) * dashTableRowsPerPage + idx + 1;
+                                                                                return (
+                                                                                    <tr key={`bag-${idx}`} style={{ borderBottom: '1px solid #f3f4f6' }}>
+                                                                                        <td style={{ padding: '10px 8px', color: '#9ca3af', fontSize: '11px' }}>{globalIdx}</td>
+                                                                                        <td style={{ padding: '10px 8px', fontWeight: '800', color: '#111827', fontFamily: 'monospace' }}>{b.bagNumber}</td>
+                                                                                        <td style={{ padding: '10px 8px', fontWeight: '600' }}>{b.targetPartner}</td>
+                                                                                        <td style={{ padding: '10px 8px' }}>
+                                                                                            <span style={{ padding: '2px 8px', borderRadius: '4px', fontSize: '11px', fontWeight: '700', color: b.status === 'SEALED' ? '#dc2626' : '#15803d' }}>
+                                                                                                {b.status === 'SEALED' ? 'SEALED' : 'OPEN'}
+                                                                                            </span>
+                                                                                        </td>
+                                                                                        <td style={{ padding: '10px 8px', fontWeight: '700', color: '#111827' }}>{b.parcelCount} parcels</td>
+                                                                                        <td style={{ padding: '10px 8px', color: '#374151' }}>{b.createdBy}</td>
+                                                                                        <td style={{ padding: '10px 8px', color: '#6b7280' }}>{b.sealedBy}</td>
+                                                                                        <td style={{ padding: '10px 8px', color: '#6b7280', fontSize: '11px' }}>{b.createdAt ? new Date(b.createdAt).toLocaleDateString() : '-'}</td>
+                                                                                    </tr>
+                                                                                );
+                                                                            })}
+                                                                        </tbody>
+                                                                    </table>
+                                                                </div>
+                                                            ) : (
+                                                                <div style={{ textAlign: 'center', padding: '30px', color: '#9ca3af', fontSize: '13px' }}>No bags created yet today.</div>
+                                                            )}
+                                                            <PaginationControl
+                                                                currentPage={dashTablePage}
+                                                                totalItems={list.length}
+                                                                rowsPerPage={dashTableRowsPerPage}
+                                                                onPageChange={(page) => setDashTablePage(page)}
+                                                                onRowsPerPageChange={(rows) => setDashTableRowsPerPage(rows)}
+                                                            />
+                                                        </>
+                                                    );
+                                                })()}
                                             </div>
                                         )}
 
@@ -6357,225 +6712,253 @@ export default function WorkstationDashboard() {
 
                                                 {/* 1. MATCHED MANIFEST SESSIONS */}
                                                 <div style={card}>
-                                                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
-                                                        <div style={label}>Matched Manifest Sessions ({
-                                                            (dashboardData.manifestsList || []).filter((m: any) => {
-                                                                const q = dashSearchQuery.trim().toLowerCase();
-                                                                return !q || (m.mawbRef && m.mawbRef.toLowerCase().includes(q)) || (m.manifestId && m.manifestId.toLowerCase().includes(q));
-                                                            }).length
-                                                        })</div>
-                                                    </div>
-                                                    <div style={{ overflowX: 'auto' }}>
-                                                        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px', textAlign: 'left' }}>
-                                                            <thead>
-                                                                <tr style={{ borderBottom: '2px solid #e5e7eb', backgroundColor: '#f9fafb' }}>
-                                                                    {['MAWB / Manifest Ref', 'Status', 'Closed By', 'Total Bags', 'Total Parcels', 'Date'].map(h => (
-                                                                        <th key={h} style={{ padding: '10px 8px', color: '#6b7280', fontWeight: '700', fontSize: '11px', textTransform: 'uppercase' }}>{h}</th>
-                                                                    ))}
-                                                                </tr>
-                                                            </thead>
-                                                            <tbody>
-                                                                {(dashboardData.manifestsList || []).filter((m: any) => {
-                                                                    const q = dashSearchQuery.trim().toLowerCase();
-                                                                    return !q || (m.mawbRef && m.mawbRef.toLowerCase().includes(q)) || (m.manifestId && m.manifestId.toLowerCase().includes(q));
-                                                                }).map((m: any, idx: number) => (
-                                                                    <tr key={`m-${idx}`} style={{ borderBottom: '1px solid #f3f4f6' }}>
-                                                                        <td style={{ padding: '10px 8px', fontWeight: '800', color: '#111827', fontFamily: 'monospace' }}>{m.mawbRef || m.manifestId}</td>
-                                                                        <td style={{ padding: '10px 8px' }}>
-                                                                            <span style={{ padding: '2px 8px', borderRadius: '4px', fontSize: '11px', fontWeight: '700', backgroundColor: m.status === 'CLOSED' ? '#e0e7ff' : '#dcfce7', color: m.status === 'CLOSED' ? '#4338ca' : '#15803d' }}>
-                                                                                {m.status === 'CLOSED' ? '✔ CLOSED' : '⚡ OPEN'}
-                                                                            </span>
-                                                                        </td>
-                                                                        <td style={{ padding: '10px 8px', color: '#374151' }}>{m.closedBy || '—'}</td>
-                                                                        <td style={{ padding: '10px 8px', fontWeight: '700' }}>{m.totalBags} bags</td>
-                                                                        <td style={{ padding: '10px 8px', fontWeight: '700', color: '#166534' }}>{m.totalParcels} parcels</td>
-                                                                        <td style={{ padding: '10px 8px', color: '#6b7280', fontSize: '11px' }}>{m.createdAt ? new Date(m.createdAt).toLocaleDateString() : '-'}</td>
-                                                                    </tr>
-                                                                ))}
-                                                                {(dashboardData.manifestsList || []).filter((m: any) => {
-                                                                    const q = dashSearchQuery.trim().toLowerCase();
-                                                                    return !q || (m.mawbRef && m.mawbRef.toLowerCase().includes(q)) || (m.manifestId && m.manifestId.toLowerCase().includes(q));
-                                                                }).length === 0 && (
-                                                                        <tr>
-                                                                            <td colSpan={6} style={{ padding: '20px', textAlign: 'center', color: '#9ca3af', fontSize: '13px' }}>
-                                                                                No manifest sessions matched query "{dashSearchQuery}"
-                                                                            </td>
-                                                                        </tr>
-                                                                    )}
-                                                            </tbody>
-                                                        </table>
-                                                    </div>
+                                                    {(() => {
+                                                        const list = (dashboardData.manifestsList || []).filter((m: any) => {
+                                                            const q = dashSearchQuery.trim().toLowerCase();
+                                                            return !q || (m.mawbRef && m.mawbRef.toLowerCase().includes(q)) || (m.manifestId && m.manifestId.toLowerCase().includes(q));
+                                                        });
+                                                        const paginatedList = list.slice((manifestSessionsPage - 1) * dashTableRowsPerPage, manifestSessionsPage * dashTableRowsPerPage);
+                                                        return (
+                                                            <>
+                                                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
+                                                                    <div style={label}>Matched Manifest Sessions ({list.length})</div>
+                                                                </div>
+                                                                <div style={{ overflowX: 'auto' }}>
+                                                                    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px', textAlign: 'left' }}>
+                                                                        <thead>
+                                                                            <tr style={{ borderBottom: '2px solid #e5e7eb', backgroundColor: '#f9fafb' }}>
+                                                                                {['MAWB / Manifest Ref', 'Status', 'Closed By', 'Total Bags', 'Total Parcels', 'Date'].map(h => (
+                                                                                    <th key={h} style={{ padding: '10px 8px', color: '#6b7280', fontWeight: '700', fontSize: '11px', textTransform: 'uppercase' }}>{h}</th>
+                                                                                ))}
+                                                                            </tr>
+                                                                        </thead>
+                                                                        <tbody>
+                                                                            {paginatedList.map((m: any, idx: number) => (
+                                                                                <tr key={`m-${idx}`} style={{ borderBottom: '1px solid #f3f4f6' }}>
+                                                                                    <td style={{ padding: '10px 8px', fontWeight: '800', color: '#111827', fontFamily: 'monospace' }}>{m.mawbRef || m.manifestId}</td>
+                                                                                    <td style={{ padding: '10px 8px' }}>
+                                                                                        <span style={{ padding: '2px 8px', borderRadius: '4px', fontSize: '11px', fontWeight: '700', backgroundColor: m.status === 'CLOSED' ? '#e0e7ff' : '#dcfce7', color: m.status === 'CLOSED' ? '#4338ca' : '#15803d' }}>
+                                                                                            {m.status === 'CLOSED' ? '✔ CLOSED' : '⚡ OPEN'}
+                                                                                        </span>
+                                                                                    </td>
+                                                                                    <td style={{ padding: '10px 8px', color: '#374151' }}>{m.closedBy || '—'}</td>
+                                                                                    <td style={{ padding: '10px 8px', fontWeight: '700' }}>{m.totalBags} bags</td>
+                                                                                    <td style={{ padding: '10px 8px', fontWeight: '700', color: '#166534' }}>{m.totalParcels} parcels</td>
+                                                                                    <td style={{ padding: '10px 8px', color: '#6b7280', fontSize: '11px' }}>{m.createdAt ? new Date(m.createdAt).toLocaleDateString() : '-'}</td>
+                                                                                </tr>
+                                                                            ))}
+                                                                            {list.length === 0 && (
+                                                                                <tr>
+                                                                                    <td colSpan={6} style={{ padding: '20px', textAlign: 'center', color: '#9ca3af', fontSize: '13px' }}>
+                                                                                        No manifest sessions matched query "{dashSearchQuery}"
+                                                                                    </td>
+                                                                                </tr>
+                                                                            )}
+                                                                        </tbody>
+                                                                    </table>
+                                                                </div>
+                                                                <PaginationControl
+                                                                    currentPage={manifestSessionsPage}
+                                                                    totalItems={list.length}
+                                                                    rowsPerPage={dashTableRowsPerPage}
+                                                                    onPageChange={(page) => setManifestSessionsPage(page)}
+                                                                    onRowsPerPageChange={(rows) => setDashTableRowsPerPage(rows)}
+                                                                />
+                                                            </>
+                                                        );
+                                                    })()}
                                                 </div>
 
                                                 {/* 2. MATCHED LMD BAGS */}
                                                 <div style={card}>
-                                                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
-                                                        <div style={label}>Matched LMD Bags ({
-                                                            (dashboardData.bagsList || []).filter((b: any) => {
-                                                                const q = dashSearchQuery.trim().toLowerCase();
-                                                                return !q || (b.mawbRef && b.mawbRef.toLowerCase().includes(q)) || (b.bagNumber && b.bagNumber.toLowerCase().includes(q));
-                                                            }).length
-                                                        })</div>
-                                                    </div>
-                                                    <div style={{ overflowX: 'auto' }}>
-                                                        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px', textAlign: 'left' }}>
-                                                            <thead>
-                                                                <tr style={{ borderBottom: '2px solid #e5e7eb', backgroundColor: '#f9fafb' }}>
-                                                                    {['Bag Number', 'MAWB Ref', 'Target Partner', 'Destination Hub', 'Parcels', 'Total Weight', 'Status', 'Created / Sealed By & Timestamp'].map(h => (
-                                                                        <th key={h} style={{ padding: '10px 8px', color: '#6b7280', fontWeight: '700', fontSize: '11px', textTransform: 'uppercase' }}>{h}</th>
-                                                                    ))}
-                                                                </tr>
-                                                            </thead>
-                                                            <tbody>
-                                                                {(dashboardData.bagsList || []).filter((b: any) => {
-                                                                    const q = dashSearchQuery.trim().toLowerCase();
-                                                                    return !q || (b.mawbRef && b.mawbRef.toLowerCase().includes(q)) || (b.bagNumber && b.bagNumber.toLowerCase().includes(q));
-                                                                }).map((b: any, idx: number) => (
-                                                                    <tr key={`b-${idx}`} style={{ borderBottom: '1px solid #f3f4f6' }}>
-                                                                        <td style={{ padding: '10px 8px', fontWeight: '800', color: '#111827', fontFamily: 'monospace' }}>{b.bagNumber}</td>
-                                                                        <td style={{ padding: '10px 8px', color: '#374151', fontSize: '12px' }}>{b.mawbRef || '—'}</td>
-                                                                        <td style={{ padding: '10px 8px' }}>
-                                                                            <span style={{ padding: '2px 8px', borderRadius: '4px', fontSize: '11px', fontWeight: '700', backgroundColor: b.targetPartner === 'PickMe' ? '#fef3c7' : b.targetPartner === 'Domex' ? '#dbeafe' : b.targetPartner === 'Pronto' ? '#e0e7ff' : '#f3f4f6', color: b.targetPartner === 'PickMe' ? '#b45309' : b.targetPartner === 'Domex' ? '#1d4ed8' : b.targetPartner === 'Pronto' ? '#4338ca' : '#374151' }}>
-                                                                                {b.targetPartner}
-                                                                            </span>
-                                                                        </td>
-                                                                        <td style={{ padding: '10px 8px', color: '#374151' }}>{b.destinationHub || b.targetPartner}</td>
-                                                                        <td style={{ padding: '10px 8px', fontWeight: '700' }}>{b.parcelCount} items</td>
-                                                                        <td style={{ padding: '10px 8px', color: '#4b5563' }}>{b.totalWeight ? `${b.totalWeight} kg` : '-'}</td>
-                                                                        <td style={{ padding: '10px 8px' }}>
-                                                                            <span style={{ padding: '2px 8px', borderRadius: '4px', fontSize: '11px', fontWeight: '700', backgroundColor: b.status === 'SEALED' ? '#fee2e2' : '#dcfce7', color: b.status === 'SEALED' ? '#dc2626' : '#15803d' }}>
-                                                                                {b.status === 'SEALED' ? 'SEALED' : 'OPEN'}
-                                                                            </span>
-                                                                        </td>
-                                                                        <td style={{ padding: '10px 8px', color: '#4b5563', fontSize: '11px' }}>
-                                                                            <div style={{ fontWeight: '600', color: '#111827' }}>{b.sealedBy && b.sealedBy !== '-' ? b.sealedBy : b.createdBy}</div>
-                                                                            <div style={{ color: '#6b7280', fontSize: '10px' }}>{b.sealedAt && b.sealedAt !== '-' ? new Date(b.sealedAt).toLocaleString() : b.createdAt ? new Date(b.createdAt).toLocaleString() : '-'}</div>
-                                                                        </td>
-                                                                    </tr>
-                                                                ))}
-                                                                {(dashboardData.bagsList || []).filter((b: any) => {
-                                                                    const q = dashSearchQuery.trim().toLowerCase();
-                                                                    return !q || (b.mawbRef && b.mawbRef.toLowerCase().includes(q)) || (b.bagNumber && b.bagNumber.toLowerCase().includes(q));
-                                                                }).length === 0 && (
-                                                                        <tr>
-                                                                            <td colSpan={8} style={{ padding: '20px', textAlign: 'center', color: '#9ca3af', fontSize: '13px' }}>
-                                                                                No LMD bags matched query "{dashSearchQuery}"
-                                                                            </td>
-                                                                        </tr>
-                                                                    )}
-                                                            </tbody>
-                                                        </table>
-                                                    </div>
+                                                    {(() => {
+                                                        const list = (dashboardData.bagsList || []).filter((b: any) => {
+                                                            const q = dashSearchQuery.trim().toLowerCase();
+                                                            return !q || (b.mawbRef && b.mawbRef.toLowerCase().includes(q)) || (b.bagNumber && b.bagNumber.toLowerCase().includes(q));
+                                                        });
+                                                        const paginatedList = list.slice((manifestBagsPage - 1) * dashTableRowsPerPage, manifestBagsPage * dashTableRowsPerPage);
+                                                        return (
+                                                            <>
+                                                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
+                                                                    <div style={label}>Matched LMD Bags ({list.length})</div>
+                                                                </div>
+                                                                <div style={{ overflowX: 'auto' }}>
+                                                                    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px', textAlign: 'left' }}>
+                                                                        <thead>
+                                                                            <tr style={{ borderBottom: '2px solid #e5e7eb', backgroundColor: '#f9fafb' }}>
+                                                                                {['Bag Number', 'MAWB Ref', 'Target Partner', 'Destination Hub', 'Parcels', 'Total Weight', 'Status', 'Created / Sealed By & Timestamp'].map(h => (
+                                                                                    <th key={h} style={{ padding: '10px 8px', color: '#6b7280', fontWeight: '700', fontSize: '11px', textTransform: 'uppercase' }}>{h}</th>
+                                                                                ))}
+                                                                            </tr>
+                                                                        </thead>
+                                                                        <tbody>
+                                                                            {paginatedList.map((b: any, idx: number) => (
+                                                                                <tr key={`b-${idx}`} style={{ borderBottom: '1px solid #f3f4f6' }}>
+                                                                                    <td style={{ padding: '10px 8px', fontWeight: '800', color: '#111827', fontFamily: 'monospace' }}>{b.bagNumber}</td>
+                                                                                    <td style={{ padding: '10px 8px', color: '#374151', fontSize: '12px' }}>{b.mawbRef || '—'}</td>
+                                                                                    <td style={{ padding: '10px 8px' }}>
+                                                                                        <span style={{ padding: '2px 8px', borderRadius: '4px', fontSize: '11px', fontWeight: '700', backgroundColor: b.targetPartner === 'PickMe' ? '#fef3c7' : b.targetPartner === 'Domex' ? '#dbeafe' : b.targetPartner === 'Pronto' ? '#e0e7ff' : '#f3f4f6', color: b.targetPartner === 'PickMe' ? '#b45309' : b.targetPartner === 'Domex' ? '#1d4ed8' : b.targetPartner === 'Pronto' ? '#4338ca' : '#374151' }}>
+                                                                                            {b.targetPartner}
+                                                                                        </span>
+                                                                                    </td>
+                                                                                    <td style={{ padding: '10px 8px', color: '#374151' }}>{b.destinationHub || b.targetPartner}</td>
+                                                                                    <td style={{ padding: '10px 8px', fontWeight: '700' }}>{b.parcelCount} items</td>
+                                                                                    <td style={{ padding: '10px 8px', color: '#4b5563' }}>{b.totalWeight ? `${b.totalWeight} kg` : '-'}</td>
+                                                                                    <td style={{ padding: '10px 8px' }}>
+                                                                                        <span style={{ padding: '2px 8px', borderRadius: '4px', fontSize: '11px', fontWeight: '700', backgroundColor: b.status === 'SEALED' ? '#fee2e2' : '#dcfce7', color: b.status === 'SEALED' ? '#dc2626' : '#15803d' }}>
+                                                                                            {b.status === 'SEALED' ? 'SEALED' : 'OPEN'}
+                                                                                        </span>
+                                                                                    </td>
+                                                                                    <td style={{ padding: '10px 8px', color: '#4b5563', fontSize: '11px' }}>
+                                                                                        <div style={{ fontWeight: '600', color: '#111827' }}>{b.sealedBy && b.sealedBy !== '-' ? b.sealedBy : b.createdBy}</div>
+                                                                                        <div style={{ color: '#6b7280', fontSize: '10px' }}>{b.sealedAt && b.sealedAt !== '-' ? new Date(b.sealedAt).toLocaleString() : b.createdAt ? new Date(b.createdAt).toLocaleString() : '-'}</div>
+                                                                                    </td>
+                                                                                </tr>
+                                                                            ))}
+                                                                            {list.length === 0 && (
+                                                                                <tr>
+                                                                                    <td colSpan={8} style={{ padding: '20px', textAlign: 'center', color: '#9ca3af', fontSize: '13px' }}>
+                                                                                        No LMD bags matched query "{dashSearchQuery}"
+                                                                                    </td>
+                                                                                </tr>
+                                                                            )}
+                                                                        </tbody>
+                                                                    </table>
+                                                                </div>
+                                                                <PaginationControl
+                                                                    currentPage={manifestBagsPage}
+                                                                    totalItems={list.length}
+                                                                    rowsPerPage={dashTableRowsPerPage}
+                                                                    onPageChange={(page) => setManifestBagsPage(page)}
+                                                                    onRowsPerPageChange={(rows) => setDashTableRowsPerPage(rows)}
+                                                                />
+                                                            </>
+                                                        );
+                                                    })()}
                                                 </div>
 
                                                 {/* 3. MATCHED BOX UNSEALINGS */}
                                                 <div style={card}>
-                                                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
-                                                        <div style={label}>Matched Box Unsealings ({
-                                                            (dashboardData.unsealedBoxesList || []).filter((u: any) => {
-                                                                const q = dashSearchQuery.trim().toLowerCase();
-                                                                return !q || (u.mawbRef && u.mawbRef.toLowerCase().includes(q)) || (u.bagNumber && u.bagNumber.toLowerCase().includes(q));
-                                                            }).length
-                                                        })</div>
-                                                    </div>
-                                                    <div style={{ overflowX: 'auto' }}>
-                                                        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px', textAlign: 'left' }}>
-                                                            <thead>
-                                                                <tr style={{ borderBottom: '2px solid #e5e7eb', backgroundColor: '#f9fafb' }}>
-                                                                    {['Box Bag No', 'MAWB Ref', 'Scanned / Expected Count', 'Unsealed By', 'Timestamp'].map(h => (
-                                                                        <th key={h} style={{ padding: '10px 8px', color: '#6b7280', fontWeight: '700', fontSize: '11px', textTransform: 'uppercase' }}>{h}</th>
-                                                                    ))}
-                                                                </tr>
-                                                            </thead>
-                                                            <tbody>
-                                                                {(dashboardData.unsealedBoxesList || []).filter((u: any) => {
-                                                                    const q = dashSearchQuery.trim().toLowerCase();
-                                                                    return !q || (u.mawbRef && u.mawbRef.toLowerCase().includes(q)) || (u.bagNumber && u.bagNumber.toLowerCase().includes(q));
-                                                                }).map((u: any, idx: number) => (
-                                                                    <tr key={`ub-${idx}`} style={{ borderBottom: '1px solid #f3f4f6' }}>
-                                                                        <td style={{ padding: '10px 8px', fontWeight: '800', color: '#111827', fontFamily: 'monospace' }}>{u.bagNumber}</td>
-                                                                        <td style={{ padding: '10px 8px', color: '#374151' }}>{u.mawbRef || '—'}</td>
-                                                                        <td style={{ padding: '10px 8px', fontWeight: '700', color: u.scannedCount === u.expectedCount ? '#166534' : '#dc2626' }}>
-                                                                            {u.scannedCount} / {u.expectedCount}
-                                                                        </td>
-                                                                        <td style={{ padding: '10px 8px', color: '#4b5563' }}>{u.unsealedBy}</td>
-                                                                        <td style={{ padding: '10px 8px', color: '#6b7280', fontSize: '11px' }}>{u.createdAt ? new Date(u.createdAt).toLocaleString() : '-'}</td>
-                                                                    </tr>
-                                                                ))}
-                                                                {(dashboardData.unsealedBoxesList || []).filter((u: any) => {
-                                                                    const q = dashSearchQuery.trim().toLowerCase();
-                                                                    return !q || (u.mawbRef && u.mawbRef.toLowerCase().includes(q)) || (u.bagNumber && u.bagNumber.toLowerCase().includes(q));
-                                                                }).length === 0 && (
-                                                                        <tr>
-                                                                            <td colSpan={5} style={{ padding: '20px', textAlign: 'center', color: '#9ca3af', fontSize: '13px' }}>
-                                                                                No box unsealings matched query "{dashSearchQuery}"
-                                                                            </td>
-                                                                        </tr>
-                                                                    )}
-                                                            </tbody>
-                                                        </table>
-                                                    </div>
+                                                    {(() => {
+                                                        const list = (dashboardData.unsealedBoxesList || []).filter((u: any) => {
+                                                            const q = dashSearchQuery.trim().toLowerCase();
+                                                            return !q || (u.mawbRef && u.mawbRef.toLowerCase().includes(q)) || (u.bagNumber && u.bagNumber.toLowerCase().includes(q));
+                                                        });
+                                                        const paginatedList = list.slice((manifestUnsealsPage - 1) * dashTableRowsPerPage, manifestUnsealsPage * dashTableRowsPerPage);
+                                                        return (
+                                                            <>
+                                                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
+                                                                    <div style={label}>Matched Box Unsealings ({list.length})</div>
+                                                                </div>
+                                                                <div style={{ overflowX: 'auto' }}>
+                                                                    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px', textAlign: 'left' }}>
+                                                                        <thead>
+                                                                            <tr style={{ borderBottom: '2px solid #e5e7eb', backgroundColor: '#f9fafb' }}>
+                                                                                {['Box Bag No', 'MAWB Ref', 'Scanned / Expected Count', 'Unsealed By', 'Timestamp'].map(h => (
+                                                                                    <th key={h} style={{ padding: '10px 8px', color: '#6b7280', fontWeight: '700', fontSize: '11px', textTransform: 'uppercase' }}>{h}</th>
+                                                                                ))}
+                                                                            </tr>
+                                                                        </thead>
+                                                                        <tbody>
+                                                                            {paginatedList.map((u: any, idx: number) => (
+                                                                                <tr key={`ub-${idx}`} style={{ borderBottom: '1px solid #f3f4f6' }}>
+                                                                                    <td style={{ padding: '10px 8px', fontWeight: '800', color: '#111827', fontFamily: 'monospace' }}>{u.bagNumber}</td>
+                                                                                    <td style={{ padding: '10px 8px', color: '#374151' }}>{u.mawbRef || '—'}</td>
+                                                                                    <td style={{ padding: '10px 8px', fontWeight: '700', color: u.scannedCount === u.expectedCount ? '#166534' : '#dc2626' }}>
+                                                                                        {u.scannedCount} / {u.expectedCount}
+                                                                                    </td>
+                                                                                    <td style={{ padding: '10px 8px', color: '#4b5563' }}>{u.unsealedBy}</td>
+                                                                                    <td style={{ padding: '10px 8px', color: '#6b7280', fontSize: '11px' }}>{u.createdAt ? new Date(u.createdAt).toLocaleString() : '-'}</td>
+                                                                                </tr>
+                                                                            ))}
+                                                                            {list.length === 0 && (
+                                                                                <tr>
+                                                                                    <td colSpan={5} style={{ padding: '20px', textAlign: 'center', color: '#9ca3af', fontSize: '13px' }}>
+                                                                                        No box unsealings matched query "{dashSearchQuery}"
+                                                                                    </td>
+                                                                                </tr>
+                                                                            )}
+                                                                        </tbody>
+                                                                    </table>
+                                                                </div>
+                                                                <PaginationControl
+                                                                    currentPage={manifestUnsealsPage}
+                                                                    totalItems={list.length}
+                                                                    rowsPerPage={dashTableRowsPerPage}
+                                                                    onPageChange={(page) => setManifestUnsealsPage(page)}
+                                                                    onRowsPerPageChange={(rows) => setDashTableRowsPerPage(rows)}
+                                                                />
+                                                            </>
+                                                        );
+                                                    })()}
                                                 </div>
 
                                                 {/* 4. MATCHED PARCELS */}
                                                 <div style={card}>
-                                                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
-                                                        <div style={label}>Matched Parcels ({
-                                                            (dashboardData.receivedParcels || []).filter((p: any) => {
-                                                                const q = dashSearchQuery.trim().toLowerCase();
-                                                                return !q || (p.mawbReference && p.mawbReference.toLowerCase().includes(q)) || (p.referenceNumber && p.referenceNumber.toLowerCase().includes(q)) || (p.bagNumber && p.bagNumber.toLowerCase().includes(q));
-                                                            }).length
-                                                        })</div>
-                                                    </div>
-                                                    <div style={{ overflowX: 'auto' }}>
-                                                        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px', textAlign: 'left' }}>
-                                                            <thead>
-                                                                <tr style={{ borderBottom: '2px solid #e5e7eb', backgroundColor: '#f9fafb' }}>
-                                                                    {['Waybill / Ref', 'Temu Barcode', 'MAWB Ref', 'Assigned Bag #', 'Courier Partner', 'Destination City', 'Status'].map(h => (
-                                                                        <th key={h} style={{ padding: '10px 8px', color: '#6b7280', fontWeight: '700', fontSize: '11px', textTransform: 'uppercase' }}>{h}</th>
-                                                                    ))}
-                                                                </tr>
-                                                            </thead>
-                                                            <tbody>
-                                                                {(dashboardData.receivedParcels || []).filter((p: any) => {
-                                                                    const q = dashSearchQuery.trim().toLowerCase();
-                                                                    return !q || (p.mawbReference && p.mawbReference.toLowerCase().includes(q)) || (p.referenceNumber && p.referenceNumber.toLowerCase().includes(q)) || (p.bagNumber && p.bagNumber.toLowerCase().includes(q));
-                                                                }).slice(0, 100).map((p: any, idx: number) => (
-                                                                    <tr key={`mp-${idx}`} style={{ borderBottom: '1px solid #f3f4f6' }}>
-                                                                        <td style={{ padding: '10px 8px', fontWeight: '700', color: '#111827' }}>{p.referenceNumber}</td>
-                                                                        <td style={{ padding: '10px 8px', color: '#4b5563', fontFamily: 'monospace', fontSize: '12px' }}>{p.senderReference}</td>
-                                                                        <td style={{ padding: '10px 8px', color: '#374151', fontSize: '12px' }}>{p.mawbReference}</td>
-                                                                        <td style={{ padding: '10px 8px' }}>
-                                                                            {p.bagNumber ? (
-                                                                                <span style={{ padding: '2px 8px', borderRadius: '4px', fontSize: '11px', fontWeight: '700', backgroundColor: '#dcfce7', color: '#15803d', fontFamily: 'monospace' }}>
-                                                                                    {p.bagNumber}
-                                                                                </span>
-                                                                            ) : (
-                                                                                <span style={{ color: '#9ca3af', fontSize: '12px' }}>Unassigned</span>
+                                                    {(() => {
+                                                        const list = (dashboardData.receivedParcels || []).filter((p: any) => {
+                                                            const q = dashSearchQuery.trim().toLowerCase();
+                                                            return !q || (p.mawbReference && p.mawbReference.toLowerCase().includes(q)) || (p.referenceNumber && p.referenceNumber.toLowerCase().includes(q)) || (p.bagNumber && p.bagNumber.toLowerCase().includes(q));
+                                                        });
+                                                        const paginatedList = list.slice((manifestParcelsPage - 1) * dashTableRowsPerPage, manifestParcelsPage * dashTableRowsPerPage);
+                                                        return (
+                                                            <>
+                                                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
+                                                                    <div style={label}>Matched Parcels ({list.length})</div>
+                                                                </div>
+                                                                <div style={{ overflowX: 'auto' }}>
+                                                                    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px', textAlign: 'left' }}>
+                                                                        <thead>
+                                                                            <tr style={{ borderBottom: '2px solid #e5e7eb', backgroundColor: '#f9fafb' }}>
+                                                                                {['Waybill / Ref', 'Temu Barcode', 'MAWB Ref', 'Assigned Bag #', 'Courier Partner', 'Destination City', 'Status'].map(h => (
+                                                                                    <th key={h} style={{ padding: '10px 8px', color: '#6b7280', fontWeight: '700', fontSize: '11px', textTransform: 'uppercase' }}>{h}</th>
+                                                                                ))}
+                                                                            </tr>
+                                                                        </thead>
+                                                                        <tbody>
+                                                                            {paginatedList.map((p: any, idx: number) => (
+                                                                                <tr key={`mp-${idx}`} style={{ borderBottom: '1px solid #f3f4f6' }}>
+                                                                                    <td style={{ padding: '10px 8px', fontWeight: '700', color: '#111827' }}>{p.referenceNumber}</td>
+                                                                                    <td style={{ padding: '10px 8px', color: '#4b5563', fontFamily: 'monospace', fontSize: '12px' }}>{p.senderReference}</td>
+                                                                                    <td style={{ padding: '10px 8px', color: '#374151', fontSize: '12px' }}>{p.mawbReference}</td>
+                                                                                    <td style={{ padding: '10px 8px' }}>
+                                                                                        {p.bagNumber ? (
+                                                                                            <span style={{ padding: '2px 8px', borderRadius: '4px', fontSize: '11px', fontWeight: '700', backgroundColor: '#dcfce7', color: '#15803d', fontFamily: 'monospace' }}>
+                                                                                                {p.bagNumber}
+                                                                                            </span>
+                                                                                        ) : (
+                                                                                            <span style={{ color: '#9ca3af', fontSize: '12px' }}>Unassigned</span>
+                                                                                        )}
+                                                                                    </td>
+                                                                                    <td style={{ padding: '10px 8px', fontWeight: '600' }}>{p.deliveryAgentCode}</td>
+                                                                                    <td style={{ padding: '10px 8px', color: '#374151' }}>{p.consigneeLocation || 'N/A'}</td>
+                                                                                    <td style={{ padding: '10px 8px' }}>
+                                                                                        <span style={{ padding: '2px 8px', borderRadius: '4px', fontSize: '11px', fontWeight: '700', backgroundColor: p.isSorted ? '#dcfce7' : '#fef3c7', color: p.isSorted ? '#15803d' : '#b45309' }}>
+                                                                                            {p.isSorted ? 'LMD ALLOCATED' : 'RECEIVED'}
+                                                                                        </span>
+                                                                                    </td>
+                                                                                </tr>
+                                                                            ))}
+                                                                            {list.length === 0 && (
+                                                                                <tr>
+                                                                                    <td colSpan={7} style={{ padding: '20px', textAlign: 'center', color: '#9ca3af', fontSize: '13px' }}>
+                                                                                        No parcels matched query "{dashSearchQuery}"
+                                                                                    </td>
+                                                                                </tr>
                                                                             )}
-                                                                        </td>
-                                                                        <td style={{ padding: '10px 8px', fontWeight: '600' }}>{p.deliveryAgentCode}</td>
-                                                                        <td style={{ padding: '10px 8px', color: '#374151' }}>{p.consigneeLocation || 'N/A'}</td>
-                                                                        <td style={{ padding: '10px 8px' }}>
-                                                                            <span style={{ padding: '2px 8px', borderRadius: '4px', fontSize: '11px', fontWeight: '700', backgroundColor: p.isSorted ? '#dcfce7' : '#fef3c7', color: p.isSorted ? '#15803d' : '#b45309' }}>
-                                                                                {p.isSorted ? 'LMD ALLOCATED' : 'RECEIVED'}
-                                                                            </span>
-                                                                        </td>
-                                                                    </tr>
-                                                                ))}
-                                                                {(dashboardData.receivedParcels || []).filter((p: any) => {
-                                                                    const q = dashSearchQuery.trim().toLowerCase();
-                                                                    return !q || (p.mawbReference && p.mawbReference.toLowerCase().includes(q)) || (p.referenceNumber && p.referenceNumber.toLowerCase().includes(q)) || (p.bagNumber && p.bagNumber.toLowerCase().includes(q));
-                                                                }).length === 0 && (
-                                                                        <tr>
-                                                                            <td colSpan={7} style={{ padding: '20px', textAlign: 'center', color: '#9ca3af', fontSize: '13px' }}>
-                                                                                No parcels matched query "{dashSearchQuery}"
-                                                                            </td>
-                                                                        </tr>
-                                                                    )}
-                                                            </tbody>
-                                                        </table>
-                                                    </div>
+                                                                        </tbody>
+                                                                    </table>
+                                                                </div>
+                                                                <PaginationControl
+                                                                    currentPage={manifestParcelsPage}
+                                                                    totalItems={list.length}
+                                                                    rowsPerPage={dashTableRowsPerPage}
+                                                                    onPageChange={(page) => setManifestParcelsPage(page)}
+                                                                    onRowsPerPageChange={(rows) => setDashTableRowsPerPage(rows)}
+                                                                />
+                                                            </>
+                                                        );
+                                                    })()}
                                                 </div>
                                             </div>
                                         )}
@@ -6592,41 +6975,59 @@ export default function WorkstationDashboard() {
                                                     </div>
                                                 </div>
 
-                                                {filteredExceptions.length > 0 ? (
-                                                    <div style={{ overflowX: 'auto' }}>
-                                                        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px', textAlign: 'left' }}>
-                                                            <thead>
-                                                                <tr style={{ borderBottom: '2px solid #e5e7eb', backgroundColor: '#f9fafb' }}>
-                                                                    {['#', 'Exception Type', 'Ref / Barcode / Bag #', 'Details', 'Scanned / Expected', 'Reported By', 'Timestamp'].map(h => (
-                                                                        <th key={h} style={{ padding: '10px 8px', color: '#6b7280', fontWeight: '700', fontSize: '11px', textTransform: 'uppercase' }}>{h}</th>
-                                                                    ))}
-                                                                </tr>
-                                                            </thead>
-                                                            <tbody>
-                                                                {filteredExceptions.filter((ex: any) => {
-                                                                    const q = dashSearchQuery.toLowerCase();
-                                                                    return !q || ex.type.toLowerCase().includes(q) || ex.refNumber.toLowerCase().includes(q) || ex.details.toLowerCase().includes(q);
-                                                                }).map((ex: any, idx: number) => (
-                                                                    <tr key={`ex-${idx}`} style={{ borderBottom: '1px solid #f3f4f6' }}>
-                                                                        <td style={{ padding: '10px 8px', color: '#9ca3af', fontSize: '11px' }}>{idx + 1}</td>
-                                                                        <td style={{ padding: '10px 8px' }}>
-                                                                            <span style={{ padding: '2px 8px', borderRadius: '4px', fontSize: '11px', fontWeight: '700', backgroundColor: ex.type.includes('Damaged') ? '#fee2e2' : '#fef3c7', color: ex.type.includes('Damaged') ? '#dc2626' : '#b45309' }}>
-                                                                                {ex.type}
-                                                                            </span>
-                                                                        </td>
-                                                                        <td style={{ padding: '10px 8px', fontWeight: '700', color: '#111827', fontFamily: 'monospace' }}>{ex.refNumber}</td>
-                                                                        <td style={{ padding: '10px 8px', color: '#374151' }}>{ex.details}</td>
-                                                                        <td style={{ padding: '10px 8px', fontWeight: '700', color: '#111827' }}>{ex.scannedVsExpected}</td>
-                                                                        <td style={{ padding: '10px 8px', color: '#4b5563' }}>{ex.reportedBy}</td>
-                                                                        <td style={{ padding: '10px 8px', color: '#6b7280', fontSize: '11px' }}>{ex.createdAt ? new Date(ex.createdAt).toLocaleString() : '-'}</td>
-                                                                    </tr>
-                                                                ))}
-                                                            </tbody>
-                                                        </table>
-                                                    </div>
-                                                ) : (
-                                                    <div style={{ textAlign: 'center', padding: '30px', color: '#9ca3af', fontSize: '13px' }}>No exception logs found.</div>
-                                                )}
+                                                {(() => {
+                                                    const list = filteredExceptions.filter((ex: any) => {
+                                                        const q = dashSearchQuery.toLowerCase();
+                                                        return !q || ex.type.toLowerCase().includes(q) || ex.refNumber.toLowerCase().includes(q) || ex.details.toLowerCase().includes(q);
+                                                    });
+                                                    const paginatedList = list.slice((dashTablePage - 1) * dashTableRowsPerPage, dashTablePage * dashTableRowsPerPage);
+                                                    return (
+                                                        <>
+                                                            {list.length > 0 ? (
+                                                                <div style={{ overflowX: 'auto' }}>
+                                                                    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px', textAlign: 'left' }}>
+                                                                        <thead>
+                                                                            <tr style={{ borderBottom: '2px solid #e5e7eb', backgroundColor: '#f9fafb' }}>
+                                                                                {['#', 'Exception Type', 'Ref / Barcode / Bag #', 'Details', 'Scanned / Expected', 'Reported By', 'Timestamp'].map(h => (
+                                                                                    <th key={h} style={{ padding: '10px 8px', color: '#6b7280', fontWeight: '700', fontSize: '11px', textTransform: 'uppercase' }}>{h}</th>
+                                                                                ))}
+                                                                            </tr>
+                                                                        </thead>
+                                                                        <tbody>
+                                                                            {paginatedList.map((ex: any, idx: number) => {
+                                                                                const globalIdx = (dashTablePage - 1) * dashTableRowsPerPage + idx + 1;
+                                                                                return (
+                                                                                    <tr key={`ex-${idx}`} style={{ borderBottom: '1px solid #f3f4f6' }}>
+                                                                                        <td style={{ padding: '10px 8px', color: '#9ca3af', fontSize: '11px' }}>{globalIdx}</td>
+                                                                                        <td style={{ padding: '10px 8px' }}>
+                                                                                            <span style={{ padding: '2px 8px', borderRadius: '4px', fontSize: '11px', fontWeight: '700', backgroundColor: ex.type.includes('Damaged') ? '#fee2e2' : '#fef3c7', color: ex.type.includes('Damaged') ? '#dc2626' : '#b45309' }}>
+                                                                                                {ex.type}
+                                                                                            </span>
+                                                                                        </td>
+                                                                                        <td style={{ padding: '10px 8px', fontWeight: '700', color: '#111827', fontFamily: 'monospace' }}>{ex.refNumber}</td>
+                                                                                        <td style={{ padding: '10px 8px', color: '#374151' }}>{ex.details}</td>
+                                                                                        <td style={{ padding: '10px 8px', fontWeight: '700', color: '#111827' }}>{ex.scannedVsExpected}</td>
+                                                                                        <td style={{ padding: '10px 8px', color: '#4b5563' }}>{ex.reportedBy}</td>
+                                                                                        <td style={{ padding: '10px 8px', color: '#6b7280', fontSize: '11px' }}>{ex.createdAt ? new Date(ex.createdAt).toLocaleString() : '-'}</td>
+                                                                                    </tr>
+                                                                                );
+                                                                            })}
+                                                                        </tbody>
+                                                                    </table>
+                                                                </div>
+                                                            ) : (
+                                                                <div style={{ textAlign: 'center', padding: '30px', color: '#9ca3af', fontSize: '13px' }}>No exception logs found.</div>
+                                                            )}
+                                                            <PaginationControl
+                                                                currentPage={dashTablePage}
+                                                                totalItems={list.length}
+                                                                rowsPerPage={dashTableRowsPerPage}
+                                                                onPageChange={(page) => setDashTablePage(page)}
+                                                                onRowsPerPageChange={(rows) => setDashTableRowsPerPage(rows)}
+                                                            />
+                                                        </>
+                                                    );
+                                                })()}
                                             </div>
                                         )}
 
@@ -6645,61 +7046,76 @@ export default function WorkstationDashboard() {
                                                     </div>
                                                 </div>
 
-                                                <div style={{ overflowX: 'auto' }}>
-                                                    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px', textAlign: 'left' }}>
-                                                        <thead>
-                                                            <tr style={{ borderBottom: '2px solid #e5e7eb', backgroundColor: '#f9fafb' }}>
-                                                                {['#', 'Operator / User Name', 'Email Address', 'Role', 'Inbound Parcels Scanned', 'Outbound Bags Sealed', 'Manifest Sessions Closed', 'System Duty Status'].map(h => (
-                                                                    <th key={h} style={{ padding: '10px 12px', color: '#6b7280', fontWeight: '700', fontSize: '11px', textTransform: 'uppercase' }}>{h}</th>
-                                                                ))}
-                                                            </tr>
-                                                        </thead>
-                                                        <tbody>
-                                                            {(usersList && usersList.length > 0
-                                                                ? usersList
-                                                                : (dashboardData.userProductivity || []).map((p: any) => ({ first_name: p.operator, last_name: '', email: `${p.operator.toLowerCase().replace(/\s+/g, '.')}@skynet.lk`, role: 'Operator', is_active: true }))
-                                                            ).map((user: any, idx: number) => {
-                                                                const fullName = `${user.first_name || ''} ${user.last_name || ''}`.trim() || user.name || user.email || 'Operator';
-                                                                const prod = (dashboardData.userProductivity || []).find((p: any) =>
-                                                                    p.operator?.toLowerCase().includes(fullName.toLowerCase()) ||
-                                                                    p.operator?.toLowerCase().includes((user.first_name || '').toLowerCase())
-                                                                );
+                                                {(() => {
+                                                    const list = usersList && usersList.length > 0
+                                                        ? usersList
+                                                        : (dashboardData.userProductivity || []).map((p: any) => ({ first_name: p.operator, last_name: '', email: `${p.operator.toLowerCase().replace(/\s+/g, '.')}@skynet.lk`, role: 'Operator', is_active: true }));
+                                                    const paginatedList = list.slice((dashTablePage - 1) * dashTableRowsPerPage, dashTablePage * dashTableRowsPerPage);
+                                                    return (
+                                                        <>
+                                                            <div style={{ overflowX: 'auto' }}>
+                                                                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px', textAlign: 'left' }}>
+                                                                    <thead>
+                                                                        <tr style={{ borderBottom: '2px solid #e5e7eb', backgroundColor: '#f9fafb' }}>
+                                                                            {['#', 'Operator / User Name', 'Email Address', 'Role', 'Inbound Parcels Scanned', 'Outbound Bags Sealed', 'Manifest Sessions Closed', 'System Duty Status'].map(h => (
+                                                                                <th key={h} style={{ padding: '10px 12px', color: '#6b7280', fontWeight: '700', fontSize: '11px', textTransform: 'uppercase' }}>{h}</th>
+                                                                            ))}
+                                                                        </tr>
+                                                                    </thead>
+                                                                    <tbody>
+                                                                        {paginatedList.map((user: any, idx: number) => {
+                                                                            const globalIdx = (dashTablePage - 1) * dashTableRowsPerPage + idx + 1;
+                                                                            const fullName = `${user.first_name || ''} ${user.last_name || ''}`.trim() || user.name || user.email || 'Operator';
+                                                                            const prod = (dashboardData.userProductivity || []).find((p: any) =>
+                                                                                p.operator?.toLowerCase().includes(fullName.toLowerCase()) ||
+                                                                                p.operator?.toLowerCase().includes((user.first_name || '').toLowerCase())
+                                                                            );
 
-                                                                const scanned = prod ? prod.scanned : 0;
-                                                                const bagsSealed = prod ? prod.bagsSealed : 0;
-                                                                const manifestsClosed = prod ? prod.manifestsClosed : 0;
+                                                                            const scanned = prod ? prod.scanned : 0;
+                                                                            const bagsSealed = prod ? prod.bagsSealed : 0;
+                                                                            const manifestsClosed = prod ? prod.manifestsClosed : 0;
 
-                                                                return (
-                                                                    <tr key={`u-prod-${user.id || idx}`} style={{ borderBottom: '1px solid #f3f4f6' }}>
-                                                                        <td style={{ padding: '10px 12px', color: '#9ca3af', fontSize: '11px' }}>{idx + 1}</td>
-                                                                        <td style={{ padding: '10px 12px', fontWeight: '700', color: '#111827' }}>
-                                                                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                                                                                <div style={{ width: '28px', height: '28px', borderRadius: '50%', backgroundColor: '#f3f4f6', border: '1px solid #d1d5db', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: '700', fontSize: '11px', color: '#374151' }}>
-                                                                                    {(user.first_name || user.name || user.email || 'O')[0].toUpperCase()}
-                                                                                </div>
-                                                                                <span>{fullName}</span>
-                                                                            </div>
-                                                                        </td>
-                                                                        <td style={{ padding: '10px 12px', color: '#4b5563', fontSize: '12px', fontFamily: 'monospace' }}>{user.email || '—'}</td>
-                                                                        <td style={{ padding: '10px 12px' }}>
-                                                                            <span style={{ padding: '2px 8px', borderRadius: '4px', fontSize: '11px', fontWeight: '700', backgroundColor: '#eff6ff', color: '#1d4ed8' }}>
-                                                                                {user.role || 'Operator'}
-                                                                            </span>
-                                                                        </td>
-                                                                        <td style={{ padding: '10px 12px', fontWeight: '800', color: '#166534' }}>{scanned} parcels</td>
-                                                                        <td style={{ padding: '10px 12px', fontWeight: '700', color: '#111827' }}>{bagsSealed} bags</td>
-                                                                        <td style={{ padding: '10px 12px', fontWeight: '700', color: '#374151' }}>{manifestsClosed} manifests</td>
-                                                                        <td style={{ padding: '10px 12px' }}>
-                                                                            <span style={{ padding: '2px 8px', borderRadius: '4px', fontSize: '11px', fontWeight: '700', backgroundColor: '#dcfce7', color: '#15803d' }}>
-                                                                                ● Active On-Duty
-                                                                            </span>
-                                                                        </td>
-                                                                    </tr>
-                                                                );
-                                                            })}
-                                                        </tbody>
-                                                    </table>
-                                                </div>
+                                                                            return (
+                                                                                <tr key={`u-prod-${user.id || idx}`} style={{ borderBottom: '1px solid #f3f4f6' }}>
+                                                                                    <td style={{ padding: '10px 12px', color: '#9ca3af', fontSize: '11px' }}>{globalIdx}</td>
+                                                                                    <td style={{ padding: '10px 12px', fontWeight: '700', color: '#111827' }}>
+                                                                                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                                                                            <div style={{ width: '28px', height: '28px', borderRadius: '50%', backgroundColor: '#f3f4f6', border: '1px solid #d1d5db', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: '700', fontSize: '11px', color: '#374151' }}>
+                                                                                                {(user.first_name || user.name || user.email || 'O')[0].toUpperCase()}
+                                                                                            </div>
+                                                                                            <span>{fullName}</span>
+                                                                                        </div>
+                                                                                    </td>
+                                                                                    <td style={{ padding: '10px 12px', color: '#4b5563', fontSize: '12px', fontFamily: 'monospace' }}>{user.email || '—'}</td>
+                                                                                    <td style={{ padding: '10px 12px' }}>
+                                                                                        <span style={{ padding: '2px 8px', borderRadius: '4px', fontSize: '11px', fontWeight: '700', backgroundColor: '#eff6ff', color: '#1d4ed8' }}>
+                                                                                            {user.role || 'Operator'}
+                                                                                        </span>
+                                                                                    </td>
+                                                                                    <td style={{ padding: '10px 12px', fontWeight: '800', color: '#166534' }}>{scanned} parcels</td>
+                                                                                    <td style={{ padding: '10px 12px', fontWeight: '700', color: '#111827' }}>{bagsSealed} bags</td>
+                                                                                    <td style={{ padding: '10px 12px', fontWeight: '700', color: '#374151' }}>{manifestsClosed} manifests</td>
+                                                                                    <td style={{ padding: '10px 12px' }}>
+                                                                                        <span style={{ padding: '2px 8px', borderRadius: '4px', fontSize: '11px', fontWeight: '700', backgroundColor: '#dcfce7', color: '#15803d' }}>
+                                                                                            ● Active On-Duty
+                                                                                        </span>
+                                                                                    </td>
+                                                                                </tr>
+                                                                            );
+                                                                        })}
+                                                                    </tbody>
+                                                                </table>
+                                                            </div>
+                                                            <PaginationControl
+                                                                currentPage={dashTablePage}
+                                                                totalItems={list.length}
+                                                                rowsPerPage={dashTableRowsPerPage}
+                                                                onPageChange={(page) => setDashTablePage(page)}
+                                                                onRowsPerPageChange={(rows) => setDashTableRowsPerPage(rows)}
+                                                            />
+                                                        </>
+                                                    );
+                                                })()}
                                             </div>
                                         )}
 
@@ -6713,55 +7129,70 @@ export default function WorkstationDashboard() {
                                                     <div style={{ fontSize: '12px', color: '#6b7280' }}>Total Inbound: <strong>{dashboardData.totalReceived} parcels</strong></div>
                                                 </div>
 
-                                                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px', textAlign: 'left' }}>
-                                                    <thead>
-                                                        <tr style={{ borderBottom: '2px solid #e5e7eb', backgroundColor: '#f9fafb' }}>
-                                                            <th style={{ padding: '12px 10px', color: '#6b7280', fontWeight: '700', fontSize: '11px', textTransform: 'uppercase' }}>Partner Name</th>
-                                                            <th style={{ padding: '12px 10px', color: '#6b7280', fontWeight: '700', fontSize: '11px', textTransform: 'uppercase' }}>No. of Parcels</th>
-                                                            <th style={{ padding: '12px 10px', color: '#6b7280', fontWeight: '700', fontSize: '11px', textTransform: 'uppercase' }}>Allocated Parcels</th>
-                                                            <th style={{ padding: '12px 10px', color: '#6b7280', fontWeight: '700', fontSize: '11px', textTransform: 'uppercase' }}>Pending / Search Parcels</th>
-                                                            <th style={{ padding: '12px 10px', color: '#6b7280', fontWeight: '700', fontSize: '11px', textTransform: 'uppercase' }}>No. of Bags</th>
-                                                            <th style={{ padding: '12px 10px', color: '#6b7280', fontWeight: '700', fontSize: '11px', textTransform: 'uppercase', width: '180px' }}>Allocation %</th>
-                                                        </tr>
-                                                    </thead>
-                                                    <tbody>
-                                                        {(dashboardData.partnerDetails || [
-                                                            { partnerName: 'PickMe', totalParcels: dashboardData.partnerDistribution?.PickMe || 0, allocatedParcels: dashboardData.partnerDistribution?.PickMe || 0, pendingParcels: 0, totalBags: dashboardData.bagPartnerCounts?.PickMe || 0 },
-                                                            { partnerName: 'Domex', totalParcels: dashboardData.partnerDistribution?.Domex || 0, allocatedParcels: dashboardData.partnerDistribution?.Domex || 0, pendingParcels: 0, totalBags: dashboardData.bagPartnerCounts?.Domex || 0 },
-                                                            { partnerName: 'Pronto', totalParcels: dashboardData.partnerDistribution?.Pronto || 0, allocatedParcels: dashboardData.partnerDistribution?.Pronto || 0, pendingParcels: 0, totalBags: dashboardData.bagPartnerCounts?.Pronto || 0 },
-                                                            { partnerName: 'Other', totalParcels: dashboardData.partnerDistribution?.Other || 0, allocatedParcels: dashboardData.partnerDistribution?.Other || 0, pendingParcels: 0, totalBags: dashboardData.bagPartnerCounts?.General || 0 }
-                                                        ]).map((partner: any) => {
-                                                            const pct = dashboardData.totalReceived > 0 ? Math.round((partner.totalParcels / dashboardData.totalReceived) * 100) : 0;
-                                                            return (
-                                                                <tr key={partner.partnerName} style={{ borderBottom: '1px solid #f3f4f6' }}>
-                                                                    <td style={{ padding: '12px 10px', fontWeight: '700', color: '#111827', fontSize: '13px' }}>
-                                                                        {partner.partnerName}
-                                                                    </td>
-                                                                    <td style={{ padding: '12px 10px', fontWeight: '700', color: '#111827' }}>
-                                                                        {partner.totalParcels} parcels
-                                                                    </td>
-                                                                    <td style={{ padding: '12px 10px', fontWeight: '700', color: '#166534' }}>
-                                                                        {partner.allocatedParcels} allocated
-                                                                    </td>
-                                                                    <td style={{ padding: '12px 10px', fontWeight: '700', color: '#b45309' }}>
-                                                                        {partner.pendingParcels} pending
-                                                                    </td>
-                                                                    <td style={{ padding: '12px 10px', fontWeight: '700', color: '#111827' }}>
-                                                                        {partner.totalBags} bags
-                                                                    </td>
-                                                                    <td style={{ padding: '12px 10px' }}>
-                                                                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                                                                            <div style={{ flex: 1, height: '8px', backgroundColor: '#f3f4f6', borderRadius: '4px', overflow: 'hidden' }}>
-                                                                                <div style={{ width: `${pct}%`, height: '100%', backgroundColor: '#111827', borderRadius: '4px', transition: 'width 0.5s ease' }} />
-                                                                            </div>
-                                                                            <span style={{ fontWeight: '700', color: '#374151', fontSize: '12px', minWidth: '35px' }}>{pct}%</span>
-                                                                        </div>
-                                                                    </td>
-                                                                </tr>
-                                                            );
-                                                        })}
-                                                    </tbody>
-                                                </table>
+                                                {(() => {
+                                                    const list = dashboardData.partnerDetails || [
+                                                        { partnerName: 'PickMe', totalParcels: dashboardData.partnerDistribution?.PickMe || 0, allocatedParcels: dashboardData.partnerDistribution?.PickMe || 0, pendingParcels: 0, totalBags: dashboardData.bagPartnerCounts?.PickMe || 0 },
+                                                        { partnerName: 'Domex', totalParcels: dashboardData.partnerDistribution?.Domex || 0, allocatedParcels: dashboardData.partnerDistribution?.Domex || 0, pendingParcels: 0, totalBags: dashboardData.bagPartnerCounts?.Domex || 0 },
+                                                        { partnerName: 'Pronto', totalParcels: dashboardData.partnerDistribution?.Pronto || 0, allocatedParcels: dashboardData.partnerDistribution?.Pronto || 0, pendingParcels: 0, totalBags: dashboardData.bagPartnerCounts?.Pronto || 0 },
+                                                        { partnerName: 'Other', totalParcels: dashboardData.partnerDistribution?.Other || 0, allocatedParcels: dashboardData.partnerDistribution?.Other || 0, pendingParcels: 0, totalBags: dashboardData.bagPartnerCounts?.General || 0 }
+                                                    ];
+                                                    const paginatedList = list.slice((dashTablePage - 1) * dashTableRowsPerPage, dashTablePage * dashTableRowsPerPage);
+                                                    return (
+                                                        <>
+                                                            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px', textAlign: 'left' }}>
+                                                                <thead>
+                                                                    <tr style={{ borderBottom: '2px solid #e5e7eb', backgroundColor: '#f9fafb' }}>
+                                                                        <th style={{ padding: '12px 10px', color: '#6b7280', fontWeight: '700', fontSize: '11px', textTransform: 'uppercase' }}>Partner Name</th>
+                                                                        <th style={{ padding: '12px 10px', color: '#6b7280', fontWeight: '700', fontSize: '11px', textTransform: 'uppercase' }}>No. of Parcels</th>
+                                                                        <th style={{ padding: '12px 10px', color: '#6b7280', fontWeight: '700', fontSize: '11px', textTransform: 'uppercase' }}>Allocated Parcels</th>
+                                                                        <th style={{ padding: '12px 10px', color: '#6b7280', fontWeight: '700', fontSize: '11px', textTransform: 'uppercase' }}>Pending / Search Parcels</th>
+                                                                        <th style={{ padding: '12px 10px', color: '#6b7280', fontWeight: '700', fontSize: '11px', textTransform: 'uppercase' }}>No. of Bags</th>
+                                                                        <th style={{ padding: '12px 10px', color: '#6b7280', fontWeight: '700', fontSize: '11px', textTransform: 'uppercase', width: '180px' }}>Allocation %</th>
+                                                                    </tr>
+                                                                </thead>
+                                                                <tbody>
+                                                                    {paginatedList.map((partner: any) => {
+                                                                        const pct = dashboardData.totalReceived > 0 ? Math.round((partner.totalParcels / dashboardData.totalReceived) * 100) : 0;
+                                                                        return (
+                                                                            <tr key={partner.partnerName} style={{ borderBottom: '1px solid #f3f4f6' }}>
+                                                                                <td style={{ padding: '12px 10px', fontWeight: '700', color: '#111827', fontSize: '13px' }}>
+                                                                                    {partner.partnerName}
+                                                                                </td>
+                                                                                <td style={{ padding: '12px 10px', fontWeight: '700', color: '#111827' }}>
+                                                                                    {partner.totalParcels} parcels
+                                                                                </td>
+                                                                                <td style={{ padding: '12px 10px', fontWeight: '700', color: '#166534' }}>
+                                                                                    {partner.allocatedParcels} allocated
+                                                                                </td>
+                                                                                <td style={{ padding: '12px 10px', fontWeight: '700', color: '#b45309' }}>
+                                                                                    {partner.pendingParcels} pending
+                                                                                </td>
+                                                                                <td style={{ padding: '12px 10px', fontWeight: '700', color: '#111827' }}>
+                                                                                    {partner.totalBags} bags
+                                                                                </td>
+                                                                                <td style={{ padding: '12px 10px' }}>
+                                                                                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                                                                        <div style={{ flex: 1, height: '8px', backgroundColor: '#f3f4f6', borderRadius: '4px', overflow: 'hidden' }}>
+                                                                                            <div style={{ width: `${pct}%`, height: '100%', backgroundColor: '#111827', borderRadius: '4px', transition: 'width 0.5s ease' }} />
+                                                                                        </div>
+                                                                                        <span style={{ fontWeight: '700', color: '#374151', fontSize: '12px', minWidth: '35px' }}>{pct}%</span>
+                                                                                    </div>
+                                                                                </td>
+                                                                            </tr>
+                                                                        );
+                                                                    })}
+                                                                </tbody>
+                                                            </table>
+                                                            <PaginationControl
+                                                                currentPage={dashTablePage}
+                                                                totalItems={list.length}
+                                                                rowsPerPage={dashTableRowsPerPage}
+                                                                onPageChange={(page) => setDashTablePage(page)}
+                                                                onRowsPerPageChange={(rows) => setDashTableRowsPerPage(rows)}
+                                                            />
+                                                        </>
+                                                    );
+                                                })()}
                                             </div>
                                         )}
                                     </>
@@ -7304,6 +7735,11 @@ export default function WorkstationDashboard() {
                 const overageOptions = ['Extra Parcels Scanned', 'Wrongly Routed to Bag', 'Other (Custom Note)'];
                 const options = isShortage ? shortageOptions : overageOptions;
                 const canConfirm = isExact || (discrepancyReason !== '' && (discrepancyReason !== 'Other (Custom Note)' || customDiscrepancyNote.trim() !== ''));
+
+                // Filter missing parcels for this bag
+                const scannedRefs = new Set(firstScanHistory.map(p => (p.skynetTrackingNumber || p.trackingNumber || '').trim().toUpperCase()));
+                const missingParcels = isShortage ? (firstScanBagParcels || []).filter(p => !scannedRefs.has((p.skynetTrackingNumber || p.trackingNumber || '').trim().toUpperCase())) : [];
+
                 return (
                     <div style={{
                         position: 'fixed',
@@ -7318,9 +7754,11 @@ export default function WorkstationDashboard() {
                             backgroundColor: '#ffffff',
                             border: `2px solid ${accentColor}`,
                             borderRadius: '12px',
-                            padding: '28px 24px',
-                            width: '500px',
+                            padding: '24px 24px',
+                            width: isShortage && missingParcels.length > 0 ? '660px' : '500px',
                             maxWidth: '92%',
+                            maxHeight: '90vh',
+                            overflowY: 'auto',
                             boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.15), 0 10px 10px -5px rgba(0, 0, 0, 0.04)',
                             textAlign: 'center'
                         }}>
@@ -7328,15 +7766,15 @@ export default function WorkstationDashboard() {
                             <div style={{
                                 backgroundColor: iconBg,
                                 color: accentColor,
-                                width: '56px', height: '56px',
+                                width: '52px', height: '52px',
                                 borderRadius: '50%',
                                 display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-                                marginBottom: '16px'
+                                marginBottom: '12px'
                             }}>
                                 {isExact ? (
-                                    <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12" /></svg>
+                                    <svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12" /></svg>
                                 ) : (
-                                    <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" /><line x1="12" y1="9" x2="12" y2="13" /><line x1="12" y1="17" x2="12.01" y2="17" /></svg>
+                                    <svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" /><line x1="12" y1="9" x2="12" y2="13" /><line x1="12" y1="17" x2="12.01" y2="17" /></svg>
                                 )}
                             </div>
 
@@ -7349,7 +7787,7 @@ export default function WorkstationDashboard() {
                             <div style={{
                                 display: 'inline-flex', gap: '20px', alignItems: 'center',
                                 backgroundColor: surfaceColor, border: `1px solid ${borderColor}`,
-                                borderRadius: '8px', padding: '10px 20px', margin: '0 0 16px 0', fontSize: '14px'
+                                borderRadius: '8px', padding: '8px 18px', margin: '0 0 14px 0', fontSize: '13px'
                             }}>
                                 <span>Expected: <strong style={{ color: '#111827' }}>{firstScanExpected}</strong></span>
                                 <span style={{ color: '#9ca3af' }}>|</span>
@@ -7358,36 +7796,36 @@ export default function WorkstationDashboard() {
                                     <>
                                         <span style={{ color: '#9ca3af' }}>|</span>
                                         <span style={{ fontWeight: '700', color: accentColor }}>
-                                            {isShortage ? `${diff} Missing` : `+${diff} Extra`}
+                                            {isShortage ? `${Math.abs(diff)} Missing` : `+${diff} Extra`}
                                         </span>
                                     </>
                                 )}
                             </div>
 
                             {/* Message */}
-                            <p style={{ fontSize: '13px', color: '#6b7280', lineHeight: '1.6', margin: '0 0 20px 0' }}>
+                            <p style={{ fontSize: '13px', color: '#4b5563', lineHeight: '1.5', margin: '0 0 16px 0' }}>
                                 {isExact
                                     ? `All ${firstScanHistory.length} parcels verified. Bag "${firstScanSelectedBag}" will be marked as COUNTED.`
                                     : isShortage
-                                        ? `Bag "${firstScanSelectedBag}" has ${Math.abs(diff)} fewer parcel${Math.abs(diff) !== 1 ? 's' : ''} than expected. Please select a shortage reason before closing.`
+                                        ? `Bag "${firstScanSelectedBag}" has ${Math.abs(diff)} fewer parcel${Math.abs(diff) !== 1 ? 's' : ''} than expected. Please specify shortage reasons below before closing.`
                                         : `Bag "${firstScanSelectedBag}" has ${diff} extra parcel${diff !== 1 ? 's' : ''} beyond the expected count. Please select an overage reason before closing.`
                                 }
                             </p>
 
-                            {/* Discrepancy Reason Form (only when mismatch) */}
+                            {/* Discrepancy Reason Form */}
                             {!isExact && (
-                                <div style={{ textAlign: 'left', marginBottom: '20px' }}>
+                                <div style={{ textAlign: 'left', marginBottom: '18px' }}>
                                     <div style={{ fontSize: '12px', fontWeight: '700', color: '#374151', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '8px' }}>
-                                        {isShortage ? 'Shortage Reason' : 'Overage Reason'} <span style={{ color: '#e21b22' }}>*</span>
+                                        {isShortage ? 'Default Shortage Reason' : 'Overage Reason'} <span style={{ color: '#e21b22' }}>*</span>
                                     </div>
-                                    <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                                    <div style={{ display: 'grid', gridTemplateColumns: isShortage ? '1fr 1fr' : '1fr', gap: '6px' }}>
                                         {options.map((opt) => (
                                             <label key={opt} style={{
-                                                display: 'flex', alignItems: 'center', gap: '10px',
-                                                padding: '9px 12px',
+                                                display: 'flex', alignItems: 'center', gap: '8px',
+                                                padding: '8px 10px',
                                                 backgroundColor: discrepancyReason === opt ? (isShortage ? '#eff6ff' : '#fffbeb') : '#f9fafb',
                                                 border: `1px solid ${discrepancyReason === opt ? accentColor : '#e5e7eb'}`,
-                                                borderRadius: '8px', cursor: 'pointer', fontSize: '13px', fontWeight: '500',
+                                                borderRadius: '8px', cursor: 'pointer', fontSize: '12px', fontWeight: '500',
                                                 color: discrepancyReason === opt ? accentColor : '#374151',
                                                 transition: 'all 0.15s ease'
                                             }}>
@@ -7411,15 +7849,105 @@ export default function WorkstationDashboard() {
                                             value={customDiscrepancyNote}
                                             onChange={(e) => setCustomDiscrepancyNote(e.target.value)}
                                             placeholder="Describe the reason for the discrepancy..."
-                                            rows={3}
+                                            rows={2}
                                             style={{
-                                                width: '100%', marginTop: '10px', padding: '10px 12px',
+                                                width: '100%', marginTop: '8px', padding: '8px 10px',
                                                 border: `1px solid ${accentColor}`, borderRadius: '8px',
-                                                fontSize: '13px', color: '#111827', resize: 'vertical',
+                                                fontSize: '12px', color: '#111827', resize: 'vertical',
                                                 outline: 'none', boxSizing: 'border-box', fontFamily: 'inherit'
                                             }}
                                         />
                                     )}
+
+                                    {/* Missing Parcels List & Per-Parcel Reason Dropdown */}
+                                    {isShortage && missingParcels.length > 0 && (
+                                        <div style={{ marginTop: '16px' }}>
+                                            <div style={{ fontSize: '12px', fontWeight: '700', color: '#991b1b', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '8px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                                <span>Missing Parcels Breakdown ({missingParcels.length})</span>
+                                                <span style={{ fontSize: '11px', color: '#6b7280', fontWeight: '500', transform: 'none', textTransform: 'none' }}>Set individual status per parcel</span>
+                                            </div>
+                                            <div style={{
+                                                maxHeight: '210px',
+                                                overflowY: 'auto',
+                                                border: '1px solid #fca5a5',
+                                                borderRadius: '8px',
+                                                backgroundColor: '#fef2f2',
+                                                padding: '8px'
+                                            }}>
+                                                {missingParcels.map((mp: any, idx: number) => {
+                                                    const ref = mp.skynetTrackingNumber || mp.trackingNumber;
+                                                    const partner = mp.assignedPartner || 'Unknown';
+                                                    const currentReason = missingParcelReasons[ref] || discrepancyReason || 'Missing Parcels';
+                                                    return (
+                                                        <div key={ref || idx} style={{
+                                                            display: 'flex',
+                                                            alignItems: 'center',
+                                                            justifyContent: 'space-between',
+                                                            padding: '8px 10px',
+                                                            backgroundColor: '#ffffff',
+                                                            borderRadius: '6px',
+                                                            border: '1px solid #fee2e2',
+                                                            marginBottom: idx < missingParcels.length - 1 ? '6px' : 0
+                                                        }}>
+                                                            <div style={{ textAlign: 'left', flex: 1, paddingRight: '10px' }}>
+                                                                <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                                                                    <span style={{ fontFamily: 'monospace', fontWeight: '700', fontSize: '12px', color: '#111827' }}>{ref}</span>
+                                                                    {partner !== 'Unknown' && (() => {
+                                                                        const pLower = partner.toLowerCase();
+                                                                        const isPickMe = pLower.includes('pickme');
+                                                                        const isDomex = pLower.includes('domex');
+                                                                        const isPronto = pLower.includes('pronto');
+                                                                        const bgColor = isPickMe ? '#facc15' : isDomex ? '#e21b22' : isPronto ? '#ea580c' : '#6b7280';
+                                                                        const textColor = isPickMe ? '#000000' : '#ffffff';
+                                                                        return (
+                                                                            <span style={{
+                                                                                fontSize: '10px',
+                                                                                fontWeight: '800',
+                                                                                padding: '2px 6px',
+                                                                                borderRadius: '4px',
+                                                                                backgroundColor: bgColor,
+                                                                                color: textColor,
+                                                                                boxShadow: '0 1px 2px rgba(0,0,0,0.1)'
+                                                                            }}>
+                                                                                {partner}
+                                                                            </span>
+                                                                        );
+                                                                    })()}
+                                                                </div>
+                                                                <div style={{ fontSize: '11px', color: '#6b7280', marginTop: '2px' }}>
+                                                                    {mp.recipientName || 'Unknown Recipient'} &bull; {mp.city || 'Unknown City'}
+                                                                </div>
+                                                            </div>
+                                                            <div style={{ minWidth: '170px' }}>
+                                                                <select
+                                                                    value={currentReason}
+                                                                    onChange={(e) => setMissingParcelReasons(prev => ({ ...prev, [ref]: e.target.value }))}
+                                                                    style={{
+                                                                        width: '100%',
+                                                                        fontSize: '11px',
+                                                                        padding: '5px 8px',
+                                                                        borderRadius: '6px',
+                                                                        border: '1px solid #d1d5db',
+                                                                        backgroundColor: '#ffffff',
+                                                                        color: '#1f2937',
+                                                                        fontWeight: '600',
+                                                                        outline: 'none',
+                                                                        cursor: 'pointer'
+                                                                    }}
+                                                                >
+                                                                    <option value="Missing Parcels">Missing Parcels</option>
+                                                                    <option value="Stolen or Lost in Transit">Stolen or Lost in Transit</option>
+                                                                    <option value="Damaged & Discarded">Damaged & Discarded</option>
+                                                                    <option value="Other (Custom Note)">Other Reason</option>
+                                                                </select>
+                                                            </div>
+                                                        </div>
+                                                    );
+                                                })}
+                                            </div>
+                                        </div>
+                                    )}
+
                                     {!discrepancyReason && (
                                         <p style={{ fontSize: '12px', color: '#e21b22', marginTop: '8px', fontWeight: '500' }}>
                                             ⚠ You must select a reason to close this bag.
@@ -8730,7 +9258,7 @@ export default function WorkstationDashboard() {
                         </div>
 
                         <div style={{ fontSize: '13px', color: '#111827', marginBottom: '-4px' }}>
-                            Manifest: <strong style={{ color: '#e21b22' }}>{selectedSecondScanMawb}</strong>
+                            Manifest: <strong style={{ color: '#e21b22' }}>{selectedSecondScanMawb || 'Multi-Manifest / General'}</strong>
                         </div>
 
                         <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
@@ -8743,8 +9271,9 @@ export default function WorkstationDashboard() {
                                     onChange={(e: any) => {
                                         const p = e.target.value;
                                         setNewBagPartner(p);
+                                        const mawbPrefix = selectedSecondScanMawb ? selectedSecondScanMawb : 'LMD';
                                         const partnerCode = p && p !== 'ALL' ? `-${p.toUpperCase()}` : '';
-                                        setCustomBagNumber(`${selectedSecondScanMawb}${partnerCode}-BAG-${String((outboundBags?.length || 0) + 1).padStart(2, '0')}`);
+                                        setCustomBagNumber(`${mawbPrefix}${partnerCode}-BAG-${String((outboundBags?.length || 0) + 1).padStart(2, '0')}`);
                                     }}
                                     style={{ ...inputStyle, width: '100%', fontWeight: '700', padding: '10px' }}
                                 >
@@ -8761,7 +9290,7 @@ export default function WorkstationDashboard() {
                                 </label>
                                 <input
                                     type="text"
-                                    value={customBagNumber !== '' ? customBagNumber : `${selectedSecondScanMawb}${newBagPartner && newBagPartner !== 'ALL' ? `-${newBagPartner.toUpperCase()}` : ''}-BAG-${String((outboundBags?.length || 0) + 1).padStart(2, '0')}`}
+                                    value={customBagNumber !== '' ? customBagNumber : `${selectedSecondScanMawb ? selectedSecondScanMawb : 'LMD'}${newBagPartner && newBagPartner !== 'ALL' ? `-${newBagPartner.toUpperCase()}` : ''}-BAG-${String((outboundBags?.length || 0) + 1).padStart(2, '0')}`}
                                     onChange={(e) => setCustomBagNumber(e.target.value)}
                                     style={{ ...inputStyle, width: '100%', fontWeight: '700', fontFamily: "'Inter', sans-serif", padding: '10px', backgroundColor: '#ffffff', border: '1px solid #d1d5db' }}
                                     placeholder="Enter or edit Bag Number"

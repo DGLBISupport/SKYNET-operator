@@ -206,7 +206,9 @@ export async function POST(request: Request) {
             targetPartner,
             outboundBagNumber,
             scannedParcels,
-            scanned_parcels
+            scanned_parcels,
+            missingParcels,
+            missing_parcels
         } = await request.json();
 
         const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -222,7 +224,7 @@ export async function POST(request: Request) {
         };
 
         // ═══════════════════════════════════════════════════════
-        // STAGE: FINISH BAG (SAVE UNSEALED BAG RECORD)
+        // STAGE: FINISH BAG (SAVE UNSEALED BAG RECORD & UPDATE MISSING PARCELS)
         // ═══════════════════════════════════════════════════════
         if (stage === 'finish-bag') {
             if (!mawbRef || !bagNumber) {
@@ -231,6 +233,7 @@ export async function POST(request: Request) {
 
             const discrepancy = (scannedCount || 0) - (expectedCount || 0);
             const parcelsToStore = scannedParcels || scanned_parcels || [];
+            const missingList = missingParcels || missing_parcels || [];
 
             const insertRes = await fetch(`${supabaseUrl}/rest/v1/bag_unsealing`, {
                 method: 'POST',
@@ -258,6 +261,48 @@ export async function POST(request: Request) {
                     return NextResponse.json({ success: false, error: `Bag "${bagNumber}" has already been unsealed.` }, { status: 409 });
                 }
                 return NextResponse.json({ success: false, error: `Failed to save bag unsealing: ${errText}` }, { status: 500 });
+            }
+
+            // Update status of each missing parcel in service_provider_allocation
+            if (Array.isArray(missingList) && missingList.length > 0) {
+                for (const mp of missingList) {
+                    const trackingNum = mp.trackingNumber || mp.shipmentRef || mp.skynetTrackingNumber;
+                    if (!trackingNum) continue;
+
+                    const rawReason = mp.status || mp.reason || 'Missing Parcels';
+                    const mpStatus = rawReason.startsWith('SHORTAGE:') ? rawReason : `SHORTAGE: ${rawReason}`;
+
+                    try {
+                        const checkRes = await fetch(`${supabaseUrl}/rest/v1/service_provider_allocation?shipment_ref=eq.${encodeURIComponent(trackingNum)}`, { headers });
+                        if (checkRes.ok) {
+                            const allocs = await checkRes.json();
+                            if (Array.isArray(allocs) && allocs.length > 0) {
+                                await fetch(`${supabaseUrl}/rest/v1/service_provider_allocation?shipment_ref=eq.${encodeURIComponent(trackingNum)}`, {
+                                    method: 'PATCH',
+                                    headers: { ...headers, 'Content-Type': 'application/json' },
+                                    body: JSON.stringify({
+                                        scan_status: mpStatus,
+                                        updated_at: new Date().toISOString()
+                                    })
+                                });
+                            } else {
+                                await fetch(`${supabaseUrl}/rest/v1/service_provider_allocation`, {
+                                    method: 'POST',
+                                    headers: { ...headers, 'Content-Type': 'application/json' },
+                                    body: JSON.stringify({
+                                        mawb_ref: mawbRef,
+                                        shipment_ref: trackingNum,
+                                        scan_status: mpStatus,
+                                        unsealed: false,
+                                        updated_at: new Date().toISOString()
+                                    })
+                                });
+                            }
+                        }
+                    } catch (err) {
+                        console.error(`Failed to update allocation for missing parcel ${trackingNum}:`, err);
+                    }
+                }
             }
 
             const data = await insertRes.json();
@@ -790,7 +835,7 @@ export async function GET(request: Request) {
         };
 
         if (getMawbs) {
-            const res = await fetch(`${supabaseUrl}/rest/v1/mawb?select=mawb_reference,carrier,declared_bags`, { headers });
+            const res = await fetch(`${supabaseUrl}/rest/v1/mawb?has_service_providers_allocated=eq.true&select=mawb_reference,carrier,declared_bags,has_service_providers_allocated`, { headers });
             if (!res.ok) {
                 const errText = await res.text();
                 return NextResponse.json({ success: false, error: errText }, { status: 500 });
@@ -803,61 +848,101 @@ export async function GET(request: Request) {
             const searchMawb = mawbRefParam.trim();
             const cleanSearchMawb = encodeURIComponent(searchMawb);
 
-            // Execute primary shipments query and unsealed bags query in parallel for max performance
-            const [shipmentsRes, unsealRes] = await Promise.all([
-                fetch(`${supabaseUrl}/rest/v1/shipments?mawb_reference=ilike.${cleanSearchMawb}&select=bag_number,reference_number&limit=2000`, { headers }),
-                fetch(`${supabaseUrl}/rest/v1/bag_unsealing?mawb_ref=ilike.${cleanSearchMawb}&select=bag_number,expected_count`, { headers })
-            ]);
-
+            // Fetch ALL shipments for this MAWB using pagination to handle large manifests (>1000 items)
             let allShipments: any[] = [];
-            if (shipmentsRes.ok) {
-                const data = await shipmentsRes.json();
-                if (Array.isArray(data)) allShipments = data;
+            let offset = 0;
+            const limit = 1000;
+            let hasMore = true;
+            let attempts = 0;
+
+            while (hasMore && attempts < 20) {
+                attempts++;
+                try {
+                    const res = await fetch(`${supabaseUrl}/rest/v1/shipments?mawb_reference=ilike.${cleanSearchMawb}&select=bag_number,reference_number&order=reference_number.asc&limit=${limit}&offset=${offset}`, { headers });
+                    if (res.ok) {
+                        const data = await res.json();
+                        if (Array.isArray(data) && data.length > 0) {
+                            allShipments.push(...data);
+                            if (data.length < limit) {
+                                hasMore = false;
+                            } else {
+                                offset += limit;
+                            }
+                        } else {
+                            hasMore = false;
+                        }
+                    } else {
+                        hasMore = false;
+                    }
+                } catch {
+                    hasMore = false;
+                }
             }
 
             // Fallback query on shipments_duplicate if primary returned 0 shipments
             if (allShipments.length === 0) {
-                const dupRes = await fetch(`${supabaseUrl}/rest/v1/shipments_duplicate?mawb_reference=ilike.${cleanSearchMawb}&select=bag_number,reference_number&limit=2000`, { headers });
-                if (dupRes.ok) {
-                    const data = await dupRes.json();
-                    if (Array.isArray(data)) allShipments = data;
+                offset = 0;
+                hasMore = true;
+                attempts = 0;
+                while (hasMore && attempts < 10) {
+                    attempts++;
+                    try {
+                        const dupRes = await fetch(`${supabaseUrl}/rest/v1/shipments_duplicate?mawb_reference=ilike.${cleanSearchMawb}&select=bag_number,reference_number&order=reference_number.asc&limit=${limit}&offset=${offset}`, { headers });
+                        if (dupRes.ok) {
+                            const data = await dupRes.json();
+                            if (Array.isArray(data) && data.length > 0) {
+                                allShipments.push(...data);
+                                if (data.length < limit) {
+                                    hasMore = false;
+                                } else {
+                                    offset += limit;
+                                }
+                            } else {
+                                hasMore = false;
+                            }
+                        } else {
+                            hasMore = false;
+                        }
+                    } catch {
+                        hasMore = false;
+                    }
                 }
             }
 
+            // Fetch unsealed bags registered for this MAWB
+            let unsealedBagsData: any[] = [];
+            try {
+                const unsealRes = await fetch(`${supabaseUrl}/rest/v1/bag_unsealing?mawb_ref=ilike.${cleanSearchMawb}&select=bag_number,expected_count`, { headers });
+                if (unsealRes.ok) {
+                    const data = await unsealRes.json();
+                    if (Array.isArray(data)) unsealedBagsData = data;
+                }
+            } catch (e) {
+                console.error("Failed to fetch unsealed bags:", e);
+            }
+
+            // Group distinct bag numbers and calculate expected parcel count (count of reference_number)
             const bagCountsMap: Record<string, number> = {};
             let unassignedCount = 0;
 
             allShipments.forEach((s: any) => {
-                if (s.bag_number && String(s.bag_number).trim() !== '') {
-                    const bNum = String(s.bag_number).trim();
-                    bagCountsMap[bNum] = (bagCountsMap[bNum] || 0) + 1;
+                const rawBag = s.bag_number ? String(s.bag_number).trim() : '';
+                if (rawBag !== '') {
+                    bagCountsMap[rawBag] = (bagCountsMap[rawBag] || 0) + 1;
                 } else {
                     unassignedCount++;
                 }
             });
 
-            // Add unsealed bags registered for this MAWB if not present
-            if (unsealRes.ok) {
-                const unsealed = await unsealRes.json();
-                if (Array.isArray(unsealed)) {
-                    unsealed.forEach((u: any) => {
-                        if (u.bag_number) {
-                            const trimmedBag = String(u.bag_number).trim();
-                            if (!bagCountsMap[trimmedBag]) {
-                                bagCountsMap[trimmedBag] = u.expected_count || 0;
-                            }
-                        }
-                    });
+            // Include any unsealed bags registered for this MAWB if not already in map
+            unsealedBagsData.forEach((u: any) => {
+                if (u.bag_number) {
+                    const trimmedBag = String(u.bag_number).trim();
+                    if (!bagCountsMap[trimmedBag]) {
+                        bagCountsMap[trimmedBag] = u.expected_count || 0;
+                    }
                 }
-            }
-
-            // If unassigned shipments exist for this MAWB, list default synthetic bag for unassigned parcels
-            if (unassignedCount > 0) {
-                const unassignedBagName = Object.keys(bagCountsMap).length === 0 ? `${searchMawb}-BAG-01` : `${searchMawb}-UNASSIGNED`;
-                if (!bagCountsMap[unassignedBagName]) {
-                    bagCountsMap[unassignedBagName] = unassignedCount;
-                }
-            }
+            });
 
             const bagsList = Object.entries(bagCountsMap).map(([bagNumber, expectedCount]) => ({
                 bagNumber,

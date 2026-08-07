@@ -1,0 +1,39 @@
+{
+  "expo": {
+    "name": "SKYNET Mobile",
+    "slug": "skynet-mobile",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "light",
+    "splash": {
+      "image": "./assets/splash.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#e21b22"
+    },
+    "assetBundlePatterns": ["**/*"],
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.dgl.skynetmobile",
+      "infoPlist": {
+        "NSCameraUsageDescription": "SKYNET Mobile needs camera access to scan parcel barcodes for Box Unsealing and LMD Verification."
+      }
+    },
+    "android": {
+      "package": "com.dgl.skynetmobile",
+      "permissions": ["CAMERA"],
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#e21b22"
+      }
+    },
+    "plugins": [
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "SKYNET Mobile needs camera access to scan parcel barcodes."
+        }
+      ]
+    ]
+  }
+}

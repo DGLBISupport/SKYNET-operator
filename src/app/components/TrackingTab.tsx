@@ -263,22 +263,24 @@ export default function TrackingTab() {
                                 <span style={{ fontWeight: '700', color: '#374151' }}>Status : </span>
                                 <span style={{
                                     display: 'inline-block',
-                                    padding: '2px 8px',
-                                    borderRadius: '12px',
-                                    fontSize: '12px',
+                                    border: '1px solid #b91c1c',
+                                    padding: '8px 14px',
+                                    borderRadius: '8px',
+                                    fontSize: '12.5px',
                                     fontWeight: '700',
-                                    backgroundColor: data.status === 'Dispatched' ? '#dcfce7' : '#fef3c7',
-                                    color: data.status === 'Dispatched' ? '#15803d' : '#b45309'
+                                    fontFamily: 'var(--font-sans, "Inter", "Inter Fallback", sans-serif)',
+                                    backgroundColor: data.status === 'Dispatched' ? '#dcfce7' : '#ffffff',
+                                    color: data.status === 'Dispatched' ? '#15803d' : '#b91c1c'
                                 }}>
-                                    ● {data.status}
+                                    {data.status}
                                 </span>
                             </div>
                         </div>
 
-                        <div style={{ marginTop: '10px', fontSize: '12px', color: '#374151', fontWeight: '600', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                        {/* <div style={{ marginTop: '10px', fontSize: '12px', color: '#374151', fontWeight: '600', display: 'flex', alignItems: 'center', gap: '6px' }}>
                             <span>Latest Status Timestamp : <strong>{data.deliveredOn}</strong></span>
                             <span style={{ color: '#4b5563', fontWeight: '500' }}>| Assigned Staff/Partner : <strong>{data.signedBy}</strong></span>
-                        </div>
+                        </div> */}
                     </div>
 
                     {/* 6 MAIN STEPS STEPPER FLOW */}
@@ -490,7 +492,7 @@ export default function TrackingTab() {
                                     <thead>
                                         <tr style={{ backgroundColor: '#f3f4f6', color: '#374151', fontWeight: '700', borderBottom: '1px solid #d1d5db' }}>
                                             <th style={{ padding: '10px 12px' }}>Date</th>
-                                            <th style={{ padding: '10px 12px' }}>Docket No</th>
+                                            <th style={{ padding: '10px 12px' }}>Manifest Reference No</th>
                                             <th style={{ padding: '10px 12px' }}>Sender No</th>
                                             <th style={{ padding: '10px 12px' }}>Receiver</th>
                                             <th style={{ padding: '10px 12px' }}>From</th>
