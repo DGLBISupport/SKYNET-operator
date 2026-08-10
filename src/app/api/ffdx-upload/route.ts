@@ -10,6 +10,7 @@
  */
 
 import { NextResponse } from 'next/server';
+import { saveManifestToSupabaseStorage, ParcelLogData } from '@/lib/supabaseStorage';
 
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
@@ -498,20 +499,24 @@ async function postToFfdx(xmlStream: string, manifestReference: string): Promise
 }
 
 // ─── Mark manifest as uploaded in Supabase ───────────────────────────────────
-async function markManifestUploaded(sb: any, manifestId: number | null, manifestReference: string): Promise<void> {
+async function markManifestUploaded(sb: any, manifestId: number | null, manifestReference: string, jsonPath?: string, xmlPath?: string): Promise<void> {
     if (!sb) return;
     try {
+        const patchData: Record<string, any> = { is_uploaded: true };
+        if (jsonPath) patchData.json_path = jsonPath;
+        if (xmlPath) patchData.xml_path = xmlPath;
+
         if (manifestId) {
             await fetch(`${sb.url}/rest/v1/outbound_manifests?id=eq.${manifestId}`, {
                 method: 'PATCH',
                 headers: sb.headers,
-                body: JSON.stringify({ is_uploaded: true })
+                body: JSON.stringify(patchData)
             });
         } else {
             await fetch(`${sb.url}/rest/v1/outbound_manifests?manifest_reference=eq.${encodeURIComponent(manifestReference)}`, {
                 method: 'PATCH',
                 headers: sb.headers,
-                body: JSON.stringify({ is_uploaded: true })
+                body: JSON.stringify(patchData)
             });
         }
         console.log(`[ffdx-upload] Marked manifest "${manifestReference}" as uploaded in Supabase.`);
@@ -633,6 +638,7 @@ export async function POST(request: Request) {
             allBags = enrichedBags;
         }
 
+        const parcelLogs: ParcelLogData[] = [];
         for (const bag of allBags) {
             const parcels = Array.isArray(bag.parcels) ? bag.parcels : [];
             for (const parcel of parcels) {
@@ -648,6 +654,19 @@ export async function POST(request: Request) {
                 totalCalculatedWeightKg += parcelWeight;
 
                 shipmentBlocks.push(buildShipmentXml(parcel, detail, bag.bagNumber));
+
+                parcelLogs.push({
+                    trackingNumber: trackingNum,
+                    bagNumber: bag.bagNumber,
+                    weightKg: parcelWeight,
+                    consigneeName: detail?.consignee_name || parcel?.recipientName || '',
+                    consigneeAddress: detail?.consignee_address_1 || parcel?.city || '',
+                    consigneeCity: detail?.consignee_city || parcel?.city || '',
+                    consignorName: detail?.consignor_name || '',
+                    consignorCountry: detail?.consignor_country_code || '',
+                    senderReference: detail?.sender_reference || parcel?.senderReference || '',
+                    status: 'UPLOADED',
+                });
             }
         }
 
@@ -712,12 +731,28 @@ export async function POST(request: Request) {
         // ─── 5. Build and send XML payload ────────────────────────────────────
         const xmlPayload = buildUploadXml(manifestReference, shipmentBlocks, headerInfo);
 
+        // Save manifest logs (XML and JSON) to Supabase storage buckets and update DB
+        const storageResult = await saveManifestToSupabaseStorage({
+            manifestReference,
+            manifestId: manifestId || null,
+            serviceProvider: receiverName,
+            headerInfo,
+            totalBags: allBags.length,
+            totalParcels: parcelLogs.length,
+            totalWeightKg: totalCalculatedWeightKg,
+            parcels: parcelLogs,
+            xmlPayload,
+        }).catch(err => {
+            console.error('[ffdx-upload] Error saving to Supabase storage:', err);
+            return null;
+        });
+
         console.log(`[ffdx-upload] Uploading manifest "${manifestReference}" with ${shipmentBlocks.length} shipment(s) (Carrier: ${carrierName}, Receiver: ${receiverCode}, From: ${fromLocName}) to FFDX GETonline...`);
 
         const ffdxResult = await postToFfdx(xmlPayload, manifestReference);
 
         if (ffdxResult.success) {
-            await markManifestUploaded(sb, manifestId || null, manifestReference);
+            await markManifestUploaded(sb, manifestId || null, manifestReference, storageResult?.jsonPath, storageResult?.xmlPath);
         } else {
             console.error(`[ffdx-upload] FFDX upload FAILED for "${manifestReference}":`, ffdxResult.error);
         }

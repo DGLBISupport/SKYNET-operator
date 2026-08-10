@@ -1,49 +1,74 @@
-import httpx
-import logging
 import asyncio
+import json
+import logging
+import os
 import random
 import string
-import os
-import requests
-import pandas as pd
-import json
-
-from io import BytesIO
 from datetime import datetime
-from typing import List
-from supabase import create_client, Client
+from typing import Any, Dict, List, Optional
+
+import httpx
 from dotenv import load_dotenv
+from supabase import Client, create_client
 
-
+# ---------------------------------------------------------------------------
+# Setup & Configuration
+# ---------------------------------------------------------------------------
 load_dotenv()
 
+logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-FFDX_VERSION = "v12"
-API_URL = f"https://ws05.ffdx.net/ffdx_ws/{FFDX_VERSION}/service_ffdx.asmx/WSDataTransfer"
+FFDX_VERSION = os.getenv("FFDX_VERSION", "v12")
+FFDX_BASE_URL = os.getenv(
+    "FFDX_BASE_URL",
+    f"https://ws05.ffdx.net/ffdx_ws/{FFDX_VERSION}/service_ffdx.asmx/WSDataTransfer"
+)
 
-FFDX_USERNAME = "26AFE6A6F99D1300F43071AE6219FD79"
-FFDX_PASSWORD = "6044F95F8F096B06083F35DE08A5641B"
-FFDX_ENTITY_ID = "4B71FB68246CD8FD8EBE0D79FAF5273E"
-FFDX_ENTITY_PIN = "VeeVA4?37kd"
-WS_VERSION = "WS1.0"
+FFDX_USERNAME = os.getenv("FFDX_USERNAME", "26AFE6A6F99D1300F43071AE6219FD79")
+FFDX_PASSWORD = os.getenv("FFDX_PASSWORD", "6044F95F8F096B06083F35DE08A5641B")
+FFDX_ENTITY_ID = os.getenv("FFDX_ENTITY_ID", "4B71FB68246CD8FD8EBE0D79FAF5273E")
+FFDX_ENTITY_PIN = os.getenv("FFDX_ENTITY_PIN", "VeeVA4?37kd")
 
 FFDX_REQUEST_RETRIES = 3
 FFDX_RETRY_BACKOFF = 5.0
-FFDX_REQUEST_TIMEOUT = httpx.Timeout(None)
+FFDX_REQUEST_TIMEOUT = httpx.Timeout(30.0)
 
-FFDX_BASE_URL = f"https://ws05.ffdx.net/ffdx_ws/{FFDX_VERSION}/service_ffdx.asmx/WSDataTransfer"
+# 1. Explicitly load .env.local used by Next.js, then fallback to .env
+load_dotenv(".env.local")
+load_dotenv()
 
-SUPABASE_URL = os.getenv("SUPABASE_URL")
-SUPABASE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
+# 2. Check both backend key names and Next.js frontend key names
+SUPABASE_URL = os.getenv("SUPABASE_URL") or os.getenv("NEXT_PUBLIC_SUPABASE_URL", "")
+SUPABASE_KEY = (
+    os.getenv("SUPABASE_SERVICE_ROLE_KEY") 
+    or os.getenv("SUPABASE_KEY") 
+    or os.getenv("NEXT_PUBLIC_SUPABASE_ANON_KEY", "")
+)
+
+if not SUPABASE_URL or not SUPABASE_KEY:
+    raise ValueError(
+        "Missing SUPABASE_URL or SUPABASE_KEY in environment! "
+        "Check your .env or .env.local file."
+    )
 
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
-def generate_random_message_id() -> str:
-    """Generate a random 10-digit message ID so each request is traceable in FFDX's logs."""
-    return ''.join(random.choices(string.digits, k=10))
+if not SUPABASE_URL or not SUPABASE_KEY:
+    logger.warning("SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY is missing from environment variables.")
 
-def create_upload_request():
+supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
+
+# ---------------------------------------------------------------------------
+# Helper Functions
+# ---------------------------------------------------------------------------
+def generate_random_message_id() -> str:
+    """Generate a random 10-digit message ID for tracing in FFDX logs."""
+    return "".join(random.choices(string.digits, k=10))
+
+
+def create_upload_request() -> str:
+    """Generate the XML string required for FFDX upload."""
     now = datetime.now().strftime("%Y/%m/%d %H:%M:%S")
     message_id = generate_random_message_id()
 
@@ -72,8 +97,8 @@ def create_upload_request():
         <ReceiverCode>PICKME</ReceiverCode>
         <ReceiverName>PickMe</ReceiverName>
         <Notes></Notes>
-        <ScheduledArrival></ScheduledArrival>
-        <DeclaredWt></DeclaredWt>
+        <ScheduledArrival>2007/04/10 12:00:00 AM</ScheduledArrival>
+        <DeclaredWt>10</DeclaredWt>
         <ManifestedBy>LK7171</ManifestedBy>
         <WeightMeasure>K</WeightMeasure>
         <Shipments>
@@ -126,7 +151,7 @@ def create_upload_request():
                 <ShipperCode>LK7171</ShipperCode>
                 <ShipperName>Logicentrix Pvt Ltd</ShipperName>
                 <Weight>14270</Weight>
-                <WeightMeasure>G</WeightMeasure>
+                <WeightMeasure>K</WeightMeasure>
                 <DeadWeight>0</DeadWeight>
                 <CustomerDeclaredWeight>0</CustomerDeclaredWeight>
                 <CubicLength>0</CubicLength>
@@ -242,14 +267,13 @@ def create_upload_request():
 </WSGET>"""
     return upload_req
 
-async def upload_manifest(req_xml_stream: str):
-    """POST the XML to FFDX and return the raw response text."""
-    last_exc = None
 
-    print(repr(FFDX_ENTITY_ID), repr(FFDX_ENTITY_PIN), repr(FFDX_USERNAME), repr(FFDX_PASSWORD))
+async def upload_manifest(req_xml_stream: str) -> str:
+    """POST the XML to FFDX and return the raw response text."""
+    last_exc: Optional[Exception] = None
 
     for attempt in range(1, FFDX_REQUEST_RETRIES + 1):
-        print(f"[attempt {attempt}] sending request...", flush=True)
+        logger.info("[attempt %d/%d] sending request to FFDX...", attempt, FFDX_REQUEST_RETRIES)
         try:
             async with httpx.AsyncClient(timeout=FFDX_REQUEST_TIMEOUT) as client:
                 response = await client.post(
@@ -260,137 +284,109 @@ async def upload_manifest(req_xml_stream: str):
                         "xmlStream": req_xml_stream,
                         "LevelConfirm": "summary",
                     },
-                    timeout=FFDX_REQUEST_TIMEOUT,
                 )
-                print(response.content)
-                print(f"[attempt {attempt}] got response: {response.status_code}", flush=True)
+                logger.info("[attempt %d] Response Status: %d", attempt, response.status_code)
                 response.raise_for_status()
                 return response.text
-        except httpx.ReadTimeout as exc:
+
+        except (httpx.ReadTimeout, httpx.HTTPError) as exc:
             last_exc = exc
-            logger.warning(
-                "FFDX request timed out on attempt %d/%d. Retrying after %.1f seconds...",
-                attempt,
-                FFDX_REQUEST_RETRIES,
-                FFDX_RETRY_BACKOFF,
-            )
-        except httpx.HTTPError as exc:
-            last_exc = exc
-            logger.error(
-                "FFDX request failed on attempt %d/%d: %s",
-                attempt,
-                FFDX_REQUEST_RETRIES,
-                exc,
-            )
-            break
+            logger.warning("FFDX request failed on attempt %d/%d: %s", attempt, FFDX_REQUEST_RETRIES, exc)
 
         if attempt < FFDX_REQUEST_RETRIES:
             await asyncio.sleep(FFDX_RETRY_BACKOFF)
 
-    raise RuntimeError(
-        f"FFDX request failed after {FFDX_REQUEST_RETRIES} attempts: {last_exc}"
-    ) from last_exc
+    raise RuntimeError(f"FFDX request failed after {FFDX_REQUEST_RETRIES} attempts: {last_exc}") from last_exc
 
 
-def get_unassigned_bags() -> List[dict]:
-    """
-    Get all bags that have not been assigned to a manifest yet.
-    Returns a list of dictionaries, where each dictionary represents a bag.
-    """
-    query = (
+# ---------------------------------------------------------------------------
+# Database Queries
+# ---------------------------------------------------------------------------
+def get_unassigned_bags() -> List[Dict[str, Any]]:
+    """Get all bags that have not been assigned to a manifest yet."""
+    response = (
         supabase.table("outbound_lmd_bags")
         .select("bag_number, target_partner")
         .eq("is_bag_in_a_manifest", False)
         .eq("status", "OPEN")
+        .execute()
     )
-    response = query.execute()
+    return response.data or []
 
-    if (len(response.data) == 0):
-        return "No data"
-    return response.data
 
-def get_outbound_bag_items(bag_number: str) -> List[dict]:
-    """
-    Get all items that belong to a specific bag.
-    Returns a list of dictionaries, where each dictionary represents an item.
-    """
-    query = (
+def get_outbound_bag_items(bag_number: str) -> List[Dict[str, Any]]:
+    """Get all items that belong to a specific bag."""
+    response = (
         supabase.table("outbound_lmd_bag_items")
         .select("*")
         .eq("bag_number", bag_number)
+        .execute()
     )
-    response = query.execute()
-
-    if (len(response.data) == 0):
-        return "No data"
-    return response.data
+    return response.data or []
 
 
-def get_downloaded_manifest_from_supabase_storage(mawb_ref: str) -> dict:
-    query = (
+def get_downloaded_manifest_from_supabase_storage(mawb_ref: str) -> bytes:
+    """Download raw JSON manifest from Supabase Storage bucket."""
+    response = (
         supabase.table("mawb")
         .select("json_file_path")
         .eq("mawb_reference", mawb_ref)
+        .execute()
     )
-    response = query.execute()
-    json_path = response.data[0]['json_file_path']
+    if not response.data:
+        raise ValueError(f"No MAWB record found for reference: {mawb_ref}")
 
-    print(json_path)
-    response = supabase.storage.from_("skynet_parcel_allocation").download(json_path)
+    json_path = response.data[0]["json_file_path"]
+    return supabase.storage.from_("skynet_parcel_allocation").download(json_path)
 
-    return response
 
-def normalize_manifest_json(raw_response) -> str:
-    """
-    Takes the raw manifest response (bytes or str, already valid JSON)
-    and returns a clean, pretty-printed JSON string.
-    """
+def normalize_manifest_json(raw_response: Any) -> str:
+    """Takes raw response (bytes or str) and returns clean, formatted JSON."""
     if isinstance(raw_response, bytes):
         raw_response = raw_response.decode("utf-8")
-
     data = json.loads(raw_response)
     return json.dumps(data, indent=2, ensure_ascii=False)
 
 
-def load_manifest_data(raw_response):
-    """Same as above, but returns the parsed Python object (list/dict) directly
-    for further processing (e.g. inserting into Supabase)."""
-    if isinstance(raw_response, bytes):
-        raw_response = raw_response.decode("utf-8")
-    return json.loads(raw_response)
-
-def get_original_manifest(shipment_ref: str):
-    query = (
-        supabase.table('shipments')
-        .select('reference_number, mawb_reference')
+def get_original_manifest(shipment_ref: str) -> List[Dict[str, Any]]:
+    """Query shipment details by reference number."""
+    response = (
+        supabase.table("shipments")
+        .select("reference_number, mawb_reference")
         .eq("reference_number", shipment_ref)
+        .execute()
     )
-    response = query.execute()
-    print(response)
-    return response.data
+    return response.data or []
 
+
+# ---------------------------------------------------------------------------
+# Main Execution Loop
+# ---------------------------------------------------------------------------
 async def main():
-    # res = get_downloaded_manifest_from_supabase_storage("LK Test 0715 1-10")
-    # clean_json = normalize_manifest_json(res)
-     # with open("mawb_output.json", "w", encoding="utf-8") as f:
-    #     f.write(clean_json)
-
-
-    res = get_unassigned_bags()
-    if (res == "No data"):
+    bags = get_unassigned_bags()
+    if not bags:
+        logger.info("No unassigned bags found.")
         return
-        
-    for bag in res:
-        items = get_outbound_bag_items(bag['bag_number'])
-        if (items == "No data"):
-            print("No items")
+
+    logger.info("Found %d unassigned bag(s).", len(bags))
+
+    for bag in bags:
+        bag_number = bag.get("bag_number")
+        logger.info("Processing bag: %s", bag_number)
+
+        items = get_outbound_bag_items(bag_number)
+        if not items:
+            logger.info("No items found for bag: %s", bag_number)
             continue
 
         for item in items:
-            shipment_ref = item['shipment_ref']
+            shipment_ref = item.get("shipment_ref")
+            if not shipment_ref:
+                continue
+
             manifest_details = get_original_manifest(shipment_ref)
-            print(manifest_details)
-            
+            logger.info("Shipment Details for %s: %s", shipment_ref, manifest_details)
+
 
 if __name__ == "__main__":
     asyncio.run(main())

@@ -17,6 +17,7 @@
  */
 
 import { NextResponse } from 'next/server';
+import { saveManifestToSupabaseStorage } from '@/lib/supabaseStorage';
 
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
@@ -723,12 +724,52 @@ export async function GET(request: Request) {
                         ? { success: true } // nothing to upload — still fine
                         : { success: failedCount === 0, error: failedCount > 0 ? `${failedCount} of ${shipmentEntries.length} shipment(s) rejected by FFDX. Last error: ${lastFfdxError}` : undefined };
 
+                let storageResult: any = null;
+                // Save complete manifest log (XML and JSON) to Supabase storage buckets and update DB
+                try {
+                    const allShipmentBlocks = shipmentEntries.map(e => buildShipmentXml(e.parcel, e.detail, e.bagNumber));
+                    const fullXmlPayload = buildUploadXml(mawbRef, allShipmentBlocks, headerInfo);
+                    const parcelLogs = shipmentEntries.map(e => ({
+                        trackingNumber: e.trackingNum,
+                        bagNumber: e.bagNumber,
+                        weightKg: Number(e.detail?.weight) || Number(e.parcel?.weight) || 0.1,
+                        consigneeName: e.detail?.consignee_name || e.parcel?.recipientName || '',
+                        consigneeAddress: e.detail?.consignee_address_1 || e.parcel?.city || '',
+                        consigneeCity: e.detail?.consignee_city || e.parcel?.city || '',
+                        consignorName: e.detail?.consignor_name || '',
+                        consignorCountry: e.detail?.consignor_country_code || '',
+                        senderReference: e.detail?.sender_reference || e.parcel?.senderReference || '',
+                        status: 'UPLOADED',
+                    }));
+
+                    storageResult = await saveManifestToSupabaseStorage({
+                        manifestReference: mawbRef,
+                        manifestId: manifestId || null,
+                        serviceProvider: receiverName,
+                        headerInfo,
+                        totalBags: allBagsList.length,
+                        totalParcels: shipmentEntries.length,
+                        totalWeightKg,
+                        parcels: parcelLogs,
+                        xmlPayload: fullXmlPayload,
+                    }).catch(err => {
+                        console.error('[manifest-close-stream] Error saving to Supabase storage:', err);
+                        return null;
+                    });
+                } catch (e) {
+                    console.error('[manifest-close-stream] Error building storage payload:', e);
+                }
+
                 // Mark uploaded in DB if at least one shipment made it through
                 if (uploadedCount > 0 || shipmentEntries.length === 0) {
+                    const patchData: Record<string, any> = { is_uploaded: true };
+                    if (storageResult?.jsonPath) patchData.json_path = storageResult.jsonPath;
+                    if (storageResult?.xmlPath) patchData.xml_path = storageResult.xmlPath;
+
                     if (manifestId) {
-                        await fetch(`${sb.url}/rest/v1/outbound_manifests?id=eq.${manifestId}`, { method: 'PATCH', headers: sb.headers, body: JSON.stringify({ is_uploaded: true }) }).catch(() => { });
+                        await fetch(`${sb.url}/rest/v1/outbound_manifests?id=eq.${manifestId}`, { method: 'PATCH', headers: sb.headers, body: JSON.stringify(patchData) }).catch(() => { });
                     } else {
-                        await fetch(`${sb.url}/rest/v1/outbound_manifests?manifest_reference=eq.${encodeURIComponent(mawbRef)}`, { method: 'PATCH', headers: sb.headers, body: JSON.stringify({ is_uploaded: true }) }).catch(() => { });
+                        await fetch(`${sb.url}/rest/v1/outbound_manifests?manifest_reference=eq.${encodeURIComponent(mawbRef)}`, { method: 'PATCH', headers: sb.headers, body: JSON.stringify(patchData) }).catch(() => { });
                     }
                 }
 
