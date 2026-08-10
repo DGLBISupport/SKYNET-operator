@@ -58,16 +58,17 @@ export async function GET(request: Request) {
         }
 
         // Fetch all tables concurrently using Promise.allSettled
-        const [shipResult, bagResult, manResult, damResult, unsealResult, spaResult, spResult, spAllocResult, mawbResult] = await Promise.allSettled([
+        const [shipResult, bagResult, manResult, damResult, unsealResult, spaResult, spResult, spAllocResult, mawbResult, omResult] = await Promise.allSettled([
             fetchAllSupabaseRows('shipments', 'reference_number,sender_reference,mawb_reference,delivery_agent_code,bag_number,consignee_location_name,created_at,weight', sb),
-            fetchAllSupabaseRows('outbound_lmd_bags', 'id,bag_number,mawb_ref,target_partner,destination_hub,status,parcel_count,total_weight,created_by,sealed_by,created_at,sealed_at', sb),
+            fetchAllSupabaseRows('outbound_lmd_bags', 'id,bag_number,mawb_ref,new_manifest_reference,target_partner,destination_hub,status,parcel_count,total_weight,created_by,sealed_by,created_at,sealed_at', sb),
             fetchAllSupabaseRows('manifest_sessions', 'id,manifest_id,mawb_ref,status,total_bags,total_parcels,closed_by,created_at,closed_at', sb),
             fetchAllSupabaseRows('damaged_barcodes', 'id,barcode,reason,reported_by,created_at', sb),
             fetchAllSupabaseRows('bag_unsealing', 'id,bag_number,mawb_ref,status,unsealed_by,scanned_count,expected_count,created_at,scanned_parcels', sb),
             fetchAllSupabaseRows('service_provider_allocation', 'id', sb),
             fetchAllSupabaseRows('service_providers', 'id,name,code', sb),
             fetchAllSupabaseRows('service_provider_allocation', 'shipment_ref,service_provider,unsealed,scan_status,mawb_ref', sb),
-            fetchAllSupabaseRows('mawb', 'id,mawb_reference,carrier,declared_bags,declared_wt,mawb_created,shipper_name,notes', sb)
+            fetchAllSupabaseRows('mawb', 'id,mawb_reference,carrier,declared_bags,declared_wt,mawb_created,shipper_name,notes', sb),
+            fetchAllSupabaseRows('outbound_manifests', 'id,manifest_reference', sb)
         ]);
 
         const shipData = shipResult.status === 'fulfilled' ? shipResult.value : [];
@@ -79,6 +80,7 @@ export async function GET(request: Request) {
         const spData = spResult.status === 'fulfilled' ? spResult.value : [];
         const spAllocData = spAllocResult.status === 'fulfilled' ? spAllocResult.value : [];
         const mawbData = mawbResult.status === 'fulfilled' ? mawbResult.value : [];
+        const omBags = omResult.status === 'fulfilled' ? omResult.value : [];
 
         // Build UUID -> MAWB reference string lookup map (shipments.mawb_reference stores mawb.id as UUID)
         const mawbUuidToRef: Record<string, string> = {};
@@ -246,10 +248,19 @@ export async function GET(request: Request) {
             if (detailsPartner === 'General' || !partnerDetailsMap[detailsPartner]) detailsPartner = 'Other';
             partnerDetailsMap[detailsPartner].totalBags++;
 
+            // Resolve manifest reference: prefer FK join, fallback to legacy mawb_ref
+            const resolvedManifestRef = (() => {
+                if (b.new_manifest_reference) {
+                    // new FK — look up in outbound_manifests data if available
+                    const omRow = (omBags || []).find((m: any) => Number(m.id) === Number(b.new_manifest_reference));
+                    return omRow?.manifest_reference || b.mawb_ref || '';
+                }
+                return b.mawb_ref || '';
+            })();
             return {
                 id: b.id,
                 bagNumber: b.bag_number || `BAG-${b.id}`,
-                mawbRef: b.mawb_ref || '',
+                mawbRef: resolvedManifestRef,
                 targetPartner: p,
                 destinationHub: b.destination_hub || p,
                 status: b.status || 'OPEN',

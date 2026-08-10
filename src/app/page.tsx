@@ -267,6 +267,19 @@ export default function WorkstationDashboard() {
     // Tab 2: Outbound LMD Bagging & Manifest Management State
     const [selectedSecondScanMawb, setSelectedSecondScanMawb] = useState('');
     const [secondScanManifestStatus, setSecondScanManifestStatus] = useState<'OPEN' | 'CLOSED'>('OPEN');
+    const [outboundManifestsList, setOutboundManifestsList] = useState<Array<{
+        id?: number;
+        manifest_reference: string;
+        bag_numbers: string[];
+        total_bags: number;
+        service_provider: number | null;
+        service_provider_name?: string;
+        total_parcels: number;
+        status?: 'OPEN' | 'CLOSED';
+        created_at?: string;
+    }>>([]);
+    const [createManifestModalOpen, setCreateManifestModalOpen] = useState(false);
+    const [selectedProviderForManifest, setSelectedProviderForManifest] = useState<'PickMe' | 'Domex' | 'Pronto'>('PickMe');
     const [outboundBags, setOutboundBags] = useState<Array<{
         bagNumber: string;
         mawbRef: string;
@@ -293,6 +306,9 @@ export default function WorkstationDashboard() {
         assignedPartner?: string;
         assignedZone?: string;
         bagNumber?: string;
+        initialManifest?: string;
+        targetMawb?: string;
+        allocationLog?: string;
     } | null>(null);
     const [printOutboundBagLabelModal, setPrintOutboundBagLabelModal] = useState<any | null>(null);
 
@@ -324,15 +340,16 @@ export default function WorkstationDashboard() {
         mawbRef: string;
         closedBy: string;
         closedAt: string;
+        provider?: string;
         totalBags: number;
-        pickmeBags: number;
-        pickmeParcels: number;
-        domexBags: number;
-        domexParcels: number;
-        prontoBags: number;
-        prontoParcels: number;
-        generalBags: number;
-        generalParcels: number;
+        pickmeBags?: number;
+        pickmeParcels?: number;
+        domexBags?: number;
+        domexParcels?: number;
+        prontoBags?: number;
+        prontoParcels?: number;
+        generalBags?: number;
+        generalParcels?: number;
         totalParcels: number;
         totalWeight: number;
     } | null>(null);
@@ -346,6 +363,18 @@ export default function WorkstationDashboard() {
     const [overageCheckModal, setOverageCheckModal] = useState<{ bagNumber: string; expected: number; history: any[] } | null>(null);
     const [extraParcelModal, setExtraParcelModal] = useState<{ barcode: string; reason: 'WRONG_BAG' | 'UNASSIGNED' | 'NOT_FOUND'; actualBag: string | null; actualMawb?: string | null; expectedBag: string; } | null>(null);
     const [extraParcelNote, setExtraParcelNote] = useState('');
+    const [partnerMismatchModal, setPartnerMismatchModal] = useState<{
+        barcode?: string;
+        manifestRef: string;
+        manifestProvider: string;
+        parcelProvider?: string;
+        bagProvider?: string;
+        message: string;
+    } | null>(null);
+    const [openBagsErrorModal, setOpenBagsErrorModal] = useState<{
+        manifestRef: string;
+        openBags: string[];
+    } | null>(null);
     const [printLabelModal, setPrintLabelModal] = useState<{
         trackingNumber: string;
         senderReference?: string;
@@ -625,7 +654,6 @@ export default function WorkstationDashboard() {
                     setMawbsList(data.mawbs);
                     if (data.mawbs.length > 0) {
                         setFirstScanMawb(prev => prev || data.mawbs[0].mawb_reference);
-                        setSelectedSecondScanMawb(prev => prev || data.mawbs[0].mawb_reference);
                     }
                 }
             }).catch(console.error);
@@ -769,12 +797,14 @@ export default function WorkstationDashboard() {
                     setSuccessModal(null);
                     setInvalidBagParcelModal(null);
                     setUnallocatedBagUnsealModal(null);
+                    setPartnerMismatchModal(null);
                     return; // Allow form submit event to proceed cleanly
                 }
             }
             if (e.key === 'Enter' || e.key === 'Escape' || e.key === ' ') {
                 e.preventDefault();
                 setDuplicateModal(null);
+                setPartnerMismatchModal(null);
                 setTimeout(() => {
                     if (activeTab === 'first-scan') firstScanInputRef.current?.focus();
                     else if (activeTab === 'second-scan') scanInputRef.current?.focus();
@@ -1827,6 +1857,23 @@ export default function WorkstationDashboard() {
         setFirstScanCurrentScan(null);
     };
 
+    const fetchOutboundManifests = async () => {
+        try {
+            const res = await fetch('/api/lmd-bags?getOutboundManifests=true', { cache: 'no-store' });
+            const data = await res.json();
+            if (data.success && Array.isArray(data.manifests)) {
+                setOutboundManifestsList(data.manifests);
+                const isValidSelection = selectedSecondScanMawb && data.manifests.some((m: any) => m.manifest_reference === selectedSecondScanMawb);
+                if (!isValidSelection) {
+                    const openManifest = data.manifests.find((m: any) => m.status === 'OPEN') || data.manifests[0];
+                    setSelectedSecondScanMawb(openManifest ? openManifest.manifest_reference : '');
+                }
+            }
+        } catch (err) {
+            console.error("Failed to fetch outbound manifests:", err);
+        }
+    };
+
     const fetchOutboundBags = async (mawbRef: string) => {
         try {
             const res = await fetch(`/api/lmd-bags?mawbRef=${encodeURIComponent(mawbRef)}`, { cache: 'no-store' });
@@ -1849,15 +1896,86 @@ export default function WorkstationDashboard() {
     };
 
     useEffect(() => {
+        if (activeTab === 'second-scan') {
+            fetchOutboundManifests();
+        }
+    }, [activeTab]);
+
+    useEffect(() => {
         if (selectedSecondScanMawb) {
             fetchOutboundBags(selectedSecondScanMawb);
         }
     }, [selectedSecondScanMawb]);
 
+    const handleCreateOutboundManifest = async () => {
+        try {
+            const activeOperator = currentUser
+                ? `${currentUser.firstName || ''} ${currentUser.lastName || ''}`.trim() || currentUser.username || currentUser.email
+                : 'Staff';
+
+            const res = await fetch('/api/lmd-bags', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    action: 'create-manifest',
+                    providerName: selectedProviderForManifest,
+                    operator: activeOperator
+                })
+            });
+            const data = await res.json();
+            if (data.success && data.manifest) {
+                const newRef = data.manifest.manifest_reference;
+                setCreateManifestModalOpen(false);
+                setSelectedSecondScanMawb(newRef);
+                await fetchOutboundManifests();
+                await fetchOutboundBags(newRef);
+                setSuccessModal({
+                    title: "Outbound Manifest Created",
+                    message: `New Outbound Manifest "${newRef}" created successfully!`
+                });
+            } else {
+                setErrorMessage(data.error || 'Failed to create outbound manifest.');
+                setStatus('ERROR');
+            }
+        } catch (err: any) {
+            setErrorMessage(err.message || 'Server error creating outbound manifest.');
+            setStatus('ERROR');
+        }
+    };
+
+    const getManifestProviderName = (manifestRef: string): string => {
+        if (!manifestRef) return 'ALL';
+        const found = outboundManifestsList.find(m => m.manifest_reference === manifestRef);
+        if (found && found.service_provider_name) {
+            const spName = found.service_provider_name;
+            if (spName.toLowerCase().includes('pickme')) return 'PickMe';
+            if (spName.toLowerCase().includes('domex')) return 'Domex';
+            if (spName.toLowerCase().includes('pronto')) return 'Pronto';
+            return spName;
+        }
+        const upper = manifestRef.toUpperCase();
+        if (upper.includes('PICKME')) return 'PickMe';
+        if (upper.includes('DOMEX')) return 'Domex';
+        if (upper.includes('PRONTO')) return 'Pronto';
+        return 'ALL';
+    };
+
     const handleCreateOutboundBag = async () => {
         if (secondScanManifestStatus === 'CLOSED') {
             setErrorMessage(`Manifest "${selectedSecondScanMawb}" is CLOSED. No additional bags can be created.`);
             setStatus('ERROR');
+            setCreateBagModalOpen(false);
+            return;
+        }
+
+        const manifestProvider = getManifestProviderName(selectedSecondScanMawb);
+        if (manifestProvider !== 'ALL' && newBagPartner !== 'ALL' && newBagPartner.toLowerCase() !== manifestProvider.toLowerCase()) {
+            setPartnerMismatchModal({
+                manifestRef: selectedSecondScanMawb,
+                manifestProvider,
+                bagProvider: newBagPartner,
+                message: `Active Manifest "${selectedSecondScanMawb}" is created for ${manifestProvider.toUpperCase()}. You cannot create a ${newBagPartner.toUpperCase()} bag inside a ${manifestProvider.toUpperCase()} manifest!`
+            });
             setCreateBagModalOpen(false);
             return;
         }
@@ -1914,6 +2032,15 @@ export default function WorkstationDashboard() {
 
         const relevantBags = (outboundBags || []).filter(b => !mawbToClose || (b.mawbRef || '').toLowerCase() === mawbToClose.toLowerCase());
 
+        const openBags = relevantBags.filter(b => b.status === 'OPEN' || b.status !== 'SEALED');
+        if (openBags.length > 0) {
+            setOpenBagsErrorModal({
+                manifestRef: mawbToClose,
+                openBags: openBags.map(b => b.bagNumber)
+            });
+            return;
+        }
+
         relevantBags.forEach((b) => {
             const bn = (b.bagNumber || '').toUpperCase();
             const p = b.targetPartner || (bn.includes('PICKME') ? 'PickMe' : bn.includes('DOMEX') ? 'Domex' : bn.includes('PRONTO') ? 'Pronto' : 'ALL');
@@ -1951,10 +2078,17 @@ export default function WorkstationDashboard() {
             const data = await res.json();
             if (data.success) {
                 setSecondScanManifestStatus('CLOSED');
+                const providerCode = getManifestProviderName(mawbToClose);
+                const providerDisplay = providerCode === 'PickMe' ? 'PickMe Express'
+                    : providerCode === 'Domex' ? 'Domex Express'
+                    : providerCode === 'Pronto' ? 'Pronto Lanka'
+                    : providerCode === 'ALL' ? 'General (All Partners)'
+                    : providerCode;
                 setManifestClosedModal({
                     mawbRef: mawbToClose,
                     closedBy: activeOperator,
                     closedAt: new Date().toLocaleString(),
+                    provider: providerDisplay,
                     totalBags: relevantBags.length,
                     pickmeBags,
                     pickmeParcels,
@@ -1968,7 +2102,14 @@ export default function WorkstationDashboard() {
                     totalWeight: Number(totalWeight.toFixed(2))
                 });
             } else {
-                setErrorMessage(data.error || 'Failed to close manifest.');
+                if (data.error && data.error.toLowerCase().includes('open')) {
+                    setOpenBagsErrorModal({
+                        manifestRef: mawbToClose,
+                        openBags: relevantBags.filter(b => b.status === 'OPEN' || b.status !== 'SEALED').map(b => b.bagNumber)
+                    });
+                } else {
+                    setErrorMessage(data.error || 'Failed to close manifest.');
+                }
             }
         } catch (err: any) {
             setErrorMessage(err.message || 'Failed to close manifest.');
@@ -2014,6 +2155,46 @@ export default function WorkstationDashboard() {
         }
     };
 
+    const handleDeleteOutboundBag = async (bagNumber: string) => {
+        if (!bagNumber) return;
+        const targetBag = (outboundBags || []).find(b => b.bagNumber === bagNumber);
+        if (targetBag && targetBag.status === 'SEALED') {
+            setErrorMessage(`Cannot delete sealed bag. Outbound Bag "${bagNumber}" is SEALED & CLOSED.`);
+            setStatus('ERROR');
+            return;
+        }
+        try {
+            const res = await fetch('/api/lmd-bags', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    action: 'delete-bag',
+                    bagNumber: bagNumber,
+                    mawbRef: selectedSecondScanMawb
+                })
+            });
+            const data = await res.json();
+            if (data.success) {
+                const updatedBags = (outboundBags || []).filter(b => b.bagNumber !== bagNumber);
+                setOutboundBags(updatedBags);
+                if (activeOutboundBag?.bagNumber === bagNumber) {
+                    const nextActive = updatedBags.find(b => b.status === 'OPEN') || updatedBags[0] || null;
+                    setActiveOutboundBag(nextActive);
+                }
+                setSuccessModal({
+                    title: "Outbound Bag Removed",
+                    message: `Outbound Bag "${bagNumber}" has been removed successfully.`
+                });
+            } else {
+                setErrorMessage(data.error || 'Failed to remove outbound bag.');
+                setStatus('ERROR');
+            }
+        } catch (err: any) {
+            setErrorMessage(err.message || 'Server error removing outbound bag.');
+            setStatus('ERROR');
+        }
+    };
+
     const handleScanSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
         const rawBarcode = barcodeInput.trim();
@@ -2023,6 +2204,7 @@ export default function WorkstationDashboard() {
         // Reset previous scan output and modals for clean new scan evaluation
         setUnallocatedPartnerModal(null);
         setValidationCard(null);
+        setPartnerMismatchModal(null);
 
         // Clear input instantly and store last scanned to prevent concatenation
         setLastScanned(barcode);
@@ -2133,13 +2315,39 @@ export default function WorkstationDashboard() {
             const data: any = await response.json();
 
             if (data.success && data.validation !== 'INCORRECT' && data.parcel) {
+                const manifestProvider = getManifestProviderName(selectedSecondScanMawb);
+                const parcelPartner = data.assignedPartner || data.parcel.assignedPartner;
+
+                if (manifestProvider !== 'ALL' && parcelPartner && parcelPartner !== 'ALL' && parcelPartner.toLowerCase() !== manifestProvider.toLowerCase()) {
+                    setStatus('ERROR');
+                    const errMsg = `MANIFEST & PARTNER MISMATCH EXCEPTION! Parcel "${barcode}" is assigned to ${parcelPartner.toUpperCase()}, but active Manifest is "${selectedSecondScanMawb}" (${manifestProvider.toUpperCase()}). You cannot allocate a ${parcelPartner.toUpperCase()} parcel into a ${manifestProvider.toUpperCase()} manifest!`;
+                    setErrorMessage(errMsg);
+                    setValidationCard({
+                        status: 'INCORRECT',
+                        reason: 'PARTNER_MISMATCH',
+                        error: errMsg,
+                        bagNumber: activeOutboundBag.bagNumber
+                    });
+                    setPartnerMismatchModal({
+                        barcode,
+                        manifestRef: selectedSecondScanMawb,
+                        manifestProvider,
+                        parcelProvider: parcelPartner,
+                        message: errMsg
+                    });
+                    return;
+                }
+
                 // Validation: CORRECT!
                 setCurrentScan(data);
                 setStatus('SUCCESS');
                 setScannedToday((prev) => prev + 1);
 
+                const initialManifest = data.initialManifest || data.parcel?.initialManifest || data.parcel?.mawbRef || 'Initial Manifest';
                 const parcelToStore = {
                     ...data.parcel,
+                    initialManifest,
+                    mawbRef: initialManifest,
                     scannedBarcode: barcode,
                     displayTrackingNumber: data.parcel?.senderReference && data.parcel.senderReference.trim().toLowerCase() === barcode.trim().toLowerCase()
                         ? `${barcode} / SKYT-${data.parcel.trackingNumber}`
@@ -2181,10 +2389,13 @@ export default function WorkstationDashboard() {
 
                 setValidationCard({
                     status: 'CORRECT',
-                    parcel: data.parcel,
+                    parcel: parcelToStore,
                     assignedPartner: data.assignedPartner,
                     assignedZone: data.assignedZone,
-                    bagNumber: activeOutboundBag.bagNumber
+                    bagNumber: activeOutboundBag.bagNumber,
+                    initialManifest,
+                    targetMawb: selectedSecondScanMawb,
+                    allocationLog: data.allocationLog || `Parcel "${data.parcel?.trackingNumber || barcode}" (Initial Manifest: "${initialManifest}") allocated to Bag "${activeOutboundBag.bagNumber}" under LMD Manifest "${selectedSecondScanMawb}"`
                 });
 
                 const partner = data.assignedPartner as 'PickMe' | 'Domex' | 'Pronto';
@@ -2223,7 +2434,16 @@ export default function WorkstationDashboard() {
                     setUnallocatedPartnerModal({
                         trackingNumber: data.parcel?.trackingNumber || barcode
                     });
-                } else if ((isPartnerMismatch || isManifestMismatch || isDuplicate) && !isCombined) {
+                } else if (isPartnerMismatch && !isCombined) {
+                    const manifestProvider = getManifestProviderName(selectedSecondScanMawb);
+                    setPartnerMismatchModal({
+                        barcode,
+                        manifestRef: selectedSecondScanMawb,
+                        manifestProvider,
+                        parcelProvider: data.assignedPartner || 'Another Partner',
+                        message: data.error || `Partner Allocation Mismatch: Parcel is allocated to ${data.assignedPartner || 'another partner'}, but active Manifest is ${selectedSecondScanMawb} (${manifestProvider}).`
+                    });
+                } else if ((isManifestMismatch || isDuplicate) && !isCombined) {
                     setDuplicateModal({
                         barcode,
                         skynetTrackingNumber: data.parcel?.trackingNumber || barcode,
@@ -4154,94 +4374,232 @@ export default function WorkstationDashboard() {
                                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '12px' }}>
                                         <div style={{ flex: 1, minWidth: '280px' }}>
                                             <label style={{ fontSize: '12px', fontWeight: '600', color: '#374151', display: 'block', marginBottom: '6px' }}>
-                                                Select Active MAWB (Master Air Waybill) (Optional)
+                                                Select Active Outbound Manifest (First Step)
                                             </label>
                                             <select
                                                 value={selectedSecondScanMawb}
                                                 onChange={(e) => setSelectedSecondScanMawb(e.target.value)}
                                                 style={{ ...inputStyle, width: '100%', backgroundColor: '#ffffff', color: '#111827', fontWeight: '600' }}
                                             >
-                                                <option value="">-- All Manifests / Multi-Manifest --</option>
-                                                {mawbsList.map(m => (
-                                                    <option key={m.mawb_reference} value={m.mawb_reference}>
-                                                        {m.mawb_reference} ({m.carrier || 'MAWB'})
+                                                <option value="">-- Select an Outbound Manifest --</option>
+                                                {outboundManifestsList.map(m => (
+                                                    <option key={m.manifest_reference} value={m.manifest_reference}>
+                                                        {m.manifest_reference} ({m.service_provider_name || 'Partner'} - {m.total_bags || 0} Bags, {m.total_parcels || 0} Pcs) {m.status === 'CLOSED' ? '[CLOSED]' : ''}
                                                     </option>
                                                 ))}
                                             </select>
                                         </div>
 
-                                        <div style={{ display: 'flex', gap: '10px', alignItems: 'flex-end', paddingTop: '18px' }}>
+                                        <div style={{ display: 'flex', gap: '10px', alignItems: 'flex-end', paddingTop: '18px', flexWrap: 'wrap' }}>
                                             <button
                                                 onClick={() => {
-                                                    const mawbPrefix = selectedSecondScanMawb ? selectedSecondScanMawb : 'LMD';
-                                                    const partnerCode = newBagPartner && newBagPartner !== 'ALL' ? `-${newBagPartner.toUpperCase()}` : '';
-                                                    setCustomBagNumber(`${mawbPrefix}${partnerCode}-BAG-${String((outboundBags?.length || 0) + 1).padStart(2, '0')}`);
-                                                    setCreateBagModalOpen(true);
+                                                    setCreateManifestModalOpen(true);
                                                 }}
-                                                disabled={Boolean(selectedSecondScanMawb && secondScanManifestStatus === 'CLOSED')}
                                                 style={{
-                                                    backgroundColor: (selectedSecondScanMawb && secondScanManifestStatus === 'CLOSED') ? '#9ca3af' : '#ffffff',
-                                                    color: (selectedSecondScanMawb && secondScanManifestStatus === 'CLOSED') ? '#ffffff' : '#374151',
-                                                    border: (selectedSecondScanMawb && secondScanManifestStatus === 'CLOSED') ? '1px solid #9ca3af' : '1px solid #d1d5db',
+                                                    backgroundColor: '#ffffff',
+                                                    color: '#374151',
+                                                    border: '1px solid #d1d5db',
                                                     borderRadius: '8px',
-                                                    padding: '10px 14px',
+                                                    padding: '10px 18px',
                                                     fontSize: '12px',
                                                     fontWeight: '600',
-                                                    cursor: (selectedSecondScanMawb && secondScanManifestStatus === 'CLOSED') ? 'not-allowed' : 'pointer'
+                                                    cursor: 'pointer',
+                                                    display: 'flex',
+                                                    alignItems: 'center',
+                                                    gap: '4px',
+                                                    boxShadow: '1px 1px 2px 1px rgba(226, 27, 34, 0.3)'
+                                                }}
+                                            >
+                                                + Create New Outbound Manifest
+                                            </button>
+                                        </div>
+                                    </div>
+
+                                    {/* Horizontal Active Outbound Manifest Box (Box Theme) */}
+                                    {selectedSecondScanMawb && (
+                                        <div style={{
+                                            backgroundColor: '#ffffff',
+                                            border: secondScanManifestStatus === 'CLOSED' ? '2px solid #ef4444' : '1px solid #e5e7eb',
+                                            borderRadius: '8px',
+                                            padding: '12px 18px',
+                                            marginTop: '12px',
+                                            marginBottom: '16px',
+                                            display: 'flex',
+                                            alignItems: 'center',
+                                            justifyContent: 'space-between',
+                                            flexWrap: 'wrap',
+                                            gap: '14px',
+                                            boxShadow: '0 1px 3px rgba(0,0,0,0.04)'
+                                        }}>
+                                            {/* Left Info */}
+                                            <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
+                                                <div>
+                                                    <div style={{ fontSize: '10px', fontWeight: '700', color: '#6b7280', textTransform: 'uppercase' }}>
+                                                        Active Outbound Manifest
+                                                    </div>
+                                                    <div style={{ fontSize: '15px', fontWeight: '800', color: '#111827', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                                        <span>{selectedSecondScanMawb}</span>
+                                                        {(() => {
+                                                            const mObj = outboundManifestsList.find(m => m.manifest_reference === selectedSecondScanMawb);
+                                                            const rawName = mObj?.service_provider_name || (selectedSecondScanMawb.includes('PICKME') ? 'PickMe' : selectedSecondScanMawb.includes('DOMEX') ? 'Domex' : selectedSecondScanMawb.includes('PRONTO') ? 'Pronto' : 'Partner');
+                                                            const isPickMe = rawName.toLowerCase().includes('pickme');
+                                                            const isDomex = rawName.toLowerCase().includes('domex');
+                                                            const isPronto = rawName.toLowerCase().includes('pronto');
+                                                            const displayLabel = isPickMe ? 'PickMe' : isDomex ? 'Domex' : isPronto ? 'Pronto' : rawName;
+                                                            return (
+                                                                <span style={{
+                                                                    backgroundColor: isPickMe ? '#facc15' : isDomex ? '#7b0f1a' : isPronto ? '#d97706' : '#4b5563',
+                                                                    color: isPickMe ? '#111827' : '#ffffff',
+                                                                    fontSize: '10px',
+                                                                    fontWeight: '800',
+                                                                    padding: '2px 7px',
+                                                                    borderRadius: '4px'
+                                                                }}>
+                                                                    {displayLabel}
+                                                                </span>
+                                                            );
+                                                        })()}
+                                                    </div>
+                                                </div>
+
+                                                <div style={{ borderLeft: '1px solid #e5e7eb', paddingLeft: '16px', display: 'flex', gap: '16px' }}>
+                                                    <div>
+                                                        <div style={{ fontSize: '10px', color: '#6b7280', textTransform: 'uppercase' }}>Total Bags</div>
+                                                        <div style={{ fontSize: '14px', fontWeight: '800', color: '#111827' }}>{outboundBags.length} Bags</div>
+                                                    </div>
+                                                    <div>
+                                                        <div style={{ fontSize: '10px', color: '#6b7280', textTransform: 'uppercase' }}>Total Parcels</div>
+                                                        <div style={{ fontSize: '14px', fontWeight: '800', color: '#111827' }}>{outboundBags.reduce((acc, b) => acc + (b.parcelCount || 0), 0)} Pcs</div>
+                                                    </div>
+                                                </div>
+                                            </div>
+
+                                            {/* Right: Status badge & Close Manifest button */}
+                                            <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                                                <div style={{
+                                                    backgroundColor: '#ffffff',
+                                                    border: '1px solid #d1d5db',
+                                                    color: '#374151',
+                                                    borderRadius: '8px',
+                                                    padding: '0 14px',
+                                                    height: '38px',
+                                                    boxSizing: 'border-box',
+                                                    fontSize: '12px',
+                                                    fontWeight: '600',
+                                                    display: 'inline-flex',
+                                                    alignItems: 'center',
+                                                    gap: '6px'
+                                                }}>
+                                                    <span>Status:</span>
+                                                    <span style={{
+                                                        backgroundColor: secondScanManifestStatus === 'CLOSED' ? '#fee2e2' : '#f3f4f6',
+                                                        color: secondScanManifestStatus === 'CLOSED' ? '#dc2626' : '#374151',
+                                                        border: secondScanManifestStatus === 'CLOSED' ? '1px solid #fca5a5' : '1px solid #e5e7eb',
+                                                        padding: '2px 8px',
+                                                        borderRadius: '4px',
+                                                        fontWeight: '700',
+                                                        fontSize: '11px'
+                                                    }}>
+                                                        {secondScanManifestStatus || 'OPEN'}
+                                                    </span>
+                                                </div>
+
+                                                {secondScanManifestStatus === 'OPEN' && (
+                                                    <button
+                                                        onClick={() => {
+                                                            const relevantBags = (outboundBags || []).filter(b => !selectedSecondScanMawb || (b.mawbRef || '').toLowerCase() === selectedSecondScanMawb.toLowerCase());
+                                                            const openBags = relevantBags.filter(b => b.status === 'OPEN' || b.status !== 'SEALED');
+                                                            if (openBags.length > 0) {
+                                                                setOpenBagsErrorModal({
+                                                                    manifestRef: selectedSecondScanMawb,
+                                                                    openBags: openBags.map(b => b.bagNumber)
+                                                                });
+                                                                return;
+                                                            }
+                                                            setCustomConfirmModal({
+                                                                title: "Close Manifest?",
+                                                                message: `Are you sure you want to CLOSE Manifest "${selectedSecondScanMawb}"? Once closed, no additional bags can be created under this manifest.`,
+                                                                onConfirm: () => handleCloseManifest()
+                                                            });
+                                                        }}
+                                                        style={{
+                                                            backgroundColor: '#ffffff',
+                                                            border: '1px solid #d1d5db',
+                                                            color: '#374151',
+                                                            borderRadius: '8px',
+                                                            padding: '0 14px',
+                                                            height: '38px',
+                                                            boxSizing: 'border-box',
+                                                            display: 'inline-flex',
+                                                            alignItems: 'center',
+                                                            gap: '6px',
+                                                            fontSize: '12px',
+                                                            fontWeight: '600',
+                                                            cursor: 'pointer'
+                                                        }}
+                                                    >
+                                                        🔒 Close Manifest
+                                                    </button>
+                                                )}
+                                            </div>
+                                        </div>
+                                    )}
+
+                                    {/* Outbound Bags Selector Pills */}
+                                    <div style={{ borderTop: '1px solid #f3f4f6', paddingTop: '12px', marginTop: '4px' }}>
+                                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px', flexWrap: 'wrap', gap: '14px' }}>
+                                            <div style={{ fontSize: '11px', fontWeight: '700', color: '#6b7280', textTransform: 'uppercase' }}>
+                                                Outbound LMD Bags for Manifest ({outboundBags.length} Bags):
+                                            </div>
+                                            <button
+                                                onClick={() => {
+                                                    if (!selectedSecondScanMawb) {
+                                                        setErrorMessage("Please select or create an Outbound Manifest first.");
+                                                        setStatus('ERROR');
+                                                        return;
+                                                    }
+                                                    const partnerCode = newBagPartner && newBagPartner !== 'ALL' ? `-${newBagPartner.toUpperCase()}` : '';
+                                                    setCustomBagNumber(`${selectedSecondScanMawb}${partnerCode}-BAG-${String((outboundBags?.length || 0) + 1).padStart(2, '0')}`);
+                                                    setCreateBagModalOpen(true);
+                                                }}
+                                                disabled={Boolean(!selectedSecondScanMawb || secondScanManifestStatus === 'CLOSED')}
+                                                style={{
+                                                    backgroundColor: (!selectedSecondScanMawb || secondScanManifestStatus === 'CLOSED') ? '#9ca3af' : '#ffffff',
+                                                    color: '#374151',
+                                                    border: (!selectedSecondScanMawb || secondScanManifestStatus === 'CLOSED') ? '1px solid #9ca3af' : '1px solid #d1d5db',
+                                                    borderRadius: '8px',
+                                                    padding: '10px 18px',
+                                                    fontSize: '12px',
+                                                    fontWeight: '600',
+                                                    cursor: (!selectedSecondScanMawb || secondScanManifestStatus === 'CLOSED') ? 'not-allowed' : 'pointer',
+                                                    display: 'flex',
+                                                    alignItems: 'center',
+                                                    gap: '4px',
+                                                    boxShadow: '1px 1px 2px 1px rgba(226, 27, 34, 0.3)'
                                                 }}
                                             >
                                                 + Create New Outbound Bag
                                             </button>
-
-                                            {selectedSecondScanMawb && secondScanManifestStatus === 'OPEN' && (
-                                                <button
-                                                    onClick={() => {
-                                                        setCustomConfirmModal({
-                                                            title: "Close Manifest?",
-                                                            message: `Are you sure you want to CLOSE Manifest "${selectedSecondScanMawb}"? Once closed, no additional bags can be created under this manifest.`,
-                                                            onConfirm: () => handleCloseManifest()
-                                                        });
-                                                    }}
-                                                    style={{
-                                                        backgroundColor: '#ffffff',
-                                                        border: '1px solid #d1d5db',
-                                                        color: '#374151',
-                                                        borderRadius: '8px',
-                                                        padding: '10px 14px',
-                                                        fontSize: '12px',
-                                                        fontWeight: '600',
-                                                        cursor: 'pointer'
-                                                    }}
-                                                >
-                                                    🔒 Close Manifest
-                                                </button>
-                                            )}
-                                        </div>
-                                    </div>
-
-                                    {/* Outbound Bags Selector Pills */}
-                                    <div style={{ borderTop: '1px solid #f3f4f6', paddingTop: '12px', marginTop: '4px' }}>
-                                        <div style={{ fontSize: '11px', fontWeight: '700', color: '#6b7280', textTransform: 'uppercase', marginBottom: '8px' }}>
-                                            Outbound LMD Bags for Manifest ({outboundBags.length} Bags):
                                         </div>
                                         <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'center' }}>
                                             {outboundBags.map((bag) => {
                                                 const isActive = activeOutboundBag?.bagNumber === bag.bagNumber;
                                                 const isSealed = bag.status === 'SEALED';
                                                 const partner = bag.targetPartner || 'ALL';
+                                                const pLower = partner.toLowerCase();
 
                                                 const partnerBgColor =
-                                                    partner === 'PickMe' ? '#facc15' :
-                                                        partner === 'Domex' ? '#800020' :
-                                                            partner === 'Pronto' ? '#d97706' : '#4b5563';
+                                                    pLower.includes('pickme') ? '#facc15' :
+                                                        pLower.includes('domex') ? '#7b0f1a' :
+                                                            pLower.includes('pronto') ? '#d97706' : '#4b5563';
 
                                                 const partnerTextColor =
-                                                    partner === 'PickMe' ? '#111827' : '#ffffff';
+                                                    pLower.includes('pickme') ? '#111827' : '#ffffff';
 
                                                 const partnerBorderColor =
-                                                    partner === 'PickMe' ? '#eab308' :
-                                                        partner === 'Domex' ? '#800020' :
-                                                            partner === 'Pronto' ? '#d97706' : '#e21b22';
+                                                    pLower.includes('pickme') ? '#eab308' :
+                                                        pLower.includes('domex') ? '#7b0f1a' :
+                                                            pLower.includes('pronto') ? '#d97706' : '#e21b22';
 
                                                 return (
                                                     <button
@@ -4321,7 +4679,7 @@ export default function WorkstationDashboard() {
                                                         <div style={{ fontSize: '15px', fontWeight: '800', color: '#111827', display: 'flex', alignItems: 'center', gap: '8px' }}>
                                                             <span>{activeOutboundBag.bagNumber}</span>
                                                             <span style={{
-                                                                backgroundColor: activeOutboundBag.targetPartner === 'PickMe' ? '#facc15' : activeOutboundBag.targetPartner === 'Domex' ? '#800020' : activeOutboundBag.targetPartner === 'Pronto' ? '#d97706' : '#4b5563',
+                                                                backgroundColor: activeOutboundBag.targetPartner === 'PickMe' ? '#facc15' : activeOutboundBag.targetPartner === 'Domex' ? '#7b0f1a' : activeOutboundBag.targetPartner === 'Pronto' ? '#d97706' : '#4b5563',
                                                                 color: activeOutboundBag.targetPartner === 'PickMe' ? '#111827' : '#ffffff',
                                                                 fontSize: '10px',
                                                                 fontWeight: '800',
@@ -4426,6 +4784,40 @@ export default function WorkstationDashboard() {
                                                             🖨 Print Bag Label
                                                         </button>
                                                     )}
+
+                                                    <button
+                                                        onClick={() => {
+                                                            if (activeOutboundBag.status === 'SEALED') {
+                                                                setErrorMessage(`Cannot delete sealed bag. Outbound Bag "${activeOutboundBag.bagNumber}" is SEALED & CLOSED.`);
+                                                                setStatus('ERROR');
+                                                                return;
+                                                            }
+                                                            setCustomConfirmModal({
+                                                                title: "Remove Outbound Bag?",
+                                                                message: `Are you sure you want to REMOVE Outbound Bag "${activeOutboundBag.bagNumber}"? This bag will be permanently deleted from this manifest.`,
+                                                                onConfirm: () => handleDeleteOutboundBag(activeOutboundBag.bagNumber)
+                                                            });
+                                                        }}
+                                                        disabled={secondScanManifestStatus === 'CLOSED' || activeOutboundBag.status === 'SEALED'}
+                                                        title={activeOutboundBag.status === 'SEALED' ? 'Sealed bags cannot be deleted or edited' : secondScanManifestStatus === 'CLOSED' ? 'Manifest is closed' : 'Remove Outbound Bag'}
+                                                        style={{
+                                                            backgroundColor: (secondScanManifestStatus === 'CLOSED' || activeOutboundBag.status === 'SEALED') ? '#f3f4f6' : '#ffffff',
+                                                            border: (secondScanManifestStatus === 'CLOSED' || activeOutboundBag.status === 'SEALED') ? '1px solid #e5e7eb' : '1px solid #fca5a5',
+                                                            color: (secondScanManifestStatus === 'CLOSED' || activeOutboundBag.status === 'SEALED') ? '#9ca3af' : '#dc2626',
+                                                            borderRadius: '8px',
+                                                            padding: '0 14px',
+                                                            height: '38px',
+                                                            boxSizing: 'border-box',
+                                                            display: 'inline-flex',
+                                                            alignItems: 'center',
+                                                            gap: '6px',
+                                                            fontSize: '12px',
+                                                            fontWeight: '600',
+                                                            cursor: (secondScanManifestStatus === 'CLOSED' || activeOutboundBag.status === 'SEALED') ? 'not-allowed' : 'pointer'
+                                                        }}
+                                                    >
+                                                        🗑 Remove Bag
+                                                    </button>
                                                 </div>
                                             </div>
                                         )}
@@ -4594,10 +4986,25 @@ export default function WorkstationDashboard() {
                                                     }}>
                                                         <span style={{
                                                             color: validationCard.assignedPartner === 'Domex' || validationCard.assignedPartner === 'Pronto'
-                                                                ? '#222523ff'
+                                                                ? '#ffffff'
                                                                 : '#121414ff'
                                                         }}></span>
-                                                        <span>✓ CORRECT Assigned to Bag <strong>{validationCard.bagNumber}</strong></span>
+                                                        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '4px' }}>
+                                                            <div>✓ CORRECT — Allocated to Bag <strong>{validationCard.bagNumber}</strong></div>
+                                                            {validationCard.parcel?.initialManifest && (
+                                                                <div style={{
+                                                                    fontSize: '11px',
+                                                                    fontWeight: '600',
+                                                                    backgroundColor: 'rgba(255,255,255,0.2)',
+                                                                    padding: '3px 10px',
+                                                                    borderRadius: '4px',
+                                                                    marginTop: '4px',
+                                                                    color: validationCard.assignedPartner === 'Domex' || validationCard.assignedPartner === 'Pronto' ? '#ffffff' : '#111827'
+                                                                }}>
+                                                                    Initial Manifest: <strong>"{validationCard.parcel.initialManifest}"</strong> → {validationCard.bagNumber} ({selectedSecondScanMawb})
+                                                                </div>
+                                                            )}
+                                                        </div>
                                                     </div>
                                                 </div>
                                             </div>
@@ -4631,7 +5038,7 @@ export default function WorkstationDashboard() {
                                 <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px', textAlign: 'left' }}>
                                     <thead>
                                         <tr style={{ borderBottom: '2px solid #e5e7eb' }}>
-                                            {['Tracking no.', 'Consignee', 'LMD Partner', 'Zone', 'Weight (kg)', 'City', 'Validation Status'].map(h => (
+                                            {['Tracking no.', 'Initial Manifest', 'Consignee', 'LMD Partner', 'Zone', 'Weight (kg)', 'City', 'Validation Status'].map(h => (
                                                 <th key={h} style={{ padding: '8px', color: '#6b7280', fontWeight: '600', fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.4px' }}>{h}</th>
                                             ))}
                                         </tr>
@@ -4639,10 +5046,16 @@ export default function WorkstationDashboard() {
                                     <tbody>
                                         {activeOutboundBag?.parcels?.map((parcel: any, idx: number) => {
                                             const partner = (parcel.assignedPartner && parcel.assignedPartner !== 'Unknown') ? parcel.assignedPartner : '-';
+                                            const initManifest = parcel.initialManifest || parcel.mawbRef || '-';
                                             return (
                                                 <tr key={idx} style={{ borderBottom: '1px solid #f3f4f6' }}>
                                                     <td style={{ padding: '8px', fontWeight: '600', color: '#111827' }}>
                                                         {parcel.displayTrackingNumber || (parcel.senderReference ? `${parcel.senderReference} / SKYT-${parcel.trackingNumber}` : `SKYT-${parcel.trackingNumber}`)}
+                                                    </td>
+                                                    <td style={{ padding: '8px', color: '#4b5563', fontSize: '11px', fontWeight: '600' }}>
+                                                        <span style={{ backgroundColor: '#f3f4f6', padding: '2px 6px', borderRadius: '4px', border: '1px solid #e5e7eb' }}>
+                                                            {initManifest}
+                                                        </span>
                                                     </td>
                                                     <td style={{ padding: '8px', color: '#374151' }}>{parcel.recipientName}</td>
                                                     <td style={{ padding: '8px' }}>
@@ -4683,7 +5096,7 @@ export default function WorkstationDashboard() {
                                         })}
                                         {(!activeOutboundBag?.parcels || activeOutboundBag.parcels.length === 0) && (
                                             <tr>
-                                                <td colSpan={7} style={{ padding: '24px 8px', textAlign: 'center', color: '#9ca3af' }}>
+                                                <td colSpan={8} style={{ padding: '24px 8px', textAlign: 'center', color: '#9ca3af' }}>
                                                     No parcels allocated to this outbound bag yet. Scan parcels above to fill bag.
                                                 </td>
                                             </tr>
@@ -5796,7 +6209,7 @@ export default function WorkstationDashboard() {
                                                             <div style={{
                                                                 width: `${rule.weightPercentage}%`,
                                                                 height: '100%',
-                                                                backgroundColor: rule.partnerCode === 'PickMe' ? '#16a34a' : rule.partnerCode === 'Domex' ? '#e53935' : '#f59e0b',
+                                                                backgroundColor: rule.partnerCode === 'PickMe' ? '#16a34a' : rule.partnerCode === 'Domex' ? '#7b0f1a' : '#f59e0b',
                                                                 borderRadius: '3px'
                                                             }} />
                                                         </div>
@@ -6394,7 +6807,7 @@ export default function WorkstationDashboard() {
                                                                                         <td style={{ padding: '10px 8px', fontWeight: '700', color: '#111827' }}>{p.referenceNumber}</td>
                                                                                         <td style={{ padding: '10px 8px', color: '#4b5563', fontFamily: 'monospace', fontSize: '12px' }}>{p.senderReference}</td>
                                                                                         <td style={{ padding: '10px 8px' }}>
-                                                                                            <span style={{ padding: '2px 8px', borderRadius: '4px', fontSize: '11px', fontWeight: '700', backgroundColor: p.deliveryAgentCode === 'PickMe' ? '#fef3c7' : p.deliveryAgentCode === 'Domex' ? '#dbeafe' : p.deliveryAgentCode === 'Pronto' ? '#e0e7ff' : '#f3f4f6', color: p.deliveryAgentCode === 'PickMe' ? '#b45309' : p.deliveryAgentCode === 'Domex' ? '#1d4ed8' : p.deliveryAgentCode === 'Pronto' ? '#4338ca' : '#374151' }}>
+                                                                                            <span style={{ padding: '2px 8px', borderRadius: '4px', fontSize: '11px', fontWeight: '700', backgroundColor: p.deliveryAgentCode === 'PickMe' ? '#fef3c7' : p.deliveryAgentCode === 'Domex' ? '#7b0f1a' : p.deliveryAgentCode === 'Pronto' ? '#e0e7ff' : '#f3f4f6', color: p.deliveryAgentCode === 'PickMe' ? '#b45309' : p.deliveryAgentCode === 'Domex' ? '#ffffff' : p.deliveryAgentCode === 'Pronto' ? '#4338ca' : '#374151' }}>
                                                                                                 {p.deliveryAgentCode}
                                                                                             </span>
                                                                                         </td>
@@ -6797,7 +7210,7 @@ export default function WorkstationDashboard() {
                                                                                     <td style={{ padding: '10px 8px', fontWeight: '800', color: '#111827', fontFamily: 'monospace' }}>{b.bagNumber}</td>
                                                                                     <td style={{ padding: '10px 8px', color: '#374151', fontSize: '12px' }}>{b.mawbRef || '—'}</td>
                                                                                     <td style={{ padding: '10px 8px' }}>
-                                                                                        <span style={{ padding: '2px 8px', borderRadius: '4px', fontSize: '11px', fontWeight: '700', backgroundColor: b.targetPartner === 'PickMe' ? '#fef3c7' : b.targetPartner === 'Domex' ? '#dbeafe' : b.targetPartner === 'Pronto' ? '#e0e7ff' : '#f3f4f6', color: b.targetPartner === 'PickMe' ? '#b45309' : b.targetPartner === 'Domex' ? '#1d4ed8' : b.targetPartner === 'Pronto' ? '#4338ca' : '#374151' }}>
+                                                                                        <span style={{ padding: '2px 8px', borderRadius: '4px', fontSize: '11px', fontWeight: '700', backgroundColor: b.targetPartner === 'PickMe' ? '#fef3c7' : b.targetPartner === 'Domex' ? '#7b0f1a' : b.targetPartner === 'Pronto' ? '#e0e7ff' : '#f3f4f6', color: b.targetPartner === 'PickMe' ? '#b45309' : b.targetPartner === 'Domex' ? '#ffffff' : b.targetPartner === 'Pronto' ? '#4338ca' : '#374151' }}>
                                                                                             {b.targetPartner}
                                                                                         </span>
                                                                                     </td>
@@ -7575,151 +7988,160 @@ export default function WorkstationDashboard() {
             })()}
 
             {/* ── MANIFEST CLOSED SUMMARY MODAL ── */}
-            {manifestClosedModal && (
-                <div style={{
-                    position: 'fixed',
-                    top: 0, left: 0, right: 0, bottom: 0,
-                    backgroundColor: 'rgba(0, 0, 0, 0.65)',
-                    backdropFilter: 'blur(3px)',
-                    display: 'flex', alignItems: 'center', justifyContent: 'center',
-                    zIndex: 3500,
-                    animation: 'fadeIn 0.2s ease-out'
-                }}>
+            {manifestClosedModal && (() => {
+                const rawProvider = manifestClosedModal.provider || getManifestProviderName(manifestClosedModal.mawbRef);
+                const providerDisplay = rawProvider === 'PickMe' ? 'PickMe Express'
+                    : rawProvider === 'Domex' ? 'Domex Express'
+                    : rawProvider === 'Pronto' ? 'Pronto Lanka'
+                    : rawProvider === 'ALL' ? 'General (All Partners)'
+                    : rawProvider;
+
+                return (
                     <div style={{
-                        backgroundColor: '#ffffff',
-                        border: '2px solid #111827',
-                        borderRadius: '14px',
-                        padding: '28px 24px',
-                        width: '480px',
-                        maxWidth: '92%',
-                        boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.25)',
-                        textAlign: 'center'
+                        position: 'fixed',
+                        top: 0, left: 0, right: 0, bottom: 0,
+                        backgroundColor: 'rgba(0, 0, 0, 0.65)',
+                        backdropFilter: 'blur(3px)',
+                        display: 'flex', alignItems: 'center', justifyContent: 'center',
+                        zIndex: 4000,
+                        animation: 'fadeIn 0.2s ease-out'
                     }}>
-                        {/* Lock / Summary Icon */}
                         <div style={{
-                            backgroundColor: '#111827',
-                            color: '#ffffff',
-                            width: '56px', height: '56px',
-                            borderRadius: '50%',
-                            display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-                            marginBottom: '16px',
-                            boxShadow: '0 4px 6px -1px rgba(0,0,0,0.1)'
-                        }}>
-                            <span style={{ fontSize: '26px' }}>🔒</span>
-                        </div>
-
-                        {/* Title */}
-                        <h3 style={{ fontSize: '19px', fontWeight: '800', color: '#111827', margin: '0 0 4px 0' }}>
-                            Manifest Session Closed
-                        </h3>
-                        <div style={{ fontSize: '13px', fontWeight: '700', color: '#e21b22', marginBottom: '18px' }}>
-                            MAWB: {manifestClosedModal.mawbRef}
-                        </div>
-
-                        {/* Operator & Closure Details Card */}
-                        <div style={{
-                            backgroundColor: '#f9fafb',
-                            border: '1px solid #e5e7eb',
-                            borderRadius: '10px',
-                            padding: '14px 16px',
-                            textAlign: 'left',
-                            fontSize: '12px',
-                            marginBottom: '16px',
+                            backgroundColor: '#ffffff',
+                            border: '2px solid #111827',
+                            borderRadius: '12px',
+                            padding: '24px',
+                            width: '460px',
+                            maxWidth: '92%',
+                            boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.25)',
                             display: 'flex',
                             flexDirection: 'column',
-                            gap: '8px'
+                            gap: '16px'
                         }}>
-                            <div style={{ display: 'flex', justifyContent: 'space-between', borderBottom: '1px solid #f3f4f6', paddingBottom: '6px' }}>
-                                <span style={{ color: '#6b7280', fontWeight: '600' }}>Closed By Operator:</span>
-                                <strong style={{ color: '#111827' }}>{manifestClosedModal.closedBy}</strong>
+                            {/* Modal Header */}
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid #e5e7eb', paddingBottom: '10px' }}>
+                                <h3 style={{ fontSize: '16px', fontWeight: '800', color: '#111827', margin: 0, display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                    <span>🔒</span>
+                                    <span>Manifest Session Closed</span>
+                                </h3>
+                                <button onClick={() => setManifestClosedModal(null)} style={{ background: 'none', border: 'none', fontSize: '18px', cursor: 'pointer', color: '#6b7280', fontWeight: 'bold' }}>✕</button>
                             </div>
-                            <div style={{ display: 'flex', justifyContent: 'space-between', borderBottom: '1px solid #f3f4f6', paddingBottom: '6px' }}>
-                                <span style={{ color: '#6b7280', fontWeight: '600' }}>Closed Timestamp:</span>
-                                <strong style={{ color: '#374151' }}>{manifestClosedModal.closedAt}</strong>
+
+                            {/* MAWB Reference Banner */}
+                            <div style={{ backgroundColor: '#fef2f2', border: '1px solid #fca5a5', borderRadius: '8px', padding: '10px 14px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                <div>
+                                    <div style={{ fontSize: '10px', fontWeight: '800', color: '#991b1b', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+                                        OUTBOUND MANIFEST MAWB
+                                    </div>
+                                    <div style={{ fontSize: '15px', fontWeight: '900', color: '#e21b22', fontFamily: 'monospace', marginTop: '2px' }}>
+                                        {manifestClosedModal.mawbRef}
+                                    </div>
+                                </div>
+                                <span style={{ backgroundColor: '#e21b22', color: '#ffffff', fontSize: '10px', fontWeight: '800', padding: '3px 8px', borderRadius: '4px', textTransform: 'uppercase' }}>
+                                    CLOSED
+                                </span>
                             </div>
-                            <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                                <span style={{ color: '#6b7280', fontWeight: '600' }}>Total Manifest Volume:</span>
-                                <strong style={{ color: '#111827' }}>
-                                    {manifestClosedModal.totalBags} Bags | {manifestClosedModal.totalParcels} Parcels ({manifestClosedModal.totalWeight} kg)
-                                </strong>
+
+                            {/* Main Details Body */}
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                                {/* Dedicated Service Provider Card */}
+                                <div style={{
+                                    backgroundColor: providerDisplay.includes('PickMe') ? '#fefce8' : providerDisplay.includes('Domex') ? '#fff1f2' : providerDisplay.includes('Pronto') ? '#fff7ed' : '#f3f4f6',
+                                    border: `1px solid ${providerDisplay.includes('PickMe') ? '#fef08a' : providerDisplay.includes('Domex') ? '#fecdd3' : providerDisplay.includes('Pronto') ? '#fed7aa' : '#e5e7eb'}`,
+                                    borderRadius: '8px',
+                                    padding: '12px 14px',
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    justifyContent: 'space-between'
+                                }}>
+                                    <div>
+                                        <div style={{ fontSize: '10px', fontWeight: '800', color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+                                            Service Provider / LMD Partner
+                                        </div>
+                                        <div style={{
+                                            fontSize: '16px',
+                                            fontWeight: '900',
+                                            color: providerDisplay.includes('PickMe') ? '#713f12' : providerDisplay.includes('Domex') ? '#881337' : providerDisplay.includes('Pronto') ? '#9a3412' : '#111827',
+                                            marginTop: '2px'
+                                        }}>
+                                            {providerDisplay}
+                                        </div>
+                                    </div>
+                                    <div style={{ fontSize: '24px' }}>
+                                        {providerDisplay.includes('PickMe') ? '🚕' : providerDisplay.includes('Domex') ? '🚚' : providerDisplay.includes('Pronto') ? '📦' : '🏢'}
+                                    </div>
+                                </div>
+
+                                {/* Session Operator & Timestamp Info Card */}
+                                <div style={{ backgroundColor: '#f9fafb', border: '1px solid #e5e7eb', borderRadius: '8px', padding: '12px 14px', display: 'flex', flexDirection: 'column', gap: '8px', fontSize: '12px' }}>
+                                    <div style={{ display: 'flex', justifyContent: 'space-between', borderBottom: '1px solid #f3f4f6', paddingBottom: '6px' }}>
+                                        <span style={{ color: '#6b7280', fontWeight: '600' }}>Closed By Operator:</span>
+                                        <strong style={{ color: '#111827' }}>{manifestClosedModal.closedBy}</strong>
+                                    </div>
+                                    <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                                        <span style={{ color: '#6b7280', fontWeight: '600' }}>Closed Timestamp:</span>
+                                        <strong style={{ color: '#374151' }}>{manifestClosedModal.closedAt}</strong>
+                                    </div>
+                                </div>
+
+                                {/* Volume Stats Grid */}
+                                <div style={{
+                                    backgroundColor: '#ffffff',
+                                    border: '1px solid #d1d5db',
+                                    borderRadius: '8px',
+                                    padding: '12px',
+                                    display: 'grid',
+                                    gridTemplateColumns: '1fr 1fr 1fr',
+                                    gap: '8px',
+                                    textAlign: 'center'
+                                }}>
+                                    <div>
+                                        <div style={{ fontSize: '10px', fontWeight: '700', color: '#6b7280', textTransform: 'uppercase' }}>Total Bags</div>
+                                        <div style={{ fontSize: '17px', fontWeight: '900', color: '#111827', marginTop: '2px' }}>
+                                            {manifestClosedModal.totalBags}
+                                        </div>
+                                    </div>
+                                    <div style={{ borderLeft: '1px solid #e5e7eb', borderRight: '1px solid #e5e7eb' }}>
+                                        <div style={{ fontSize: '10px', fontWeight: '700', color: '#6b7280', textTransform: 'uppercase' }}>Total Parcels</div>
+                                        <div style={{ fontSize: '17px', fontWeight: '900', color: '#047857', marginTop: '2px' }}>
+                                            {manifestClosedModal.totalParcels}
+                                        </div>
+                                    </div>
+                                    <div>
+                                        <div style={{ fontSize: '10px', fontWeight: '700', color: '#6b7280', textTransform: 'uppercase' }}>Total Weight</div>
+                                        <div style={{ fontSize: '17px', fontWeight: '900', color: '#e21b22', marginTop: '2px' }}>
+                                            {manifestClosedModal.totalWeight} <span style={{ fontSize: '11px', fontWeight: '700' }}>kg</span>
+                                        </div>
+                                    </div>
+                                </div>
                             </div>
+
+                            {/* Action Button */}
+                            <button
+                                autoFocus
+                                onClick={() => setManifestClosedModal(null)}
+                                style={{
+                                    backgroundColor: '#e21b22',
+                                    color: '#ffffff',
+                                    border: 'none',
+                                    borderRadius: '8px',
+                                    padding: '12px 24px',
+                                    fontSize: '14px',
+                                    fontWeight: '700',
+                                    width: '100%',
+                                    cursor: 'pointer',
+                                    transition: 'all 0.15s ease',
+                                    boxShadow: '0 2px 4px rgba(0, 0, 0, 0.1)'
+                                }}
+                                onMouseOver={(e) => { e.currentTarget.style.backgroundColor = '#b91c1c'; }}
+                                onMouseOut={(e) => { e.currentTarget.style.backgroundColor = '#e21b22'; }}
+                            >
+                                Acknowledge &amp; Finish Session (Press Enter)
+                            </button>
                         </div>
-
-                        {/* Courier Partner Bag Breakdown Header */}
-                        <div style={{ fontSize: '11px', fontWeight: '800', color: '#4b5563', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '8px', textAlign: 'left' }}>
-                            Outbound LMD Bags Summary Breakdown:
-                        </div>
-
-                        {/* Partner Grid Cards */}
-                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px', marginBottom: '20px' }}>
-                            {/* PickMe Card */}
-                            <div style={{ backgroundColor: '#fefce8', border: '1px solid #fef08a', borderRadius: '8px', padding: '10px 12px', textAlign: 'left' }}>
-                                <div style={{ fontSize: '10px', fontWeight: '800', color: '#854d0e', textTransform: 'uppercase' }}>PickMe</div>
-                                <div style={{ fontSize: '14px', fontWeight: '900', color: '#713f12', marginTop: '2px' }}>
-                                    {manifestClosedModal.pickmeBags} <span style={{ fontSize: '11px', fontWeight: '700' }}>Bags</span>
-                                </div>
-                                <div style={{ fontSize: '11px', fontWeight: '700', color: '#a16207' }}>
-                                    {manifestClosedModal.pickmeParcels} Parcels
-                                </div>
-                            </div>
-
-                            {/* Domex Card */}
-                            <div style={{ backgroundColor: '#fff1f2', border: '1px solid #fecdd3', borderRadius: '8px', padding: '10px 12px', textAlign: 'left' }}>
-                                <div style={{ fontSize: '10px', fontWeight: '800', color: '#881337', textTransform: 'uppercase' }}>Domex</div>
-                                <div style={{ fontSize: '14px', fontWeight: '900', color: '#881337', marginTop: '2px' }}>
-                                    {manifestClosedModal.domexBags} <span style={{ fontSize: '11px', fontWeight: '700' }}>Bags</span>
-                                </div>
-                                <div style={{ fontSize: '11px', fontWeight: '700', color: '#9f1239' }}>
-                                    {manifestClosedModal.domexParcels} Parcels
-                                </div>
-                            </div>
-
-                            {/* Pronto Card */}
-                            <div style={{ backgroundColor: '#fff7ed', border: '1px solid #fed7aa', borderRadius: '8px', padding: '10px 12px', textAlign: 'left' }}>
-                                <div style={{ fontSize: '10px', fontWeight: '800', color: '#9a3412', textTransform: 'uppercase' }}>Pronto</div>
-                                <div style={{ fontSize: '14px', fontWeight: '900', color: '#9a3412', marginTop: '2px' }}>
-                                    {manifestClosedModal.prontoBags} <span style={{ fontSize: '11px', fontWeight: '700' }}>Bags</span>
-                                </div>
-                                <div style={{ fontSize: '11px', fontWeight: '700', color: '#c2410c' }}>
-                                    {manifestClosedModal.prontoParcels} Parcels
-                                </div>
-                            </div>
-
-                            {/* General / ALL Card */}
-                            <div style={{ backgroundColor: '#f3f4f6', border: '1px solid #e5e7eb', borderRadius: '8px', padding: '10px 12px', textAlign: 'left' }}>
-                                <div style={{ fontSize: '10px', fontWeight: '800', color: '#374151', textTransform: 'uppercase' }}>General (ALL)</div>
-                                <div style={{ fontSize: '14px', fontWeight: '900', color: '#111827', marginTop: '2px' }}>
-                                    {manifestClosedModal.generalBags} <span style={{ fontSize: '11px', fontWeight: '700' }}>Bags</span>
-                                </div>
-                                <div style={{ fontSize: '11px', fontWeight: '700', color: '#4b5563' }}>
-                                    {manifestClosedModal.generalParcels} Parcels
-                                </div>
-                            </div>
-                        </div>
-                        {/* Dismiss Action Button */}
-                        <button
-                            onClick={() => setManifestClosedModal(null)}
-                            style={{
-                                backgroundColor: '#e21b22',
-                                color: '#ffffff',
-                                border: 'none',
-                                borderRadius: '8px',
-                                padding: '12px 24px',
-                                fontSize: '14px',
-                                fontWeight: '700',
-                                width: '100%',
-                                cursor: 'pointer',
-                                transition: 'all 0.15s ease',
-                                boxShadow: '0 2px 4px rgba(0, 0, 0, 0.1)'
-                            }}
-                            onMouseOver={(e) => { e.currentTarget.style.backgroundColor = '#b91c1c'; }}
-                            onMouseOut={(e) => { e.currentTarget.style.backgroundColor = '#e21b22'; }}
-                        >
-                            Acknowledge &amp; Finish Session (Press Enter)
-                        </button>
                     </div>
-                </div>
-            )}
+                );
+            })()}
 
             {/* ── CONFIRM FINISH MODAL ── */}
             {confirmFinishModal && (() => {
@@ -9222,6 +9644,283 @@ export default function WorkstationDashboard() {
                                 }}
                             >
                                 Close (Esc)
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* ── MANIFEST & PARTNER MISMATCH EXCEPTION MODAL (EXACT MATCHING DESIGN) ── */}
+            {partnerMismatchModal && (
+                <div style={{
+                    position: 'fixed',
+                    top: 0, left: 0, right: 0, bottom: 0,
+                    backgroundColor: 'rgba(0, 0, 0, 0.6)',
+                    backdropFilter: 'blur(3px)',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    zIndex: 9999,
+                    animation: 'fadeIn 0.2s ease-out'
+                }}>
+                    <div style={{
+                        backgroundColor: '#ffffff',
+                        border: '2px solid #e21b22',
+                        borderRadius: '12px',
+                        padding: '30px 24px',
+                        width: '460px',
+                        maxWidth: '90%',
+                        boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.15)',
+                        textAlign: 'center'
+                    }}>
+                        {/* Warning Icon */}
+                        <div style={{
+                            backgroundColor: '#fee2e2',
+                            color: '#e21b22',
+                            width: '56px', height: '56px',
+                            borderRadius: '50%',
+                            display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                            marginBottom: '20px'
+                        }}>
+                            <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                                <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
+                                <line x1="12" y1="9" x2="12" y2="13" />
+                                <line x1="12" y1="17" x2="12.01" y2="17" />
+                            </svg>
+                        </div>
+
+                        {/* Title */}
+                        <h3 style={{ fontSize: '18px', fontWeight: '700', color: '#111827', margin: '0 0 10px 0' }}>
+                            Partner Mismatch !
+                        </h3>
+
+                        {/* Content Message */}
+                        <p style={{ fontSize: '14px', color: '#4b5563', lineHeight: '1.6', margin: '0 0 24px 0' }}>
+                            {partnerMismatchModal.message}
+                        </p>
+
+                        {/* Action Button */}
+                        <div style={{ display: 'flex', gap: '10px' }}>
+                            <button
+                                onClick={() => {
+                                    setPartnerMismatchModal(null);
+                                    setTimeout(() => {
+                                        scanInputRef.current?.focus();
+                                    }, 50);
+                                }}
+                                style={{
+                                    flex: 1,
+                                    backgroundColor: '#e21b22',
+                                    color: '#ffffff',
+                                    border: 'none',
+                                    borderRadius: '8px',
+                                    padding: '12px 18px',
+                                    fontSize: '14px',
+                                    fontWeight: '600',
+                                    cursor: 'pointer',
+                                    transition: 'all 0.15s ease'
+                                }}
+                            >
+                                OK (Enter/Space)
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* ── OPEN BAGS CANNOT CLOSE MANIFEST POPUP MODAL ── */}
+            {openBagsErrorModal && (
+                <div style={{
+                    position: 'fixed',
+                    top: 0, left: 0, right: 0, bottom: 0,
+                    backgroundColor: 'rgba(0, 0, 0, 0.65)',
+                    backdropFilter: 'blur(3px)',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    zIndex: 9999,
+                    animation: 'fadeIn 0.2s ease-out'
+                }}>
+                    <div style={{
+                        backgroundColor: '#ffffff',
+                        border: '2px solid #e21b22',
+                        borderRadius: '12px',
+                        padding: '28px 24px',
+                        width: '480px',
+                        maxWidth: '92%',
+                        boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.2)',
+                        textAlign: 'center'
+                    }}>
+                        {/* Warning Icon */}
+                        <div style={{
+                            backgroundColor: '#fee2e2',
+                            color: '#e21b22',
+                            width: '56px', height: '56px',
+                            borderRadius: '50%',
+                            display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                            margin: '0 auto 16px auto'
+                        }}>
+                            <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                                <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
+                                <line x1="12" y1="9" x2="12" y2="13" />
+                                <line x1="12" y1="17" x2="12.01" y2="17" />
+                            </svg>
+                        </div>
+
+                        {/* Title */}
+                        <h3 style={{ fontSize: '18px', fontWeight: '800', color: '#111827', margin: '0 0 6px 0' }}>
+                            Cannot Close Outbound Manifest!
+                        </h3>
+
+                        {/* Subtitle */}
+                        <div style={{ fontSize: '13px', color: '#4b5563', marginBottom: '16px', fontWeight: '600' }}>
+                            Manifest: <span style={{ color: '#e21b22', fontWeight: '800' }}>{openBagsErrorModal.manifestRef}</span>
+                        </div>
+
+                        {/* Warning Box with Bag Numbers */}
+                        <div style={{
+                            backgroundColor: '#fef2f2',
+                            border: '1px solid #fca5a5',
+                            borderRadius: '8px',
+                            padding: '14px',
+                            marginBottom: '20px',
+                            textAlign: 'left'
+                        }}>
+                            <div style={{ fontSize: '12px', fontWeight: '700', color: '#991b1b', textTransform: 'uppercase', marginBottom: '8px' }}>
+                                The following bag(s) under this manifest are still OPEN:
+                            </div>
+                            <div style={{ maxHeight: '140px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                                {openBagsErrorModal.openBags.map((bagNum, idx) => (
+                                    <div key={idx} style={{
+                                        backgroundColor: '#ffffff',
+                                        border: '1px solid #f87171',
+                                        borderRadius: '6px',
+                                        padding: '7px 10px',
+                                        fontSize: '12px',
+                                        fontWeight: '800',
+                                        color: '#dc2626',
+                                        fontFamily: 'monospace',
+                                        display: 'flex',
+                                        alignItems: 'center',
+                                        gap: '6px'
+                                    }}>
+                                        <span>{bagNum}</span>
+                                        <span style={{ marginLeft: 'auto', fontSize: '10px', backgroundColor: '#ffffff', color: '#dc2626', padding: '2px 6px', borderRadius: '4px', fontWeight: '700' }}>OPEN</span>
+                                    </div>
+                                ))}
+                            </div>
+                            <div style={{ fontSize: '11px', color: '#7f1d1d', marginTop: '10px', fontWeight: '600' }}>
+                                Please seal and close all open bags under this manifest before closing the manifest.
+                            </div>
+                        </div>
+
+                        {/* Action Button */}
+                        <button
+                            onClick={() => setOpenBagsErrorModal(null)}
+                            style={{
+                                width: '100%',
+                                backgroundColor: '#e21b22',
+                                color: '#ffffff',
+                                border: 'none',
+                                borderRadius: '8px',
+                                padding: '12px',
+                                fontSize: '14px',
+                                fontWeight: '700',
+                                cursor: 'pointer'
+                            }}
+                        >
+                            OK, Got It
+                        </button>
+                    </div>
+                </div>
+            )}
+
+            {/* ── CREATE OUTBOUND MANIFEST MODAL ── */}
+            {createManifestModalOpen && (
+                <div style={{
+                    position: 'fixed',
+                    top: 0, left: 0, right: 0, bottom: 0,
+                    backgroundColor: 'rgba(0, 0, 0, 0.65)',
+                    backdropFilter: 'blur(3px)',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    zIndex: 4000
+                }}>
+                    <div style={{
+                        backgroundColor: '#ffffff',
+                        border: '2px solid #111827',
+                        borderRadius: '12px',
+                        padding: '24px',
+                        width: '440px',
+                        maxWidth: '92%',
+                        boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.25)',
+                        display: 'flex',
+                        flexDirection: 'column',
+                        gap: '16px'
+                    }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid #e5e7eb', paddingBottom: '10px' }}>
+                            <h3 style={{ fontSize: '16px', fontWeight: '800', color: '#111827', margin: 0, display: 'flex', alignItems: 'center', gap: '6px' }}>
+                                <span>Create New Outbound Manifest</span>
+                            </h3>
+                            <button onClick={() => setCreateManifestModalOpen(false)} style={{ background: 'none', border: 'none', fontSize: '18px', cursor: 'pointer', color: '#6b7280', fontWeight: 'bold' }}>✕</button>
+                        </div>
+
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+                            <div>
+                                <label style={{ fontSize: '12px', fontWeight: '800', color: '#374151', display: 'block', marginBottom: '6px' }}>
+                                    Select Service Provider / LMD Partner:
+                                </label>
+                                <select
+                                    value={selectedProviderForManifest}
+                                    onChange={(e: any) => setSelectedProviderForManifest(e.target.value)}
+                                    style={{ ...inputStyle, width: '100%', fontWeight: '700', padding: '10px' }}
+                                >
+                                    <option value="PickMe">PickMe Express</option>
+                                    <option value="Domex">Domex Express</option>
+                                    <option value="Pronto">Pronto Lanka</option>
+                                </select>
+                            </div>
+
+                            <div style={{ backgroundColor: '#f9fafb', border: '1px border #e5e7eb', borderRadius: '8px', padding: '12px 14px' }}>
+                                <div style={{ fontSize: '11px', fontWeight: '700', color: '#6b7280', textTransform: 'uppercase', marginBottom: '4px' }}>
+                                    Manifest Code Format Preview:
+                                </div>
+                                <div style={{ fontSize: '15px', fontWeight: '800', color: '#e21b22', fontFamily: 'monospace' }}>
+                                    LK-{selectedProviderForManifest.toUpperCase()}-07082026-01
+                                </div>
+                                <div style={{ fontSize: '11px', color: '#6b7280', marginTop: '4px' }}>
+                                    Sequence suffix (-01, -02) will automatically calculate based on existing manifests for today.
+                                </div>
+                            </div>
+                        </div>
+
+                        <div style={{ display: 'flex', gap: '10px', marginTop: '10px' }}>
+                            <button
+                                onClick={handleCreateOutboundManifest}
+                                style={{
+                                    flex: 1,
+                                    backgroundColor: '#111827',
+                                    color: '#ffffff',
+                                    border: 'none',
+                                    borderRadius: '8px',
+                                    padding: '12px',
+                                    fontSize: '13px',
+                                    fontWeight: '800',
+                                    cursor: 'pointer'
+                                }}
+                            >
+                                Generate & Open Manifest
+                            </button>
+                            <button
+                                onClick={() => setCreateManifestModalOpen(false)}
+                                style={{
+                                    flex: 1,
+                                    backgroundColor: '#ffffff',
+                                    border: '1px solid #d1d5db',
+                                    color: '#374151',
+                                    borderRadius: '8px',
+                                    padding: '12px',
+                                    fontSize: '13px',
+                                    fontWeight: '600',
+                                    cursor: 'pointer'
+                                }}
+                            >
+                                Cancel
                             </button>
                         </div>
                     </div>

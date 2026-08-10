@@ -118,7 +118,7 @@ export async function GET(request: Request) {
         // 2. SEARCH OUTBOUND LMD BAGS (By Bag Number, MAWB Ref, or Destination Hub)
         try {
             const bagRes = await fetch(
-                `${sb.url}/rest/v1/outbound_lmd_bags?or=(bag_number.ilike.*${cleanQ}*,mawb_ref.ilike.*${cleanQ}*,destination_hub.ilike.*${cleanQ}*)&order=created_at.desc&limit=30`,
+                `${sb.url}/rest/v1/outbound_lmd_bags?or=(bag_number.ilike.*${cleanQ}*,mawb_ref.ilike.*${cleanQ}*,destination_hub.ilike.*${cleanQ}*)&order=created_at.desc&limit=30&select=*,outbound_manifests(id,manifest_reference)`,
                 { headers: sb.headers }
             );
             if (bagRes.ok) {
@@ -130,10 +130,13 @@ export async function GET(request: Request) {
                         else if (typeof b.parcels === 'string') {
                             try { parsedParcels = JSON.parse(b.parcels); } catch (e) { parsedParcels = []; }
                         }
+                        // Resolve manifest reference: prefer FK join, fallback to legacy mawb_ref
+                        const joinedManifest = b.outbound_manifests;
+                        const resolvedMawbRef = joinedManifest?.manifest_reference || b.mawb_ref || '';
                         return {
                             id: b.id,
                             bagNumber: b.bag_number,
-                            mawbRef: b.mawb_ref,
+                            mawbRef: resolvedMawbRef,
                             targetPartner: b.target_partner || 'ALL',
                             destinationHub: b.destination_hub,
                             status: b.status,

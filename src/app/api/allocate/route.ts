@@ -586,15 +586,18 @@ export async function POST(request: Request) {
         // ═══════════════════════════════════════════════════════
         // Always fetch FRESH shipment data from DB for Stage 2 — do NOT reuse
         // resolvedShipment which was fetched before any Stage 1 update ran.
-        const [spaRes, freshShipRes] = await Promise.all([
+        const [spaRes, freshShipRes, lmdBagItemRes] = await Promise.all([
             fetch(`${supabaseUrl}/rest/v1/service_provider_allocation?shipment_ref=eq.${shipmentRef}`, { headers }),
-            fetch(`${supabaseUrl}/rest/v1/shipments?reference_number=eq.${encodeURIComponent(shipmentRef)}`, { headers })
+            fetch(`${supabaseUrl}/rest/v1/shipments?reference_number=eq.${encodeURIComponent(shipmentRef)}`, { headers }),
+            fetch(`${supabaseUrl}/rest/v1/outbound_lmd_bag_items?shipment_ref=eq.${encodeURIComponent(shipmentRef)}`, { headers })
         ]);
 
         const allocations = await spaRes.json();
         const freshShipData = await freshShipRes.json();
+        const lmdBagItems = await lmdBagItemRes.json();
         // Use fresh DB row for shipment details (scan status is checked via allocation below)
         const shipment = (freshShipData && freshShipData[0]) || resolvedShipment;
+        const existingLmdBag = Array.isArray(lmdBagItems) && lmdBagItems.length > 0 ? lmdBagItems[0].bag_number : null;
 
         if (!shipment) {
             return NextResponse.json({
@@ -618,16 +621,12 @@ export async function POST(request: Request) {
         // Flag parcels that bypassed 1st scan
         missedFirstScan = !firstScanConfirmed;
 
-
-
-
-
         // 2. Concurrently resolve details (parallelized step 2 with cache fallbacks)
         const spId = allocation?.service_provider;
         const mappedCityId = allocation?.mapped_city;
         let cityName = shipment.consignee_location_name || "";
         let districtName = shipment.consignee_address_3 || "";
-        const mawbRefVal = allocation?.mawb_ref;
+        const mawbRefVal = allocation?.mawb_ref || shipment.mawb_reference || shipment.mawb_ref;
 
         const cityPromise = mappedCityId
             ? (cache.cities.has(mappedCityId)
@@ -714,6 +713,8 @@ export async function POST(request: Request) {
             else if (assignedPartner.toLowerCase().includes('pronto')) assignedPartner = 'Pronto';
         }
 
+        const initialManifestRef = allocation?.mawb_ref || shipment.mawb_reference || shipment.mawb_ref || mawbRefVal || "Initial Manifest";
+
         const skynetData: SkyNetParcelData = {
             trackingNumber: shipment.reference_number.toString(),
             recipientName: shipment.consignee_name || "Unknown Recipient",
@@ -741,7 +742,7 @@ export async function POST(request: Request) {
             account: shipment.shipper_code || undefined,
             apiSync: allocation?.validated ? "Validated" : "Pending",
             goodsDesc: shipment.goods_desc || undefined,
-            mawbRef: allocation?.mawb_ref || undefined,
+            mawbRef: initialManifestRef,
             mawbCarrier: mawbDetails ? mawbDetails.carrier : undefined,
             mawbFlight: mawbDetails ? mawbDetails.travel_id : undefined,
             mawbBags: mawbDetails ? mawbDetails.declared_bags : undefined,
@@ -765,13 +766,13 @@ export async function POST(request: Request) {
             validationError = 'This parcel has not completed the 1st scan (Box Unsealing). Please perform the 1st scan first before proceeding to LMD Verification.';
         }
 
-        // 1. Manifest Mismatch Check
+        // 1. DEDUPLICATION CHECK (once allocated to an LMD bag / manifest, it CANNOT be allocated again)
         if (validationStatus === 'CORRECT') {
-            const parcelMawb = allocation?.mawb_ref || shipment?.mawb_reference || shipment?.mawb_ref;
-            if (targetMawb && parcelMawb && parcelMawb.trim().toLowerCase() !== targetMawb.trim().toLowerCase()) {
+            if (existingLmdBag || allocation?.scan_status === '2ND_SCAN_DONE') {
+                const bagRefMsg = existingLmdBag ? `to LMD Bag "${existingLmdBag}"` : `to an LMD Bag`;
                 validationStatus = 'INCORRECT';
-                validationReason = 'MANIFEST_MISMATCH';
-                validationError = `Manifest Mismatch: Parcel belongs to Manifest "${parcelMawb}", not selected Manifest "${targetMawb}".`;
+                validationReason = 'DUPLICATE';
+                validationError = `Already Scanned!! Parcel "${shipmentRef}" has ALREADY been allocated ${bagRefMsg} and cannot be allocated again.`;
             }
         }
 
@@ -788,17 +789,22 @@ export async function POST(request: Request) {
             }
         }
 
-        if (validationStatus === 'CORRECT' && allocation && allocation.id) {
-            // Mark 2nd scan done on service_provider_allocation (source of truth)
-            fetch(`${supabaseUrl}/rest/v1/service_provider_allocation?id=eq.${allocation.id}`, {
-                method: 'PATCH',
-                headers: { ...headers, "Content-Type": "application/json" },
-                body: JSON.stringify({
-                    validated: true,
-                    scan_status: '2ND_SCAN_DONE',
-                    updated_at: new Date().toISOString()
-                })
-            }).catch(e => console.error("Failed to update allocation to 2ND_SCAN_DONE:", e));
+        if (validationStatus === 'CORRECT') {
+            const allocationLogMsg = `[LMD ALLOCATION LOG] Parcel "${shipmentRef}" (Initial Manifest: "${initialManifestRef}") allocated to Bag "${outboundBagNumber || 'Active Bag'}" under LMD Manifest "${targetMawb || 'LMD Manifest'}".`;
+            console.log(allocationLogMsg);
+
+            if (allocation && allocation.id) {
+                // Mark 2nd scan done on service_provider_allocation (source of truth)
+                fetch(`${supabaseUrl}/rest/v1/service_provider_allocation?id=eq.${allocation.id}`, {
+                    method: 'PATCH',
+                    headers: { ...headers, "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                        validated: true,
+                        scan_status: '2ND_SCAN_DONE',
+                        updated_at: new Date().toISOString()
+                    })
+                }).catch(e => console.error("Failed to update allocation to 2ND_SCAN_DONE:", e));
+            }
         }
 
         return NextResponse.json({
@@ -806,10 +812,17 @@ export async function POST(request: Request) {
             validation: validationStatus,
             reason: validationReason,
             error: validationError,
-            parcel: skynetData,
+            parcel: {
+                ...skynetData,
+                initialManifest: initialManifestRef
+            },
             assignedZone,
             assignedPartner,
-            missedFirstScan
+            missedFirstScan,
+            initialManifest: initialManifestRef,
+            targetMawb,
+            outboundBagNumber,
+            allocationLog: `Parcel "${shipmentRef}" (Initial Manifest: "${initialManifestRef}") allocated to Bag "${outboundBagNumber || 'Active Bag'}" under LMD Manifest "${targetMawb || 'LMD Manifest'}"`
         });
 
     } catch (error: any) {
