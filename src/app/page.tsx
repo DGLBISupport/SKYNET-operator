@@ -353,6 +353,27 @@ export default function WorkstationDashboard() {
         totalParcels: number;
         totalWeight: number;
     } | null>(null);
+    const [manifestProgressModal, setManifestProgressModal] = useState<{
+        mawbRef: string;
+        closedBy: string;
+        closedAt: string;
+        provider: string;
+        totalBags: number;
+        totalParcels: number;
+        processedParcels: number;
+        status: 'initializing' | 'enriching' | 'ffdx_uploading' | 'completed' | 'error';
+        currentBagNumber?: string;
+        currentParcelRef?: string;
+        bags: Array<{
+            bagNumber: string;
+            parcelCount: number;
+            status: 'pending' | 'processing' | 'done';
+            parcels: Array<{ trackingNumber: string; status: 'pending' | 'enriching' | 'ok' | 'skipped' | 'error'; message?: string }>;
+        }>;
+        expandedBags: Record<string, boolean>;
+        error?: string;
+        summary?: { totalBags: number; totalParcels: number; uploaded: number; errors: number; ffdxError?: string };
+    } | null>(null);
     const [confirmFinishModal, setConfirmFinishModal] = useState(false);
     const [successModal, setSuccessModal] = useState<{ title: string; message: string } | null>(null);
     const [unallocatedPartnerModal, setUnallocatedPartnerModal] = useState<{ trackingNumber: string } | null>(null);
@@ -1896,16 +1917,37 @@ export default function WorkstationDashboard() {
     };
 
     useEffect(() => {
-        if (activeTab === 'second-scan') {
+        if (activeTab === 'second-scan' || createManifestModalOpen) {
             fetchOutboundManifests();
         }
-    }, [activeTab]);
+    }, [activeTab, createManifestModalOpen]);
 
     useEffect(() => {
         if (selectedSecondScanMawb) {
             fetchOutboundBags(selectedSecondScanMawb);
         }
     }, [selectedSecondScanMawb]);
+
+    const getNextManifestPreviewCode = (provider: string) => {
+        const providerCode = provider.toUpperCase().replace(/\s+/g, '');
+        const today = new Date();
+        const dd = String(today.getDate()).padStart(2, '0');
+        const mm = String(today.getMonth() + 1).padStart(2, '0');
+        const yyyy = today.getFullYear();
+        const prefixPattern = `LK-${providerCode}-${dd}${mm}${yyyy}-`;
+
+        const seqs = outboundManifestsList
+            .map(m => m.manifest_reference || '')
+            .filter(ref => ref.toUpperCase().startsWith(prefixPattern.toUpperCase()))
+            .map(ref => {
+                const parts = ref.split('-');
+                const num = parseInt(parts[parts.length - 1], 10);
+                return isNaN(num) ? 0 : num;
+            });
+
+        const nextSeq = seqs.length > 0 ? Math.max(...seqs, 0) + 1 : 1;
+        return `${prefixPattern}${String(nextSeq).padStart(2, '0')}`;
+    };
 
     const handleCreateOutboundManifest = async () => {
         try {
@@ -2024,12 +2066,6 @@ export default function WorkstationDashboard() {
             ? `${currentUser.firstName || ''} ${currentUser.lastName || ''}`.trim() || currentUser.username || currentUser.email
             : 'Staff';
 
-        let pickmeBags = 0, pickmeParcels = 0;
-        let domexBags = 0, domexParcels = 0;
-        let prontoBags = 0, prontoParcels = 0;
-        let generalBags = 0, generalParcels = 0;
-        let totalParcels = 0, totalWeight = 0;
-
         const relevantBags = (outboundBags || []).filter(b => !mawbToClose || (b.mawbRef || '').toLowerCase() === mawbToClose.toLowerCase());
 
         const openBags = relevantBags.filter(b => b.status === 'OPEN' || b.status !== 'SEALED');
@@ -2041,79 +2077,140 @@ export default function WorkstationDashboard() {
             return;
         }
 
-        relevantBags.forEach((b) => {
-            const bn = (b.bagNumber || '').toUpperCase();
-            const p = b.targetPartner || (bn.includes('PICKME') ? 'PickMe' : bn.includes('DOMEX') ? 'Domex' : bn.includes('PRONTO') ? 'Pronto' : 'ALL');
-            const count = b.parcelCount || (b.parcels ? b.parcels.length : 0);
-            const w = b.totalWeight || 0;
+        const providerCode = getManifestProviderName(mawbToClose);
+        const providerDisplay = providerCode === 'PickMe' ? 'PickMe Express'
+            : providerCode === 'Domex' ? 'Domex Express'
+            : providerCode === 'Pronto' ? 'Pronto Lanka'
+            : providerCode === 'ALL' ? 'General (All Partners)'
+            : providerCode;
 
-            totalParcels += count;
-            totalWeight += w;
-
-            if (p === 'PickMe' || bn.includes('PICKME')) {
-                pickmeBags += 1;
-                pickmeParcels += count;
-            } else if (p === 'Domex' || bn.includes('DOMEX')) {
-                domexBags += 1;
-                domexParcels += count;
-            } else if (p === 'Pronto' || bn.includes('PRONTO')) {
-                prontoBags += 1;
-                prontoParcels += count;
-            } else {
-                generalBags += 1;
-                generalParcels += count;
-            }
+        // Initialize progress modal state
+        setManifestProgressModal({
+            mawbRef: mawbToClose,
+            closedBy: activeOperator,
+            closedAt: new Date().toLocaleTimeString(),
+            provider: providerDisplay,
+            totalBags: relevantBags.length,
+            totalParcels: relevantBags.reduce((s, b) => s + (b.parcelCount || (b.parcels?.length || 0)), 0),
+            processedParcels: 0,
+            status: 'initializing',
+            bags: relevantBags.map(b => ({
+                bagNumber: b.bagNumber,
+                parcelCount: b.parcelCount || (b.parcels?.length || 0),
+                status: 'pending',
+                parcels: (b.parcels || []).map((p: any) => ({
+                    trackingNumber: String(p.trackingNumber || p.shipment_ref || '').replace(/^skyt-?/i, '').trim(),
+                    status: 'pending'
+                }))
+            })),
+            expandedBags: relevantBags.reduce((acc, b) => { acc[b.bagNumber] = true; return acc; }, {} as Record<string, boolean>)
         });
 
-        try {
-            const res = await fetch('/api/lmd-bags', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    action: 'close-manifest',
-                    mawbRef: mawbToClose,
-                    operator: activeOperator
-                })
-            });
-            const data = await res.json();
-            if (data.success) {
-                setSecondScanManifestStatus('CLOSED');
-                const providerCode = getManifestProviderName(mawbToClose);
-                const providerDisplay = providerCode === 'PickMe' ? 'PickMe Express'
-                    : providerCode === 'Domex' ? 'Domex Express'
-                    : providerCode === 'Pronto' ? 'Pronto Lanka'
-                    : providerCode === 'ALL' ? 'General (All Partners)'
-                    : providerCode;
-                setManifestClosedModal({
-                    mawbRef: mawbToClose,
-                    closedBy: activeOperator,
-                    closedAt: new Date().toLocaleString(),
-                    provider: providerDisplay,
-                    totalBags: relevantBags.length,
-                    pickmeBags,
-                    pickmeParcels,
-                    domexBags,
-                    domexParcels,
-                    prontoBags,
-                    prontoParcels,
-                    generalBags,
-                    generalParcels,
-                    totalParcels,
-                    totalWeight: Number(totalWeight.toFixed(2))
-                });
-            } else {
-                if (data.error && data.error.toLowerCase().includes('open')) {
-                    setOpenBagsErrorModal({
-                        manifestRef: mawbToClose,
-                        openBags: relevantBags.filter(b => b.status === 'OPEN' || b.status !== 'SEALED').map(b => b.bagNumber)
+        // Open SSE Connection
+        const sseUrl = `/api/manifest-close-stream?mawbRef=${encodeURIComponent(mawbToClose)}&operator=${encodeURIComponent(activeOperator)}&serviceProviderName=${encodeURIComponent(providerCode)}`;
+        const es = new EventSource(sseUrl);
+
+        es.onmessage = (event) => {
+            try {
+                const data = JSON.parse(event.data);
+                if (data.type === 'start') {
+                    setManifestProgressModal(prev => prev ? ({
+                        ...prev,
+                        totalBags: data.totalBags || prev.totalBags,
+                        totalParcels: data.totalParcels || prev.totalParcels,
+                        closedAt: new Date(data.closedAt).toLocaleTimeString(),
+                        status: 'enriching'
+                    }) : null);
+                } else if (data.type === 'bag') {
+                    setManifestProgressModal(prev => {
+                        if (!prev) return null;
+                        const existingBags = [...prev.bags];
+                        const idx = existingBags.findIndex(b => b.bagNumber === data.bagNumber);
+                        if (idx >= 0) {
+                            existingBags[idx] = {
+                                ...existingBags[idx],
+                                parcelCount: data.parcelCount !== undefined ? data.parcelCount : existingBags[idx].parcelCount,
+                                status: data.status === 'processing' ? 'processing' : data.status === 'done' ? 'done' : 'pending'
+                            };
+                        } else {
+                            existingBags.push({
+                                bagNumber: data.bagNumber,
+                                parcelCount: data.parcelCount || 0,
+                                status: data.status === 'processing' ? 'processing' : data.status === 'done' ? 'done' : 'pending',
+                                parcels: []
+                            });
+                        }
+                        return {
+                            ...prev,
+                            currentBagNumber: data.bagNumber,
+                            bags: existingBags,
+                            expandedBags: { ...prev.expandedBags, [data.bagNumber]: true }
+                        };
                     });
-                } else {
-                    setErrorMessage(data.error || 'Failed to close manifest.');
+                } else if (data.type === 'parcel') {
+                    setManifestProgressModal(prev => {
+                        if (!prev) return null;
+                        const bags = prev.bags.map(b => {
+                            if (b.bagNumber !== data.bagNumber) return b;
+                            const parcels = [...b.parcels];
+                            const pIdx = parcels.findIndex(p => p.trackingNumber === data.trackingNumber);
+                            const newStatus = data.status === 'ok' ? 'ok' : data.status === 'skipped' ? 'skipped' : data.status === 'enriching' ? 'enriching' : 'error';
+                            if (pIdx >= 0) {
+                                parcels[pIdx] = { ...parcels[pIdx], status: newStatus, message: data.message };
+                            } else {
+                                parcels.push({ trackingNumber: data.trackingNumber, status: newStatus, message: data.message });
+                            }
+                            return { ...b, parcels };
+                        });
+                        const processedCount = (data.status === 'ok' || data.status === 'skipped') ? prev.processedParcels + 1 : prev.processedParcels;
+                        return {
+                            ...prev,
+                            bags,
+                            currentParcelRef: data.trackingNumber,
+                            processedParcels: data.status !== 'enriching' ? Math.min(processedCount, prev.totalParcels) : prev.processedParcels
+                        };
+                    });
+                } else if (data.type === 'ffdx_start') {
+                    setManifestProgressModal(prev => prev ? ({ ...prev, status: 'ffdx_uploading' }) : null);
+                } else if (data.type === 'ffdx_done') {
+                    if (!data.success && data.error) {
+                        setManifestProgressModal(prev => prev ? ({ ...prev, error: data.error }) : null);
+                    }
+                } else if (data.type === 'done') {
+                    es.close();
+                    setSecondScanManifestStatus('CLOSED');
+                    setManifestProgressModal(prev => prev ? ({
+                        ...prev,
+                        status: 'completed',
+                        processedParcels: prev.totalParcels,
+                        summary: data.summary
+                    }) : null);
+                } else if (data.type === 'error') {
+                    es.close();
+                    setManifestProgressModal(prev => prev ? ({
+                        ...prev,
+                        status: 'error',
+                        error: data.message || 'Manifest close failed'
+                    }) : null);
                 }
+            } catch (e) {
+                console.error('[manifest-close-stream] Event parse error:', e);
             }
-        } catch (err: any) {
-            setErrorMessage(err.message || 'Failed to close manifest.');
-        }
+        };
+
+        es.onerror = (err) => {
+            console.error('[manifest-close-stream] SSE error:', err);
+            es.close();
+            setManifestProgressModal(prev => {
+                if (!prev) return null;
+                // If it's already finished or nearing finish, just complete it
+                if (prev.status === 'ffdx_uploading' || prev.status === 'completed') {
+                    setSecondScanManifestStatus('CLOSED');
+                    return { ...prev, status: 'completed' };
+                }
+                return { ...prev, status: 'error', error: 'Connection to server interrupted.' };
+            });
+        };
     };
 
     const handleSealOutboundBag = async (bagNumber: string) => {
@@ -7987,6 +8084,213 @@ export default function WorkstationDashboard() {
                 );
             })()}
 
+            {/* ── REAL-TIME MANIFEST CLOSE & GETONLINE UPLOAD PROGRESS MODAL ── */}
+            {manifestProgressModal && (() => {
+                const { mawbRef, closedBy, closedAt, provider, totalBags, totalParcels, processedParcels, status, bags, expandedBags, error, summary } = manifestProgressModal;
+                const percent = totalParcels > 0 ? Math.min(100, Math.round((processedParcels / totalParcels) * 100)) : 100;
+                const isFinished = status === 'completed' || status === 'error';
+
+                const toggleBag = (bagNumber: string) => {
+                    setManifestProgressModal(prev => {
+                        if (!prev) return null;
+                        return {
+                            ...prev,
+                            expandedBags: { ...prev.expandedBags, [bagNumber]: !prev.expandedBags[bagNumber] }
+                        };
+                    });
+                };
+
+                return (
+                    <div style={{
+                        position: 'fixed',
+                        top: 0, left: 0, right: 0, bottom: 0,
+                        backgroundColor: 'rgba(0, 0, 0, 0.70)',
+                        backdropFilter: 'blur(4px)',
+                        display: 'flex', alignItems: 'center', justifyContent: 'center',
+                        zIndex: 4500,
+                        animation: 'fadeIn 0.2s ease-out'
+                    }}>
+                        <div style={{
+                            backgroundColor: '#ffffff',
+                            border: '2px solid #111827',
+                            borderRadius: '14px',
+                            padding: '24px',
+                            width: '580px',
+                            maxWidth: '94%',
+                            maxHeight: '90vh',
+                            display: 'flex',
+                            flexDirection: 'column',
+                            gap: '16px',
+                            boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.35)',
+                            overflow: 'hidden'
+                        }}>
+                            {/* Modal Header */}
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid #e5e7eb', paddingBottom: '12px' }}>
+                                <div>
+                                    <h3 style={{ fontSize: '17px', fontWeight: '800', color: '#111827', margin: 0, display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                        <span>🔒</span>
+                                        <span>Closing Outbound Manifest</span>
+                                    </h3>
+                                    <div style={{ fontSize: '11px', color: '#6b7280', marginTop: '2px', fontWeight: '600' }}>
+                                        Operator: <strong>{closedBy}</strong> | Time: {closedAt}
+                                    </div>
+                                </div>
+                                <span style={{
+                                    backgroundColor: isFinished ? (status === 'completed' ? '#dcfce7' : '#fee2e2') : '#fef3c7',
+                                    color: isFinished ? (status === 'completed' ? '#166534' : '#991b1b') : '#92400e',
+                                    fontSize: '11px', fontWeight: '800', padding: '4px 10px', borderRadius: '12px', textTransform: 'uppercase'
+                                }}>
+                                    {status === 'initializing' ? 'Initializing...' : status === 'enriching' ? 'Updating Parcels...' : status === 'ffdx_uploading' ? 'Uploading GETonline...' : status === 'completed' ? 'Completed ✅' : 'Error ❌'}
+                                </span>
+                            </div>
+
+                            {/* Manifest & Provider Banner */}
+                            <div style={{ backgroundColor: '#f8fafc', border: '1px solid #cbd5e1', borderRadius: '8px', padding: '12px 14px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                <div>
+                                    <div style={{ fontSize: '10px', fontWeight: '800', color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+                                        Outbound MAWB Reference
+                                    </div>
+                                    <div style={{ fontSize: '16px', fontWeight: '900', color: '#0f172a', fontFamily: 'monospace', marginTop: '2px' }}>
+                                        {mawbRef}
+                                    </div>
+                                </div>
+                                <div style={{ textAlign: 'right' }}>
+                                    <div style={{ fontSize: '10px', fontWeight: '800', color: '#64748b', textTransform: 'uppercase' }}>LMD Partner</div>
+                                    <div style={{ fontSize: '13px', fontWeight: '800', color: '#1e293b', marginTop: '2px' }}>{provider}</div>
+                                </div>
+                            </div>
+
+                            {/* Main Completing Bar / Progress Bar */}
+                            <div style={{ backgroundColor: '#f1f5f9', borderRadius: '10px', padding: '14px', border: '1px solid #e2e8f0' }}>
+                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px', fontSize: '12px', fontWeight: '700' }}>
+                                    <span style={{ color: '#334155' }}>
+                                        {status === 'ffdx_uploading' ? '🌐 Transmitting XML to GETonline API...' : status === 'completed' ? '🎉 All Parcels & Bags Successfully Processed' : status === 'error' ? '❌ Error Occurred' : '📦 Processing Bags & Parcels...'}
+                                    </span>
+                                    <span style={{ color: '#0f172a', fontWeight: '900', fontSize: '14px' }}>
+                                        {processedParcels} / {totalParcels} ({percent}%)
+                                    </span>
+                                </div>
+                                <div style={{ height: '14px', backgroundColor: '#cbd5e1', borderRadius: '7px', overflow: 'hidden', position: 'relative' }}>
+                                    <div style={{
+                                        width: `${percent}%`,
+                                        height: '100%',
+                                        backgroundColor: status === 'error' ? '#ef4444' : percent === 100 ? '#10b981' : '#2563eb',
+                                        transition: 'width 0.3s ease-in-out',
+                                        backgroundImage: status !== 'completed' && status !== 'error' ? 'linear-gradient(45deg, rgba(255,255,255,0.2) 25%, transparent 25%, transparent 50%, rgba(255,255,255,0.2) 50%, rgba(255,255,255,0.2) 75%, transparent 75%, transparent)' : 'none',
+                                        backgroundSize: '20px 20px',
+                                        animation: status !== 'completed' && status !== 'error' ? 'moveStripes 1s linear infinite' : 'none'
+                                    }} />
+                                </div>
+                            </div>
+
+                            {/* Error Banner if any */}
+                            {(error || summary?.ffdxError) && (
+                                <div style={{ backgroundColor: '#fef2f2', border: '1px solid #fca5a5', borderRadius: '8px', padding: '10px 14px', fontSize: '12px', color: '#991b1b' }}>
+                                    <strong>⚠️ GETonline Upload Notice:</strong> {error || summary?.ffdxError}
+                                </div>
+                            )}
+
+                            {/* Dropdown Lists for Each Bag & Each Parcel */}
+                            <div style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '8px', maxHeight: '280px', paddingRight: '4px' }}>
+                                {bags.map((bag, bIdx) => {
+                                    const isExpanded = !!expandedBags[bag.bagNumber];
+                                    const bagOkCount = bag.parcels.filter(p => p.status === 'ok').length;
+
+                                    return (
+                                        <div key={bag.bagNumber || bIdx} style={{ border: '1px solid #e2e8f0', borderRadius: '8px', overflow: 'hidden', backgroundColor: '#ffffff' }}>
+                                            {/* Bag Accordion Header */}
+                                            <div
+                                                onClick={() => toggleBag(bag.bagNumber)}
+                                                style={{
+                                                    backgroundColor: '#f8fafc',
+                                                    padding: '10px 14px',
+                                                    display: 'flex',
+                                                    justifyContent: 'space-between',
+                                                    alignItems: 'center',
+                                                    cursor: 'pointer',
+                                                    userSelect: 'none',
+                                                    borderBottom: isExpanded ? '1px solid #e2e8f0' : 'none'
+                                                }}
+                                            >
+                                                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                                    <span style={{ fontSize: '12px', color: '#64748b', transform: isExpanded ? 'rotate(90deg)' : 'rotate(0deg)', transition: 'transform 0.15s' }}>▶</span>
+                                                    <span style={{ fontSize: '13px', fontWeight: '800', color: '#0f172a', fontFamily: 'monospace' }}>💼 {bag.bagNumber}</span>
+                                                </div>
+                                                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                                    <span style={{ fontSize: '11px', fontWeight: '700', color: '#475569', backgroundColor: '#e2e8f0', padding: '2px 8px', borderRadius: '10px' }}>
+                                                        {bagOkCount} / {bag.parcelCount} parcels updated
+                                                    </span>
+                                                    <span style={{ fontSize: '13px' }}>
+                                                        {bag.status === 'done' ? '✅' : bag.status === 'processing' ? '🔄' : '⏳'}
+                                                    </span>
+                                                </div>
+                                            </div>
+
+                                            {/* Bag Accordion Dropdown Content — Each Parcel List */}
+                                            {isExpanded && (
+                                                <div style={{ backgroundColor: '#fafafa', padding: '8px 12px', display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                                                    {bag.parcels.length === 0 ? (
+                                                        <div style={{ fontSize: '11px', color: '#94a3b8', fontStyle: 'italic', padding: '4px' }}>Reading parcel items...</div>
+                                                    ) : (
+                                                        bag.parcels.map((p, pIdx) => (
+                                                            <div key={p.trackingNumber || pIdx} style={{
+                                                                display: 'flex',
+                                                                justifyContent: 'space-between',
+                                                                alignItems: 'center',
+                                                                padding: '6px 10px',
+                                                                backgroundColor: p.status === 'ok' ? '#f0fdf4' : p.status === 'enriching' ? '#eff6ff' : p.status === 'error' ? '#fef2f2' : '#ffffff',
+                                                                border: `1px solid ${p.status === 'ok' ? '#bbf7d0' : p.status === 'enriching' ? '#bfdbfe' : p.status === 'error' ? '#fecdd3' : '#e2e8f0'}`,
+                                                                borderRadius: '6px',
+                                                                fontSize: '12px'
+                                                            }}>
+                                                                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                                                    <span style={{ fontSize: '11px', color: '#64748b' }}>#{pIdx + 1}</span>
+                                                                    <strong style={{ fontFamily: 'monospace', color: '#1e293b' }}>{p.trackingNumber}</strong>
+                                                                </div>
+                                                                <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                                                                    {p.status === 'enriching' && <span style={{ color: '#2563eb', fontWeight: '700', fontSize: '11px' }}>🔄 Enriching & Syncing...</span>}
+                                                                    {p.status === 'ok' && <span style={{ color: '#16a34a', fontWeight: '800', fontSize: '11px' }}>✅ GETonline Updated</span>}
+                                                                    {p.status === 'skipped' && <span style={{ color: '#d97706', fontWeight: '700', fontSize: '11px' }}>⚠️ Skipped</span>}
+                                                                    {p.status === 'pending' && <span style={{ color: '#94a3b8', fontSize: '11px' }}>⏳ Pending</span>}
+                                                                    {p.status === 'error' && <span style={{ color: '#dc2626', fontWeight: '700', fontSize: '11px' }}>❌ {p.message || 'Error'}</span>}
+                                                                </div>
+                                                            </div>
+                                                        ))
+                                                    )}
+                                                </div>
+                                            )}
+                                        </div>
+                                    );
+                                })}
+                            </div>
+
+                            {/* Footer Action Button — Appears when operation completed or error */}
+                            {isFinished && (
+                                <button
+                                    autoFocus
+                                    onClick={() => setManifestProgressModal(null)}
+                                    style={{
+                                        backgroundColor: status === 'completed' ? '#10b981' : '#e21b22',
+                                        color: '#ffffff',
+                                        border: 'none',
+                                        borderRadius: '8px',
+                                        padding: '12px 24px',
+                                        fontSize: '14px',
+                                        fontWeight: '700',
+                                        width: '100%',
+                                        cursor: 'pointer',
+                                        boxShadow: '0 2px 4px rgba(0, 0, 0, 0.1)',
+                                        transition: 'all 0.15s ease'
+                                    }}
+                                >
+                                    Acknowledge & Finish Session (Press Enter)
+                                </button>
+                            )}
+                        </div>
+                    </div>
+                );
+            })()}
+
             {/* ── MANIFEST CLOSED SUMMARY MODAL ── */}
             {manifestClosedModal && (() => {
                 const rawProvider = manifestClosedModal.provider || getManifestProviderName(manifestClosedModal.mawbRef);
@@ -9881,7 +10185,7 @@ export default function WorkstationDashboard() {
                                     Manifest Code Format Preview:
                                 </div>
                                 <div style={{ fontSize: '15px', fontWeight: '800', color: '#e21b22', fontFamily: 'monospace' }}>
-                                    LK-{selectedProviderForManifest.toUpperCase()}-07082026-01
+                                    {getNextManifestPreviewCode(selectedProviderForManifest)}
                                 </div>
                                 <div style={{ fontSize: '11px', color: '#6b7280', marginTop: '4px' }}>
                                     Sequence suffix (-01, -02) will automatically calculate based on existing manifests for today.

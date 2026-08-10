@@ -265,7 +265,6 @@ CREATE TABLE public.shipments (
 CREATE TABLE public.outbound_lmd_bags (
   id bigint GENERATED ALWAYS AS IDENTITY NOT NULL,
   created_at timestamp with time zone NOT NULL DEFAULT now(),
-  mawb_ref text NOT NULL,
   bag_number text NOT NULL UNIQUE,
   target_partner text,
   destination_hub text NOT NULL,
@@ -289,6 +288,7 @@ CREATE TABLE public.outbound_lmd_bag_items (
   weight double precision,
   scanned_by text,
   CONSTRAINT outbound_lmd_bag_items_pkey PRIMARY KEY (id),
+  CONSTRAINT outbound_lmd_bag_items_shipment_ref_fkey FOREIGN KEY (shipment_ref) REFERENCES public.shipments(reference_number),
   CONSTRAINT outbound_lmd_bag_items_bag_number_fkey FOREIGN KEY (bag_number) REFERENCES public.outbound_lmd_bags(bag_number)
 );
 CREATE TABLE public.manifest_sessions (
@@ -376,7 +376,7 @@ CREATE TABLE public.reuploaded_manifests (
 CREATE TABLE public.outbound_manifests (
   id bigint GENERATED ALWAYS AS IDENTITY NOT NULL,
   created_at timestamp with time zone NOT NULL DEFAULT now(),
-  manifest_reference text UNIQUE,
+  manifest_reference text NOT NULL,
   bag_numbers ARRAY,
   total_bags bigint,
   service_provider bigint,
@@ -385,5 +385,6 @@ CREATE TABLE public.outbound_manifests (
   xml_path text,
   total_parcels bigint,
   is_uploaded boolean DEFAULT false,
+  status text NOT NULL DEFAULT 'OPEN'::text CHECK (status = ANY (ARRAY['OPEN'::text, 'CLOSED'::text])),
   CONSTRAINT outbound_manifests_pkey PRIMARY KEY (id)
 );

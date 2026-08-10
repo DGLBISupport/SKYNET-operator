@@ -103,31 +103,9 @@ async function updateOutboundManifestInDB(sb: any, manifestRef: string, serviceP
         let totalParcels = 0;
 
         if (manifestId) {
+            // Fetch all bags linked to this manifest via FK
             const bagsRes = await fetch(
                 `${sb.url}/rest/v1/outbound_lmd_bags?new_manifest_reference=eq.${manifestId}&select=bag_number,parcel_count`,
-                { headers: sb.headers, cache: 'no-store' }
-            );
-            const bagsData = await bagsRes.json();
-            if (Array.isArray(bagsData)) {
-                bagNumbers = bagsData.map((b: any) => b.bag_number).filter(Boolean);
-                totalParcels = bagsData.reduce((acc: number, b: any) => acc + (Number(b.parcel_count) || 0), 0);
-            }
-            const legacyRes = await fetch(
-                `${sb.url}/rest/v1/outbound_lmd_bags?mawb_ref=eq.${encodeURIComponent(manifestRef)}&new_manifest_reference=is.null&select=bag_number,parcel_count`,
-                { headers: sb.headers, cache: 'no-store' }
-            );
-            const legacyData = await legacyRes.json();
-            if (Array.isArray(legacyData)) {
-                for (const b of legacyData) {
-                    if (b.bag_number && !bagNumbers.includes(b.bag_number)) {
-                        bagNumbers.push(b.bag_number);
-                        totalParcels += Number(b.parcel_count) || 0;
-                    }
-                }
-            }
-        } else {
-            const bagsRes = await fetch(
-                `${sb.url}/rest/v1/outbound_lmd_bags?mawb_ref=eq.${encodeURIComponent(manifestRef)}&select=bag_number,parcel_count`,
                 { headers: sb.headers, cache: 'no-store' }
             );
             const bagsData = await bagsRes.json();
@@ -140,7 +118,6 @@ async function updateOutboundManifestInDB(sb: any, manifestRef: string, serviceP
         if (addedBagNumber && !bagNumbers.includes(addedBagNumber)) bagNumbers.push(addedBagNumber);
 
         const payload: any = {
-            manifest_reference: manifestRef,
             bag_numbers: bagNumbers,
             total_bags: bagNumbers.length,
             total_parcels: totalParcels
@@ -153,8 +130,9 @@ async function updateOutboundManifestInDB(sb: any, manifestRef: string, serviceP
                 method: 'PATCH', headers: sb.headers, body: JSON.stringify(payload)
             });
         } else {
+            // Fallback: match by manifest_reference string if ID is not yet resolved
             const checkRes = await fetch(
-                `${sb.url}/rest/v1/outbound_manifests?manifest_reference=eq.${encodeURIComponent(manifestRef)}`,
+                `${sb.url}/rest/v1/outbound_manifests?manifest_reference=eq.${encodeURIComponent(manifestRef)}&select=id`,
                 { headers: sb.headers, cache: 'no-store' }
             );
             const checkData = await checkRes.json();
@@ -163,8 +141,8 @@ async function updateOutboundManifestInDB(sb: any, manifestRef: string, serviceP
                     method: 'PATCH', headers: sb.headers, body: JSON.stringify(payload)
                 });
             } else {
-                payload.created_by = 1;
                 if (!payload.status) payload.status = 'OPEN';
+                payload.manifest_reference = manifestRef;
                 await fetch(`${sb.url}/rest/v1/outbound_manifests`, {
                     method: 'POST', headers: sb.headers, body: JSON.stringify(payload)
                 });
@@ -172,6 +150,51 @@ async function updateOutboundManifestInDB(sb: any, manifestRef: string, serviceP
         }
     } catch (err) {
         console.error("Failed to sync outbound_manifests in DB:", err);
+    }
+}
+
+// ─── FFDX GETonline Upload Helper ────────────────────────────────────────────
+// Fire-and-forget: builds the bag/parcel payload and calls /api/ffdx-upload.
+// Does NOT block the main request — failures are logged but do not throw.
+async function triggerFfdxUpload({
+    manifestReference,
+    manifestId,
+    serviceProviderName,
+    bags,
+    baseUrl
+}: {
+    manifestReference: string;
+    manifestId?: number | null;
+    serviceProviderName?: string;
+    bags: Array<{ bagNumber: string; parcels: any[] }>;
+    baseUrl: string;
+}): Promise<void> {
+    try {
+        if (!manifestReference) return;
+        const payload = { manifestReference, manifestId: manifestId || null, serviceProviderName: serviceProviderName || 'All Partners', bags };
+        console.log(`[lmd-bags] Triggering FFDX upload for "${manifestReference}" (${bags.reduce((s, b) => s + b.parcels.length, 0)} parcel(s))`);
+        // Non-blocking: we don't await here — fire and forget
+        fetch(`${baseUrl}/api/ffdx-upload`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+        }).then(async (res) => {
+            const txt = await res.text().catch(() => '');
+            if (!res.ok) console.error(`[lmd-bags] FFDX upload response error (${res.status}): ${txt.slice(0, 300)}`);
+            else console.log(`[lmd-bags] FFDX upload triggered OK for "${manifestReference}"`);
+        }).catch(e => console.error(`[lmd-bags] FFDX upload fetch failed for "${manifestReference}":`, e));
+    } catch (e) {
+        console.error(`[lmd-bags] triggerFfdxUpload error:`, e);
+    }
+}
+
+// Helper: get base URL for internal API calls
+function getBaseUrl(request: Request): string {
+    try {
+        const url = new URL(request.url);
+        return `${url.protocol}//${url.host}`;
+    } catch {
+        return process.env.NEXTAUTH_URL || process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : 'http://localhost:3000';
     }
 }
 
@@ -267,6 +290,7 @@ export async function GET(request: Request) {
     if (mawbRef) {
         if (sb) {
             try {
+                // Fetch manifest status from outbound_manifests only
                 const omRes = await fetch(`${sb.url}/rest/v1/outbound_manifests?manifest_reference=eq.${encodeURIComponent(mawbRef)}&select=id,status`, { headers: sb.headers, cache: 'no-store' });
                 const omData = await omRes.json();
                 let manifestStatus: 'OPEN' | 'CLOSED' = 'OPEN';
@@ -274,26 +298,14 @@ export async function GET(request: Request) {
                 if (Array.isArray(omData) && omData.length > 0) {
                     if (omData[0].status) manifestStatus = omData[0].status as 'OPEN' | 'CLOSED';
                     if (omData[0].id) manifestDbId = Number(omData[0].id);
-                } else {
-                    const manifestRes = await fetch(`${sb.url}/rest/v1/manifest_sessions?mawb_ref=eq.${encodeURIComponent(mawbRef)}`, { headers: sb.headers, cache: 'no-store' });
-                    const manifestData = await manifestRes.json();
-                    manifestStatus = Array.isArray(manifestData) && manifestData.length > 0 ? manifestData[0].status : 'OPEN';
                 }
 
+                // Fetch bags via new_manifest_reference FK (outbound_lmd_bags has no mawb_ref column)
                 let bagsData: any[] = [];
                 if (manifestDbId) {
-                    const newBagsRes = await fetch(`${sb.url}/rest/v1/outbound_lmd_bags?new_manifest_reference=eq.${manifestDbId}&order=created_at.desc`, { headers: sb.headers, cache: 'no-store' });
-                    const newBags = await newBagsRes.json();
-                    if (Array.isArray(newBags)) bagsData = newBags;
-                    const legacyRes = await fetch(`${sb.url}/rest/v1/outbound_lmd_bags?mawb_ref=eq.${encodeURIComponent(mawbRef)}&new_manifest_reference=is.null&order=created_at.desc`, { headers: sb.headers, cache: 'no-store' });
-                    const legacyBags = await legacyRes.json();
-                    if (Array.isArray(legacyBags) && legacyBags.length > 0) {
-                        const existingNums = new Set(bagsData.map((b: any) => b.bag_number));
-                        for (const lb of legacyBags) { if (!existingNums.has(lb.bag_number)) bagsData.push(lb); }
-                    }
-                } else {
-                    const legacyRes = await fetch(`${sb.url}/rest/v1/outbound_lmd_bags?mawb_ref=eq.${encodeURIComponent(mawbRef)}&order=created_at.desc`, { headers: sb.headers, cache: 'no-store' });
-                    bagsData = await legacyRes.json();
+                    const bagsRes = await fetch(`${sb.url}/rest/v1/outbound_lmd_bags?new_manifest_reference=eq.${manifestDbId}&order=created_at.desc`, { headers: sb.headers, cache: 'no-store' });
+                    const fetchedBags = await bagsRes.json();
+                    if (Array.isArray(fetchedBags)) bagsData = fetchedBags;
                 }
 
                 if (Array.isArray(bagsData)) {
@@ -330,13 +342,15 @@ export async function POST(request: Request) {
         const { action, mawbRef, bagNumber, partner, destinationHub, operator, parcelCount, totalWeight, parcels, providerName, serviceProviderId } = body;
         const effectiveMawbRef = mawbRef || 'GENERAL';
         const sb = getSupabaseConfig();
+        const baseUrl = getBaseUrl(request);
 
         if (action === 'create-manifest') {
             const providerCode = (providerName || partner || 'PICKME').toUpperCase().replace(/\s+/g, '');
             const todayStr = getFormattedDateDDMMYYYY();
             const prefixPattern = `LK-${providerCode}-${todayStr}-`;
-            let nextSeq = 1;
             let spId: number | null = serviceProviderId ? Number(serviceProviderId) : null;
+            const seqs: number[] = [];
+
             if (sb) {
                 try {
                     if (!spId) {
@@ -350,15 +364,36 @@ export async function POST(request: Request) {
                             else if (providerCode.includes('PRONTO')) spId = 3;
                         }
                     }
-                    const omRes = await fetch(`${sb.url}/rest/v1/outbound_manifests?manifest_reference=ilike.${prefixPattern}%`, { headers: sb.headers });
+                    const omRes = await fetch(`${sb.url}/rest/v1/outbound_manifests?manifest_reference=ilike.${encodeURIComponent(prefixPattern + '*')}&select=manifest_reference`, { headers: sb.headers, cache: 'no-store' });
                     const omData = await omRes.json();
-                    if (Array.isArray(omData) && omData.length > 0) {
-                        const seqs = omData.map((row: any) => { const parts = (row.manifest_reference || '').split('-'); const num = parseInt(parts[parts.length - 1], 10); return isNaN(num) ? 0 : num; });
-                        nextSeq = Math.max(...seqs, 0) + 1;
+                    if (Array.isArray(omData)) {
+                        omData.forEach((row: any) => {
+                            const ref = row.manifest_reference || '';
+                            const parts = ref.split('-');
+                            const num = parseInt(parts[parts.length - 1], 10);
+                            if (!isNaN(num)) seqs.push(num);
+                        });
                     }
                 } catch (err) { console.error("Error querying outbound manifests sequence:", err); }
             }
-            const manifestReference = `${prefixPattern}${String(nextSeq).padStart(2, '0')}`;
+
+            // Also check in-memory manifestsMap
+            manifestsMap.forEach((_, ref) => {
+                if (ref && ref.toUpperCase().startsWith(prefixPattern.toUpperCase())) {
+                    const parts = ref.split('-');
+                    const num = parseInt(parts[parts.length - 1], 10);
+                    if (!isNaN(num)) seqs.push(num);
+                }
+            });
+
+            let nextSeq = seqs.length > 0 ? Math.max(...seqs, 0) + 1 : 1;
+            let manifestReference = `${prefixPattern}${String(nextSeq).padStart(2, '0')}`;
+
+            // Safety loop: ensure manifestReference is completely unique
+            while (manifestsMap.has(manifestReference)) {
+                nextSeq++;
+                manifestReference = `${prefixPattern}${String(nextSeq).padStart(2, '0')}`;
+            }
             manifestsMap.set(manifestReference, { mawbRef: manifestReference, status: 'OPEN', serviceProviderId: spId || undefined, serviceProviderName: providerName || partner || 'PickMe' });
             let newManifestDbId: number | null = null;
             if (sb) {
@@ -373,12 +408,9 @@ export async function POST(request: Request) {
                         const session = manifestsMap.get(manifestReference);
                         if (session) session.dbId = newManifestDbId;
                     }
-                    await fetch(`${sb.url}/rest/v1/manifest_sessions`, {
-                        method: 'POST', headers: { ...sb.headers, "Prefer": "resolution=merge-duplicates" },
-                        body: JSON.stringify({ mawb_ref: manifestReference, status: 'OPEN' })
-                    });
                 } catch (err) { console.error("Error inserting new outbound_manifests:", err); }
             }
+
             return NextResponse.json({ success: true, message: `New Outbound Manifest "${manifestReference}" created successfully.`, manifest: { id: newManifestDbId, manifest_reference: manifestReference, service_provider: spId, service_provider_name: providerName || partner || 'PickMe', bag_numbers: [], total_bags: 0, total_parcels: 0, status: 'OPEN' } });
         }
 
@@ -405,14 +437,14 @@ export async function POST(request: Request) {
             if (mawbRef && !manifestsMap.has(mawbRef)) manifestsMap.set(mawbRef, { mawbRef, dbId: manifestDbId || undefined, status: 'OPEN' });
             if (sb) {
                 try {
+                    // outbound_lmd_bags links to outbound_manifests via new_manifest_reference (no mawb_ref column)
                     const bagPayload: any = {
                         bag_number: newBagNumber, target_partner: partner || 'ALL', destination_hub: newBag.destinationHub,
                         status: 'OPEN', parcel_count: 0, total_weight: 0, created_by: operator || 'Staff',
-                        is_bag_in_a_manifest: !!manifestDbId, mawb_ref: effectiveMawbRef
+                        is_bag_in_a_manifest: !!manifestDbId
                     };
                     if (manifestDbId) bagPayload.new_manifest_reference = manifestDbId;
                     await fetch(`${sb.url}/rest/v1/outbound_lmd_bags`, { method: 'POST', headers: sb.headers, body: JSON.stringify(bagPayload) });
-                    if (mawbRef) await fetch(`${sb.url}/rest/v1/manifest_sessions`, { method: 'POST', headers: { ...sb.headers, "Prefer": "resolution=merge-duplicates" }, body: JSON.stringify({ mawb_ref: mawbRef, status: 'OPEN' }) });
                     await updateOutboundManifestInDB(sb, effectiveMawbRef, serviceProviderId ? Number(serviceProviderId) : null, newBagNumber);
                 } catch (err) { console.error("Supabase insert outbound_lmd_bags error:", err); }
             }
@@ -441,6 +473,7 @@ export async function POST(request: Request) {
                     if (bag.mawbRef) await updateOutboundManifestInDB(sb, bag.mawbRef, serviceProviderId ? Number(serviceProviderId) : null);
                 } catch (err) { console.error("Supabase add-parcel update error:", err); }
             }
+
             return NextResponse.json({ success: true, bag });
         }
 
@@ -464,6 +497,7 @@ export async function POST(request: Request) {
                     if (bag.mawbRef) await updateOutboundManifestInDB(sb, bag.mawbRef, serviceProviderId ? Number(serviceProviderId) : null);
                 } catch (err) { console.error("Supabase seal bag update error:", err); }
             }
+
             return NextResponse.json({ success: true, message: `Outbound Bag "${bagNumber}" has been SEALED & CLOSED.`, bag });
         }
 
@@ -509,13 +543,117 @@ export async function POST(request: Request) {
             }
 
             manifestsMap.set(mawbRef, { mawbRef, dbId: manifestsMap.get(mawbRef)?.dbId, status: 'CLOSED', closedAt: closedTimestamp, closedBy: closingOperator });
+
+            // ── Bulk: Gather all sealed bags + parcels from DB (authoritative source) ──
+            const allBagsForManifestMap = new Map<string, { bagNumber: string; parcels: any[] }>();
+
+            // Step 1 – Collect all bags from memory
+            for (const b of Array.from(outboundBagsMap.values())) {
+                if ((b.mawbRef || '').toLowerCase() === (mawbRef || '').toLowerCase()) {
+                    allBagsForManifestMap.set(b.bagNumber, { bagNumber: b.bagNumber, parcels: b.parcels || [] });
+                }
+            }
+
             if (sb) {
                 try {
-                    await fetch(`${sb.url}/rest/v1/manifest_sessions`, { method: 'POST', headers: { ...sb.headers, "Prefer": "resolution=merge-duplicates" }, body: JSON.stringify({ mawb_ref: mawbRef, status: 'CLOSED', closed_at: closedTimestamp, closed_by: closingOperator }) });
-                    await updateOutboundManifestInDB(sb, mawbRef, serviceProviderId ? Number(serviceProviderId) : null, undefined, 'CLOSED');
-                } catch (err) { console.error("Supabase close manifest error:", err); }
+                    // Step 2 – Resolve manifestId for this manifest reference
+                    const manifestId = await getManifestDbId(sb, mawbRef);
+
+                    // Step 3 – Fetch all bags for this manifest from DB
+                    let dbBagsRes;
+                    if (manifestId) {
+                        dbBagsRes = await fetch(`${sb.url}/rest/v1/outbound_lmd_bags?new_manifest_reference=eq.${manifestId}&select=bag_number,parcel_count,total_weight,target_partner,parcels`, { headers: sb.headers, cache: 'no-store' });
+                    } else {
+                        dbBagsRes = await fetch(`${sb.url}/rest/v1/outbound_lmd_bags?mawb_ref=eq.${encodeURIComponent(mawbRef)}&select=bag_number,parcel_count,total_weight,target_partner,parcels`, { headers: sb.headers, cache: 'no-store' });
+                    }
+                    const dbBagsRaw = await dbBagsRes.json();
+
+                    if (Array.isArray(dbBagsRaw)) {
+                        for (const b of dbBagsRaw) {
+                            if (!b.bag_number) continue;
+                            // Use JSONB parcels from DB if memory doesn't have it
+                            let bagParcels: any[] = [];
+                            if (Array.isArray(b.parcels)) bagParcels = b.parcels;
+                            else if (typeof b.parcels === 'string') { try { bagParcels = JSON.parse(b.parcels); } catch { bagParcels = []; } }
+
+                            if (!allBagsForManifestMap.has(b.bag_number)) {
+                                allBagsForManifestMap.set(b.bag_number, { bagNumber: b.bag_number, parcels: bagParcels });
+                            } else if (bagParcels.length > (allBagsForManifestMap.get(b.bag_number)?.parcels.length || 0)) {
+                                // Prefer the DB parcel list if it is more complete
+                                allBagsForManifestMap.set(b.bag_number, { bagNumber: b.bag_number, parcels: bagParcels });
+                            }
+                        }
+                    }
+
+                    // Step 4 – For every bag, enrich parcel list from outbound_lmd_bag_items (authoritative scan list)
+                    for (const [bagNum, bagEntry] of allBagsForManifestMap.entries()) {
+                        try {
+                            const itemsRes = await fetch(`${sb.url}/rest/v1/outbound_lmd_bag_items?bag_number=eq.${encodeURIComponent(bagNum)}&select=shipment_ref,weight`, { headers: sb.headers, cache: 'no-store' });
+                            const items = await itemsRes.json();
+                            if (Array.isArray(items) && items.length > 0) {
+                                // Build a Set of existing tracking numbers in current parcel list
+                                const existingRefs = new Set(bagEntry.parcels.map((p: any) => String(p.trackingNumber || p.reference_number || p.shipment_ref || '').replace(/^skyt-?/i, '').trim().toLowerCase()));
+                                for (const item of items) {
+                                    const ref = String(item.shipment_ref || '').replace(/^skyt-?/i, '').trim();
+                                    if (ref && !existingRefs.has(ref.toLowerCase())) {
+                                        bagEntry.parcels.push({ trackingNumber: ref, weight: item.weight || 0.1 });
+                                        existingRefs.add(ref.toLowerCase());
+                                    }
+                                }
+                            }
+                        } catch (e) {
+                            console.error(`[close-manifest] Failed to enrich parcel items for bag ${bagNum}:`, e);
+                        }
+                    }
+
+                    const allBagsList = Array.from(allBagsForManifestMap.values());
+                    const allBagNumbers = allBagsList.map(b => b.bagNumber);
+                    const totalParcelsCount = allBagsList.reduce((sum, b) => sum + (b.parcels?.length || 0), 0);
+
+
+                    // Step 6 – Update outbound_manifests with full accurate data
+                    const manifestUpdatePayload: any = {
+                        bag_numbers: allBagNumbers,
+                        total_bags: allBagNumbers.length,
+                        total_parcels: totalParcelsCount,
+                        status: 'CLOSED'
+                    };
+
+                    // Resolve service_provider id from manifest session or body
+                    const manifestSession = manifestsMap.get(mawbRef);
+                    const resolvedSpId = serviceProviderId ? Number(serviceProviderId) : (manifestSession?.serviceProviderId || null);
+                    if (resolvedSpId) manifestUpdatePayload.service_provider = resolvedSpId;
+
+                    // Update outbound_manifests only (no manifest_sessions — that table is for inbound manifests)
+                    if (manifestId) {
+                        await fetch(`${sb.url}/rest/v1/outbound_manifests?id=eq.${manifestId}`, {
+                            method: 'PATCH',
+                            headers: sb.headers,
+                            body: JSON.stringify(manifestUpdatePayload)
+                        });
+                    } else {
+                        await fetch(`${sb.url}/rest/v1/outbound_manifests?manifest_reference=eq.${encodeURIComponent(mawbRef)}`, {
+                            method: 'PATCH',
+                            headers: sb.headers,
+                            body: JSON.stringify(manifestUpdatePayload)
+                        });
+                    }
+
+                    // Step 7 – Trigger FFDX GETonline upload (bulk) for entire manifest
+                    triggerFfdxUpload({
+                        manifestReference: mawbRef,
+                        manifestId: manifestId || manifestSession?.dbId,
+                        serviceProviderName: body.serviceProviderName || manifestSession?.serviceProviderName || 'All Partners',
+                        bags: allBagsList,
+                        baseUrl
+                    });
+
+                } catch (err) {
+                    console.error("[close-manifest] Bulk update error:", err);
+                }
             }
-            return NextResponse.json({ success: true, message: `Manifest "${mawbRef}" has been CLOSED. No additional bags can be created.`, manifest: manifestsMap.get(mawbRef) });
+
+            return NextResponse.json({ success: true, message: `Manifest "${mawbRef}" has been CLOSED. All parcels and bags updated in bulk.`, manifest: manifestsMap.get(mawbRef) });
         }
 
         if (action === 'delete-bag') {
