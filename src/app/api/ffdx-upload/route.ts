@@ -46,14 +46,22 @@ function generateMessageId(): string {
 }
 
 function nowFormatted(): string {
-    const d = new Date();
-    const yyyy = d.getFullYear();
-    const mm = String(d.getMonth() + 1).padStart(2, '0');
-    const dd = String(d.getDate()).padStart(2, '0');
-    const hh = String(d.getHours()).padStart(2, '0');
-    const min = String(d.getMinutes()).padStart(2, '0');
-    const ss = String(d.getSeconds()).padStart(2, '0');
-    return `${yyyy}/${mm}/${dd} ${hh}:${min}:${ss}`;
+    const tz = process.env.TZ || 'Asia/Colombo';
+    const formatter = new Intl.DateTimeFormat('en-US', {
+        timeZone: tz,
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
+        hour12: false
+    });
+    const parts = formatter.formatToParts(new Date());
+    const m: Record<string, string> = {};
+    for (const p of parts) if (p.type !== 'literal') m[p.type] = p.value;
+    const h24 = String(parseInt(m.hour || '0', 10) % 24).padStart(2, '0');
+    return `${m.year}/${m.month}/${m.day} ${h24}:${m.minute}:${m.second}`;
 }
 
 function escapeXml(str: string | number | null | undefined): string {

@@ -112,12 +112,27 @@ function buildFfdxXml(referenceNumber: string): string {
     const entityId   = process.env.FFDX_ENTITY_ID   || '';
     const entityPin  = process.env.FFDX_ENTITY_PIN  || '';
     const updateId   = process.env.FFDX_UPDATE_ENTITY_ID || 'LK7171';
-    const now = new Date();
-    // Format: YYYY/MM/DD HH:MM:SS AM/PM  (matches Python strftime "%Y/%m/%d %I:%M:%S %p")
-    const pad = (n: number) => String(n).padStart(2, '0');
-    const hours12 = now.getHours() % 12 || 12;
-    const ampm = now.getHours() < 12 ? 'AM' : 'PM';
-    const eventDT = `${now.getFullYear()}/${pad(now.getMonth() + 1)}/${pad(now.getDate())} ${pad(hours12)}:${pad(now.getMinutes())}:${pad(now.getSeconds())} ${ampm}`;
+    
+    // Format in local timezone (defaulting to Asia/Colombo)
+    const tz = process.env.TZ || 'Asia/Colombo';
+    const formatter = new Intl.DateTimeFormat('en-US', {
+        timeZone: tz,
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
+        hour12: false
+    });
+    const parts = formatter.formatToParts(new Date());
+    const m: Record<string, string> = {};
+    for (const p of parts) if (p.type !== 'literal') m[p.type] = p.value;
+
+    const h24 = parseInt(m.hour || '0', 10) % 24;
+    const h12 = String(h24 % 12 || 12).padStart(2, '0');
+    const ampm = h24 >= 12 ? 'PM' : 'AM';
+    const eventDT = `${m.year}/${m.month}/${m.day} ${h12}:${m.minute}:${m.second} ${ampm}`;
 
     return `<?xml version='1.0' encoding='ISO-8859-1' ?>
 <WSGET><AccessRequest><WSVersion>WS1.0</WSVersion><FileType>2</FileType><Action>upload</Action><EntityID>${entityId}</EntityID><EntityPIN>${entityPin}</EntityPIN><MessageID>0001</MessageID></AccessRequest><Event><ReferenceNumber>${referenceNumber}</ReferenceNumber><ReferenceType>C</ReferenceType><EventDateTime>${eventDT}</EventDateTime><EventID>1558</EventID><Remarks>Skynet Warehouse</Remarks><OriginByPrefix>0</OriginByPrefix><OriginEntityID></OriginEntityID><UpdateEntityID>${updateId}</UpdateEntityID><UpdateEntityLocationName>Colombo</UpdateEntityLocationName></Event></WSGET>`;
