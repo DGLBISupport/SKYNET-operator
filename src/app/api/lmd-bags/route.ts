@@ -208,6 +208,7 @@ export async function GET(request: Request) {
     if (getOutboundManifests === 'true') {
         let manifestsList: OutboundManifestRecord[] = [];
         let serviceProvidersMap: Record<number, string> = { 1: 'PickMe', 2: 'Domex', 3: 'Pronto' };
+        let supabaseSuccess = false;
         if (sb) {
             try {
                 const spRes = await fetch(`${sb.url}/rest/v1/service_providers?select=id,name,code`, { headers: sb.headers, cache: 'no-store' });
@@ -217,6 +218,7 @@ export async function GET(request: Request) {
                 const omRes = await fetch(`${sb.url}/rest/v1/outbound_manifests?order=created_at.desc`, { headers: sb.headers, cache: 'no-store' });
                 const omData = await omRes.json();
                 if (Array.isArray(omData)) {
+                    supabaseSuccess = true;
                     manifestsList = omData.map((row: any) => ({
                         id: row.id,
                         created_at: row.created_at,
@@ -231,6 +233,15 @@ export async function GET(request: Request) {
                         total_parcels: row.total_parcels || 0,
                         status: (row.status as 'OPEN' | 'CLOSED') || manifestsMap.get(row.manifest_reference)?.status || 'OPEN'
                     }));
+
+                    // Prune in-memory manifestsMap: remove any manifest reference that is no longer in Supabase DB!
+                    const activeRefsFromDb = new Set(omData.map((row: any) => row.manifest_reference).filter(Boolean));
+                    manifestsMap.forEach((_, ref) => {
+                        if (ref && ref.startsWith('LK-') && !activeRefsFromDb.has(ref)) {
+                            manifestsMap.delete(ref);
+                        }
+                    });
+
                     omData.forEach((row: any) => {
                         if (row.manifest_reference && row.id) {
                             const existing = manifestsMap.get(row.manifest_reference);
@@ -240,11 +251,15 @@ export async function GET(request: Request) {
                 }
             } catch (e) { console.error("Supabase GET outbound_manifests error:", e); }
         }
-        manifestsMap.forEach((session, ref) => {
-            if (ref && ref.startsWith('LK-') && !manifestsList.some(m => m.manifest_reference === ref)) {
-                manifestsList.push({ manifest_reference: ref, bag_numbers: [], total_bags: 0, service_provider: session.serviceProviderId || null, service_provider_name: session.serviceProviderName || 'All Partners', total_parcels: 0, status: session.status });
-            }
-        });
+
+        // Only append fallback in-memory manifests if Supabase fetch failed or is unconfigured
+        if (!supabaseSuccess) {
+            manifestsMap.forEach((session, ref) => {
+                if (ref && ref.startsWith('LK-') && !manifestsList.some(m => m.manifest_reference === ref)) {
+                    manifestsList.push({ manifest_reference: ref, bag_numbers: [], total_bags: 0, service_provider: session.serviceProviderId || null, service_provider_name: session.serviceProviderName || 'All Partners', total_parcels: 0, status: session.status });
+                }
+            });
+        }
         return NextResponse.json({ success: true, manifests: manifestsList });
     }
 
@@ -295,9 +310,16 @@ export async function GET(request: Request) {
                 const omData = await omRes.json();
                 let manifestStatus: 'OPEN' | 'CLOSED' = 'OPEN';
                 let manifestDbId: number | null = null;
+                let manifestExistsInDb = false;
+
                 if (Array.isArray(omData) && omData.length > 0) {
+                    manifestExistsInDb = true;
                     if (omData[0].status) manifestStatus = omData[0].status as 'OPEN' | 'CLOSED';
                     if (omData[0].id) manifestDbId = Number(omData[0].id);
+                } else if (Array.isArray(omData) && omData.length === 0) {
+                    // Manifest deleted in DB — prune in-memory caches
+                    manifestsMap.delete(mawbRef);
+                    outboundBagsMap.forEach((bag, bNum) => { if (bag.mawbRef.toLowerCase() === mawbRef.toLowerCase()) outboundBagsMap.delete(bNum); });
                 }
 
                 // Fetch bags via new_manifest_reference FK (outbound_lmd_bags has no mawb_ref column)
@@ -308,7 +330,7 @@ export async function GET(request: Request) {
                     if (Array.isArray(fetchedBags)) bagsData = fetchedBags;
                 }
 
-                if (Array.isArray(bagsData)) {
+                if (manifestExistsInDb || Array.isArray(bagsData)) {
                     const dbBags: OutboundBag[] = bagsData.map((row: any) => {
                         let parcels: any[] = [];
                         if (Array.isArray(row.parcels)) parcels = row.parcels;
@@ -322,8 +344,10 @@ export async function GET(request: Request) {
                         } as OutboundBag;
                     });
                     outboundBagsMap.forEach((bag, bNum) => { if (bag.mawbRef.toLowerCase() === mawbRef.toLowerCase()) outboundBagsMap.delete(bNum); });
-                    dbBags.forEach((bag) => outboundBagsMap.set(bag.bagNumber, bag));
-                    manifestsMap.set(mawbRef, { mawbRef, dbId: manifestDbId || undefined, status: manifestStatus });
+                    if (manifestExistsInDb) {
+                        dbBags.forEach((bag) => outboundBagsMap.set(bag.bagNumber, bag));
+                        manifestsMap.set(mawbRef, { mawbRef, dbId: manifestDbId || undefined, status: manifestStatus });
+                    }
                     return NextResponse.json({ success: true, mawbRef, manifestStatus, bags: dbBags });
                 }
             } catch (e) { console.error("Supabase GET mawbRef bags error:", e); }
@@ -706,6 +730,35 @@ export async function POST(request: Request) {
             }
 
             return NextResponse.json({ success: true, message: `Outbound Bag "${bagNumber}" has been deleted successfully.` });
+        }
+
+        if (action === 'delete-manifest') {
+            const targetRef = mawbRef || body.manifestReference;
+            if (!targetRef) return NextResponse.json({ success: false, error: 'Missing manifest reference' }, { status: 400 });
+
+            // Remove from in-memory maps
+            manifestsMap.delete(targetRef);
+            outboundBagsMap.forEach((bag, bNum) => {
+                if ((bag.mawbRef || '').toLowerCase() === targetRef.toLowerCase()) {
+                    outboundBagsMap.delete(bNum);
+                }
+            });
+
+            if (sb) {
+                try {
+                    const manifestId = await getManifestDbId(sb, targetRef);
+                    if (manifestId) {
+                        await fetch(`${sb.url}/rest/v1/outbound_lmd_bags?new_manifest_reference=eq.${manifestId}`, { method: 'DELETE', headers: sb.headers });
+                        await fetch(`${sb.url}/rest/v1/outbound_manifests?id=eq.${manifestId}`, { method: 'DELETE', headers: sb.headers });
+                    } else {
+                        await fetch(`${sb.url}/rest/v1/outbound_manifests?manifest_reference=eq.${encodeURIComponent(targetRef)}`, { method: 'DELETE', headers: sb.headers });
+                    }
+                } catch (err) {
+                    console.error("Supabase delete manifest error:", err);
+                }
+            }
+
+            return NextResponse.json({ success: true, message: `Outbound Manifest "${targetRef}" has been deleted successfully.` });
         }
 
         return NextResponse.json({ success: false, error: 'Invalid action parameter' }, { status: 400 });
