@@ -295,7 +295,7 @@ export default function WorkstationDashboard() {
     }>>([]);
     const [activeOutboundBag, setActiveOutboundBag] = useState<any | null>(null);
     const [createBagModalOpen, setCreateBagModalOpen] = useState(false);
-    const [newBagPartner, setNewBagPartner] = useState<'PickMe' | 'Domex' | 'Pronto' | 'ALL'>('ALL');
+    const [newBagPartner, setNewBagPartner] = useState<'PickMe' | 'Domex' | 'Pronto'>('PickMe');
     const [newBagHub, setNewBagHub] = useState('');
     const [customBagNumber, setCustomBagNumber] = useState('');
     const [validationCard, setValidationCard] = useState<{
@@ -2011,7 +2011,7 @@ export default function WorkstationDashboard() {
         }
 
         const manifestProvider = getManifestProviderName(selectedSecondScanMawb);
-        if (manifestProvider !== 'ALL' && newBagPartner !== 'ALL' && newBagPartner.toLowerCase() !== manifestProvider.toLowerCase()) {
+        if (manifestProvider !== 'ALL' && newBagPartner.toLowerCase() !== manifestProvider.toLowerCase()) {
             setPartnerMismatchModal({
                 manifestRef: selectedSecondScanMawb,
                 manifestProvider,
@@ -2022,7 +2022,7 @@ export default function WorkstationDashboard() {
             return;
         }
 
-        const defaultCalculatedBagNumber = `${selectedSecondScanMawb}${newBagPartner && newBagPartner !== 'ALL' ? `-${newBagPartner.toUpperCase()}` : ''}-BAG-${String((outboundBags?.length || 0) + 1).padStart(2, '0')}`;
+        const defaultCalculatedBagNumber = `${selectedSecondScanMawb}-${newBagPartner.toUpperCase()}-BAG-${String((outboundBags?.length || 0) + 1).padStart(2, '0')}`;
         const finalBagNumber = customBagNumber.trim() || defaultCalculatedBagNumber;
 
         try {
@@ -2034,7 +2034,7 @@ export default function WorkstationDashboard() {
                     mawbRef: selectedSecondScanMawb,
                     partner: newBagPartner,
                     customBagNumber: finalBagNumber,
-                    destinationHub: newBagHub || (newBagPartner !== 'ALL' ? `${newBagPartner}` : 'Main Sorting Hub'),
+                    destinationHub: newBagHub || `${newBagPartner}`,
                     operator: currentUser ? `${currentUser.firstName} ${currentUser.lastName}` : 'Staff'
                 })
             });
@@ -4655,7 +4655,10 @@ export default function WorkstationDashboard() {
                                                         setStatus('ERROR');
                                                         return;
                                                     }
-                                                    const partnerCode = newBagPartner && newBagPartner !== 'ALL' ? `-${newBagPartner.toUpperCase()}` : '';
+                                                    const prov = getManifestProviderName(selectedSecondScanMawb);
+                                                    const initialPartner: 'PickMe' | 'Domex' | 'Pronto' = (prov === 'Domex' || prov === 'Pronto' || prov === 'PickMe') ? prov : 'PickMe';
+                                                    setNewBagPartner(initialPartner);
+                                                    const partnerCode = `-${initialPartner.toUpperCase()}`;
                                                     setCustomBagNumber(`${selectedSecondScanMawb}${partnerCode}-BAG-${String((outboundBags?.length || 0) + 1).padStart(2, '0')}`);
                                                     setCreateBagModalOpen(true);
                                                 }}
@@ -10272,10 +10275,10 @@ export default function WorkstationDashboard() {
                                 <select
                                     value={newBagPartner}
                                     onChange={(e: any) => {
-                                        const p = e.target.value;
+                                        const p = e.target.value as 'PickMe' | 'Domex' | 'Pronto';
                                         setNewBagPartner(p);
                                         const mawbPrefix = selectedSecondScanMawb ? selectedSecondScanMawb : 'LMD';
-                                        const partnerCode = p && p !== 'ALL' ? `-${p.toUpperCase()}` : '';
+                                        const partnerCode = `-${p.toUpperCase()}`;
                                         setCustomBagNumber(`${mawbPrefix}${partnerCode}-BAG-${String((outboundBags?.length || 0) + 1).padStart(2, '0')}`);
                                     }}
                                     style={{ ...inputStyle, width: '100%', fontWeight: '700', padding: '10px' }}
@@ -10283,7 +10286,6 @@ export default function WorkstationDashboard() {
                                     <option value="PickMe">PickMe Courier</option>
                                     <option value="Domex">Domex Express</option>
                                     <option value="Pronto">Pronto Lanka</option>
-                                    <option value="ALL">All Partners (General Sorting Bag)</option>
                                 </select>
                             </div>
 
@@ -10293,7 +10295,7 @@ export default function WorkstationDashboard() {
                                 </label>
                                 <input
                                     type="text"
-                                    value={customBagNumber !== '' ? customBagNumber : `${selectedSecondScanMawb ? selectedSecondScanMawb : 'LMD'}${newBagPartner && newBagPartner !== 'ALL' ? `-${newBagPartner.toUpperCase()}` : ''}-BAG-${String((outboundBags?.length || 0) + 1).padStart(2, '0')}`}
+                                    value={customBagNumber !== '' ? customBagNumber : `${selectedSecondScanMawb ? selectedSecondScanMawb : 'LMD'}-${newBagPartner.toUpperCase()}-BAG-${String((outboundBags?.length || 0) + 1).padStart(2, '0')}`}
                                     onChange={(e) => setCustomBagNumber(e.target.value)}
                                     style={{ ...inputStyle, width: '100%', fontWeight: '700', fontFamily: "'Inter', sans-serif", padding: '10px', backgroundColor: '#ffffff', border: '1px solid #d1d5db' }}
                                     placeholder="Enter or edit Bag Number"
