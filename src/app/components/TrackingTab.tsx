@@ -37,6 +37,7 @@ export default function TrackingTab() {
     const [loading, setLoading] = useState(false);
     const [data, setData] = useState<TrackingData | null>(null);
     const [notFoundError, setNotFoundError] = useState<string | null>(null);
+    const [lastUpdatedTime, setLastUpdatedTime] = useState<string | null>(null);
     const [timeFormat, setTimeFormat] = useState<'12H' | '24H'>('12H');
     const [timezone, setTimezone] = useState('Asia/Colombo');
     const [activeSectionTab, setActiveSectionTab] = useState<'all' | 'details' | 'manifest' | 'shipment'>('all');
@@ -67,11 +68,17 @@ export default function TrackingTab() {
             sessionStorage.setItem('last_tracked_barcode', q);
         }
         try {
-            const res = await fetch(`/api/tracking?q=${encodeURIComponent(q)}&_t=${Date.now()}`);
+            const res = await fetch(`/api/tracking?q=${encodeURIComponent(q)}&_t=${Date.now()}`, {
+                headers: {
+                    'Cache-Control': 'no-cache, no-store, must-revalidate',
+                    'Pragma': 'no-cache'
+                }
+            });
             const result = await res.json();
             if (result.success) {
                 setData(result);
                 setActiveQuery(q);
+                setLastUpdatedTime(new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true }));
             } else if (result.notFound) {
                 setData(null);
                 setActiveQuery(q);
@@ -100,6 +107,21 @@ export default function TrackingTab() {
         }, 50);
     };
 
+    const handleClear = () => {
+        setSearchQuery('');
+        setLastScanned('');
+        setActiveQuery('');
+        setData(null);
+        setNotFoundError(null);
+        setLastUpdatedTime(null);
+        if (typeof window !== 'undefined') {
+            sessionStorage.removeItem('last_tracked_barcode');
+        }
+        setTimeout(() => {
+            trackingInputRef.current?.focus();
+        }, 50);
+    };
+
     const handleQuickSample = (barcode: string) => {
         setSearchQuery(barcode);
         setLastScanned(barcode);
@@ -115,7 +137,7 @@ export default function TrackingTab() {
             {/* Search Header Card (Real Database Querying) */}
             <div style={{ backgroundColor: '#ffffff', padding: '20px', borderRadius: '10px', border: '1px solid #e5e7eb', boxShadow: '0 1px 3px rgba(0,0,0,0.04)' }}>
                 <p style={{ fontSize: '13px', color: '#4b5563', marginTop: 0, marginBottom: '12px' }}>
-                    Enter reference number or parcel barcode to track.
+                    Enter reference number or parcel barcode to track. Data is queried live from the database without caching.
                 </p>
 
                 <form onSubmit={handleSearchSubmit} style={{ display: 'flex', gap: '10px', alignItems: 'center', flexWrap: 'wrap' }}>
@@ -152,7 +174,7 @@ export default function TrackingTab() {
                         disabled={loading}
                         style={{
                             padding: '10px 22px',
-                            backgroundColor: '#e21b22',
+                            backgroundColor: '#b91c1c',
                             color: '#ffffff',
                             border: 'none',
                             borderRadius: '6px',
@@ -165,7 +187,7 @@ export default function TrackingTab() {
                             boxShadow: '0 2px 4px rgba(226, 27, 34, 0.2)'
                         }}
                     >
-                        {loading ? 'Searching ...' : 'Search Parcel'}
+                        {loading ? 'Searching...' : 'Search Parcel'}
                     </button>
                     <button
                         type="button"
@@ -186,9 +208,53 @@ export default function TrackingTab() {
                             opacity: loading || !searchQuery.trim() ? 0.6 : 1
                         }}
                     >
+                        <svg
+                            width="14"
+                            height="14"
+                            viewBox="0 0 24 24"
+                            fill="none"
+                            stroke="currentColor"
+                            strokeWidth="2.5"
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                            style={{
+                                animation: loading ? 'spin 1s linear infinite' : 'none'
+                            }}
+                        >
+                            <polyline points="23 4 23 10 17 10" />
+                            <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10" />
+                        </svg>
                         Refresh
                     </button>
+                    {(searchQuery || data || notFoundError) && (
+                        <button
+                            type="button"
+                            onClick={handleClear}
+                            disabled={loading}
+                            style={{
+                                padding: '10px 14px',
+                                backgroundColor: '#f3f4f6',
+                                color: '#4b5563',
+                                border: '1px solid #d1d5db',
+                                borderRadius: '6px',
+                                fontSize: '13px',
+                                fontWeight: '600',
+                                cursor: 'pointer',
+                                display: 'flex',
+                                alignItems: 'center',
+                                gap: '4px'
+                            }}
+                        >
+                            Clear
+                        </button>
+                    )}
                 </form>
+                {lastUpdatedTime && (
+                    <div style={{ marginTop: '10px', fontSize: '11px', color: '#090a09ff', fontWeight: '600', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                        {/* <span style={{ width: '7px', height: '7px', borderRadius: '50%', backgroundColor: '#090a09ff', display: 'inline-block' }}></span> */}
+                        Last Refreshed: {lastUpdatedTime}
+                    </div>
+                )}
             </div>
 
             {/* Error / Not Found Alert Card */}
@@ -269,8 +335,8 @@ export default function TrackingTab() {
                                     fontSize: '12.5px',
                                     fontWeight: '700',
                                     fontFamily: 'var(--font-sans, "Inter", "Inter Fallback", sans-serif)',
-                                    backgroundColor: data.status === 'Dispatched' ? '#dcfce7' : '#ffffff',
-                                    color: data.status === 'Dispatched' ? '#15803d' : '#b91c1c'
+                                    backgroundColor: data.status === 'Dispatched' ? '#b91c1c' : '#b91c1c',
+                                    color: data.status === 'Dispatched' ? '#ffffffff' : '#ffffffff'
                                 }}>
                                     {data.status}
                                 </span>
