@@ -467,6 +467,34 @@ export default function WorkstationDashboard() {
         otherScanned: 0
     });
     const [verifyOutboundBags, setVerifyOutboundBags] = useState<any[]>([]);
+    const [verifyManifestTable, setVerifyManifestTable] = useState<Array<{
+        inboundMawb: string;
+        outboundManifest: string;
+        dailyScanned: number;
+        unsealedCount: number;
+        verifiedCount: number;
+        pickMeScanned: number;
+        domexScanned: number;
+        prontoScanned: number;
+    }>>([]);
+    const [verifyScannedParcels, setVerifyScannedParcels] = useState<Array<{
+        id: string | number;
+        trackingNumber: string;
+        senderReference?: string;
+        temuBarcode?: string;
+        inboundMawb: string;
+        outboundBag: string;
+        outboundManifest: string;
+        unsealed: boolean;
+        verified: boolean;
+        scanStatus: string;
+        serviceProvider: string;
+        scannedAt: string;
+    }>>([]);
+    const [verifyFilterTab, setVerifyFilterTab] = useState<'ALL' | 'UNSEALED' | 'VERIFIED' | 'PICKME' | 'DOMEX'>('ALL');
+    const [verifyParcelSearchQuery, setVerifyParcelSearchQuery] = useState('');
+    const [verifyParcelsPage, setVerifyParcelsPage] = useState<number>(1);
+    const [verifyParcelsRowsPerPage, setVerifyParcelsRowsPerPage] = useState<number>(15);
     const [verifyLoadingStats, setVerifyLoadingStats] = useState(false);
 
     const fetchVerifyDailyStats = useCallback(async (dateStr: string) => {
@@ -479,6 +507,12 @@ export default function WorkstationDashboard() {
             }
             if (result.success && Array.isArray(result.outboundBags)) {
                 setVerifyOutboundBags(result.outboundBags);
+            }
+            if (result.success && Array.isArray(result.manifestTable)) {
+                setVerifyManifestTable(result.manifestTable);
+            }
+            if (result.success && Array.isArray(result.scannedParcels)) {
+                setVerifyScannedParcels(result.scannedParcels);
             }
         } catch (err) {
             console.error("Failed to fetch dispatch verify daily stats:", err);
@@ -6160,124 +6194,217 @@ export default function WorkstationDashboard() {
                                 </div>
                             </div>
 
-                            {/* Step 1: Select Bin & Provider Outbound LMD Bags for Manifest */}
+                            {/* Individual Scanned Parcels Verification Table */}
                             <div style={{ ...card, marginBottom: '20px', fontFamily: 'var(--font-sans, "Inter", "Inter Fallback", sans-serif)' }}>
-                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
-                                    <div style={label}>Select Active Dispatch Bin & Provider Outbound LMD Bags</div>
-                                    <span style={{ fontSize: '12px', color: '#6b7280', fontWeight: '600' }}>
-                                        {verifyOutboundBags.length} Outbound LMD Bags Created
-                                    </span>
-                                </div>
-                                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '12px', marginBottom: '16px' }}>
-                                    {(['PickMe', 'Domex', 'Pronto'] as const).map((bin) => {
-                                        const partnerBags = verifyOutboundBags.filter(b => (b.targetPartner || '').toLowerCase() === bin.toLowerCase());
-                                        const isSelected = selectedBin === bin;
-
-                                        return (
-                                            <button
-                                                key={bin}
-                                                onClick={() => setSelectedBin(bin)}
-                                                onMouseOver={(e) => { e.currentTarget.style.outline = '2px solid #e21b22'; e.currentTarget.style.outlineOffset = '-2px'; }}
-                                                onMouseOut={(e) => { e.currentTarget.style.outline = 'none'; }}
-                                                style={{
-                                                    backgroundColor: '#ffffff',
-                                                    color: '#111827',
-                                                    border: isSelected ? '2px solid #e21b22' : '1px solid #e5e7eb',
-                                                    borderRadius: '10px',
-                                                    padding: '14px',
-                                                    cursor: 'pointer',
-                                                    textAlign: 'center',
-                                                    transition: 'all 0.15s ease-in-out',
-                                                    transform: isSelected ? 'translateY(-2px)' : 'none',
-                                                    boxShadow: isSelected ? '0 4px 12px rgba(226, 27, 34, 0.15)' : '0 1px 3px rgba(0,0,0,0.05)',
-                                                    fontFamily: 'var(--font-sans, "Inter", "Inter Fallback", sans-serif)'
-                                                }}
-                                            >
-                                                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '6px' }}>
-                                                    {bin === 'PickMe' && (
-                                                        <div style={{ backgroundColor: '#ffffff', padding: '4px 8px', borderRadius: '4px', height: '24px', display: 'flex', alignItems: 'center', justifyContent: 'center', width: '80px' }}>
-                                                            <img src="/pick_me_logo.png" alt="PickMe" style={{ maxHeight: '100%', maxWidth: '100%', objectFit: 'contain' }} />
-                                                        </div>
-                                                    )}
-                                                    {bin === 'Domex' && (
-                                                        <div style={{ backgroundColor: '#ffffff', padding: '4px 8px', borderRadius: '4px', height: '24px', display: 'flex', alignItems: 'center', justifyContent: 'center', width: '80px' }}>
-                                                            <img src="/domex_logo.png" alt="Domex" style={{ maxHeight: '100%', maxWidth: '100%', objectFit: 'contain' }} />
-                                                        </div>
-                                                    )}
-                                                    {bin === 'Pronto' && (
-                                                        <div style={{ backgroundColor: '#ffffff', padding: '4px 8px', borderRadius: '4px', height: '24px', display: 'flex', alignItems: 'center', justifyContent: 'center', width: '80px', fontWeight: '900', color: '#ea580c', fontSize: '13px' }}>
-                                                            PRONTO
-                                                        </div>
-                                                    )}
-                                                    <div style={{ fontSize: '12px', fontWeight: '700', marginTop: '2px', color: isSelected ? '#e21b22' : '#111827', fontFamily: 'var(--font-sans, "Inter", "Inter Fallback", sans-serif)' }}>
-                                                        {verifyLoadingStats ? '...' : (bin === 'PickMe' ? verifyDailyStats.pickMeScanned : bin === 'Domex' ? verifyDailyStats.domexScanned : verifyDailyStats.prontoScanned)} Allocated Parcels | {partnerBags.length} LMD Bags
-                                                    </div>
-                                                </div>
-                                            </button>
-                                        );
-                                    })}
-                                </div>
-
-                                {/* Outbound LMD Bags for Manifest Table */}
-                                <div style={{ backgroundColor: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '8px', padding: '14px' }}>
-                                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
-                                        <div style={{ fontSize: '13px', fontWeight: '800', color: '#1e293b', fontFamily: 'var(--font-sans, "Inter", "Inter Fallback", sans-serif)' }}>
-                                            {selectedBin || 'All Providers'} | Outbound LMD Bags for Manifest (LMD Verification)
+                                {/* Top Controls & Header */}
+                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px', flexWrap: 'wrap', gap: '12px' }}>
+                                    <div>
+                                        <div style={{ ...label, marginBottom: '2px' }}>Scanned Parcels Verification Log Table</div>
+                                        <div style={{ fontSize: '12px', color: '#64748b' }}>
+                                            List of each scanned parcel record for {verifySelectedDate} with Inbound & Outbound Manifest details
                                         </div>
-                                        <span style={{ fontSize: '11.5px', color: '#64748b', fontWeight: '600', fontFamily: 'var(--font-sans, "Inter", "Inter Fallback", sans-serif)' }}>
-                                            Showing LMD verification bags created in system
-                                        </span>
                                     </div>
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
+                                        <input
+                                            type="text"
+                                            placeholder="Search Tracking No, MAWB, Outbound Manifest..."
+                                            value={verifyParcelSearchQuery}
+                                            onChange={(e) => {
+                                                setVerifyParcelSearchQuery(e.target.value);
+                                                setVerifyParcelsPage(1);
+                                            }}
+                                            style={{
+                                                padding: '7px 12px',
+                                                fontSize: '12px',
+                                                border: '1px solid #cbd5e1',
+                                                borderRadius: '6px',
+                                                width: '280px',
+                                                outline: 'none'
+                                            }}
+                                        />
+                                        <div style={{ display: 'flex', backgroundColor: '#f1f5f9', borderRadius: '6px', padding: '2px' }}>
+                                            {(['ALL', 'UNSEALED', 'VERIFIED', 'PICKME', 'DOMEX'] as const).map(tabKey => {
+                                                const active = verifyFilterTab === tabKey;
+                                                return (
+                                                    <button
+                                                        key={tabKey}
+                                                        onClick={() => { setVerifyFilterTab(tabKey); setVerifyParcelsPage(1); }}
+                                                        style={{
+                                                            padding: '5px 10px',
+                                                            fontSize: '11px',
+                                                            fontWeight: '700',
+                                                            border: 'none',
+                                                            borderRadius: '4px',
+                                                            cursor: 'pointer',
+                                                            backgroundColor: active ? '#ffffff' : 'transparent',
+                                                            color: active ? '#b91c1c' : '#475569',
+                                                            boxShadow: active ? '0 1px 2px rgba(0,0,0,0.08)' : 'none',
+                                                            transition: 'all 0.15s'
+                                                        }}
+                                                    >
+                                                        {tabKey === 'ALL' ? 'ALL' : tabKey === 'UNSEALED' ? 'Unsealed' : tabKey === 'VERIFIED' ? 'Verified' : tabKey}
+                                                    </button>
+                                                );
+                                            })}
+                                        </div>
+                                    </div>
+                                </div>
 
-                                    {verifyOutboundBags.filter(b => !selectedBin || (b.targetPartner || '').toLowerCase() === selectedBin.toLowerCase()).length > 0 ? (
-                                        <div style={{ overflowX: 'auto' }}>
-                                            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px', textAlign: 'left', fontFamily: 'var(--font-sans, "Inter", "Inter Fallback", sans-serif)' }}>
-                                                <thead>
-                                                    <tr style={{ borderBottom: '2px solid #cbd5e1', backgroundColor: '#ffffff' }}>
-                                                        {['LMD Bag No.', 'Manifest / MAWB Ref', 'Courier Partner', 'Destination Hub', 'Parcels', 'Total Weight', 'Bag Status', 'Created Date'].map(h => (
-                                                            <th key={h} style={{ padding: '8px 10px', color: '#475569', fontWeight: '700', fontSize: '11px', textTransform: 'uppercase', fontFamily: 'var(--font-sans, "Inter", "Inter Fallback", sans-serif)' }}>{h}</th>
-                                                        ))}
-                                                    </tr>
-                                                </thead>
-                                                <tbody>
-                                                    {verifyOutboundBags
-                                                        .filter(b => !selectedBin || (b.targetPartner || '').toLowerCase() === selectedBin.toLowerCase())
-                                                        .map((bag, bIdx) => (
-                                                            <tr key={bag.id || bIdx} style={{ borderBottom: '1px solid #e2e8f0', backgroundColor: bIdx % 2 === 0 ? '#ffffff' : '#f8fafc' }}>
-                                                                <td style={{ padding: '8px 10px', fontWeight: '800', color: '#dc2626' }}>{bag.bagNumber}</td>
-                                                                <td style={{ padding: '8px 10px', fontWeight: '600', color: '#1e293b' }}>{bag.mawbRef}</td>
-                                                                <td style={{ padding: '8px 10px', fontWeight: '700', color: bag.targetPartner === 'PickMe' ? '#a16207' : bag.targetPartner === 'Domex' ? '#991b1b' : '#c2410c' }}>
-                                                                    {bag.targetPartner}
-                                                                </td>
-                                                                <td style={{ padding: '8px 10px', color: '#334155' }}>{bag.destinationHub}</td>
-                                                                <td style={{ padding: '8px 10px', fontWeight: '700', color: '#0f172a' }}>{bag.parcelCount} pcs</td>
-                                                                <td style={{ padding: '8px 10px', color: '#475569' }}>{bag.totalWeight} kg</td>
-                                                                <td style={{ padding: '8px 10px' }}>
-                                                                    <span style={{
-                                                                        backgroundColor: '#ffffff',
-                                                                        color: '#000000',
-                                                                        border: '1px solid #dc2626',
-                                                                        padding: '2px 8px',
-                                                                        borderRadius: '4px',
-                                                                        fontSize: '10.5px',
-                                                                        fontWeight: '700'
-                                                                    }}>
-                                                                        {bag.status}
+                                {/* Table */}
+                                <div style={{ overflowX: 'auto' }}>
+                                    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px', textAlign: 'left', fontFamily: 'var(--font-sans, "Inter", "Inter Fallback", sans-serif)' }}>
+                                        <thead>
+                                            <tr style={{ borderBottom: '2px solid #cbd5e1', backgroundColor: '#f8fafc' }}>
+                                                <th style={{ padding: '10px 10px', color: '#475569', fontWeight: '800', fontSize: '11px', textTransform: 'uppercase', width: '45px' }}>#</th>
+                                                <th style={{ padding: '10px 10px', color: '#475569', fontWeight: '800', fontSize: '11px', textTransform: 'uppercase' }}>Parcel Tracking No.</th>
+                                                <th style={{ padding: '10px 10px', color: '#475569', fontWeight: '800', fontSize: '11px', textTransform: 'uppercase' }}>Inbound Manifest (MAWB Ref)</th>
+                                                <th style={{ padding: '10px 10px', color: '#475569', fontWeight: '800', fontSize: '11px', textTransform: 'uppercase' }}>Outbound Bag</th>
+                                                <th style={{ padding: '10px 10px', color: '#475569', fontWeight: '800', fontSize: '11px', textTransform: 'uppercase' }}>Outbound Manifest</th>
+                                                <th style={{ padding: '10px 10px', color: '#475569', fontWeight: '800', fontSize: '11px', textTransform: 'uppercase', textAlign: 'center' }}>1st Scan (Unsealed)</th>
+                                                <th style={{ padding: '10px 10px', color: '#475569', fontWeight: '800', fontSize: '11px', textTransform: 'uppercase', textAlign: 'center' }}>2nd Scan (Verified)</th>
+                                                <th style={{ padding: '10px 10px', color: '#475569', fontWeight: '800', fontSize: '11px', textTransform: 'uppercase' }}>Allocated Courier</th>
+                                                <th style={{ padding: '10px 10px', color: '#475569', fontWeight: '800', fontSize: '11px', textTransform: 'uppercase' }}>Scan Time</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            {(() => {
+                                                const filtered = verifyScannedParcels.filter(p => {
+                                                    // Search filter
+                                                    if (verifyParcelSearchQuery.trim()) {
+                                                        const q = verifyParcelSearchQuery.toLowerCase();
+                                                        const matches = (p.trackingNumber || '').toLowerCase().includes(q) ||
+                                                            (p.senderReference || p.temuBarcode || '').toLowerCase().includes(q) ||
+                                                            (p.inboundMawb || '').toLowerCase().includes(q) ||
+                                                            (p.outboundBag || '').toLowerCase().includes(q) ||
+                                                            (p.outboundManifest || '').toLowerCase().includes(q) ||
+                                                            (p.serviceProvider || '').toLowerCase().includes(q);
+                                                        if (!matches) return false;
+                                                    }
+                                                    // Tab filter
+                                                    if (verifyFilterTab === 'UNSEALED') return p.unsealed;
+                                                    if (verifyFilterTab === 'VERIFIED') return p.verified;
+                                                    if (verifyFilterTab === 'PICKME') return (p.serviceProvider || '').toLowerCase() === 'pickme';
+                                                    if (verifyFilterTab === 'DOMEX') return (p.serviceProvider || '').toLowerCase() === 'domex';
+                                                    return true;
+                                                });
+
+                                                if (verifyLoadingStats) {
+                                                    return (
+                                                        <tr>
+                                                            <td colSpan={9} style={{ padding: '24px', textAlign: 'center', color: '#64748b', fontSize: '13px' }}>
+                                                                Loading scanned parcel details...
+                                                            </td>
+                                                        </tr>
+                                                    );
+                                                }
+
+                                                if (filtered.length === 0) {
+                                                    return (
+                                                        <tr>
+                                                            <td colSpan={9} style={{ padding: '24px', textAlign: 'center', color: '#94a3b8', fontSize: '13px' }}>
+                                                                No scanned parcel records found for {verifySelectedDate}.
+                                                            </td>
+                                                        </tr>
+                                                    );
+                                                }
+
+                                                const totalPages = Math.ceil(filtered.length / verifyParcelsRowsPerPage);
+                                                const page = Math.min(verifyParcelsPage, totalPages || 1);
+                                                const startIndex = (page - 1) * verifyParcelsRowsPerPage;
+                                                const visibleRows = filtered.slice(startIndex, startIndex + verifyParcelsRowsPerPage);
+
+                                                return (
+                                                    <>
+                                                        {visibleRows.map((parcel, idx) => {
+                                                            const rowNo = startIndex + idx + 1;
+                                                            return (
+                                                                <tr key={parcel.id || idx} style={{ borderBottom: '1px solid #e2e8f0', backgroundColor: idx % 2 === 0 ? '#ffffff' : '#f8fafc' }}>
+                                                                    <td style={{ padding: '9px 10px', color: '#1e293b', fontSize: '12px', fontWeight: '600' }}>{rowNo}</td>
+                                                                    <td style={{ padding: '9px 10px', fontWeight: '700', color: '#0f172a', fontFamily: 'monospace', fontSize: '12.5px' }}>
+                                                                        <div>{parcel.trackingNumber}</div>
+                                                                        {(parcel.senderReference || parcel.temuBarcode) && (parcel.senderReference || parcel.temuBarcode)!.trim().toLowerCase() !== parcel.trackingNumber.trim().toLowerCase() && (
+                                                                            <div style={{ fontSize: '10.5px', color: '#64748b', fontWeight: '500', fontFamily: 'var(--font-sans, "Inter", "Inter Fallback", sans-serif)' }}>
+                                                                                Temu: {parcel.senderReference || parcel.temuBarcode}
+                                                                            </div>
+                                                                        )}
+                                                                    </td>
+                                                                    <td style={{ padding: '9px 10px', fontWeight: '600', color: '#0f172a' }}>
+                                                                        {parcel.inboundMawb}
+                                                                    </td>
+                                                                    <td style={{ padding: '9px 10px', fontWeight: '600', color: '#0f172a' }}>
+                                                                        {parcel.outboundBag || 'Pending Bag'}
+                                                                    </td>
+                                                                    <td style={{ padding: '9px 10px', fontWeight: '600', color: '#0f172a' }}>
+                                                                        {parcel.outboundManifest || 'Pending Manifest'}
+                                                                    </td>
+                                                                    <td style={{ padding: '9px 10px', textAlign: 'center', color: '#0f172a', fontWeight: '600' }}>
+                                                                        {parcel.unsealed ? 'Unsealed' : '-'}
+                                                                    </td>
+                                                                    <td style={{ padding: '9px 10px', textAlign: 'center', color: '#0f172a', fontWeight: '600' }}>
+                                                                        {parcel.verified ? 'Verified (2nd)' : 'Pending'}
+                                                                    </td>
+                                                                    <td style={{ padding: '9px 10px', fontWeight: '700', color: '#0f172a' }}>
+                                                                        {parcel.serviceProvider}
+                                                                    </td>
+                                                                    <td style={{ padding: '9px 10px', color: '#0f172a', fontSize: '12px' }}>
+                                                                        {parcel.scannedAt ? new Date(parcel.scannedAt).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', second: '2-digit' }) : '-'}
+                                                                    </td>
+                                                                </tr>
+                                                            );
+                                                        })}
+
+                                                        {/* Pagination Footer */}
+                                                        <tr>
+                                                            <td colSpan={9} style={{ padding: '12px 10px', borderTop: '2px solid #e2e8f0', backgroundColor: '#f8fafc' }}>
+                                                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '10px' }}>
+                                                                    <span style={{ fontSize: '11.5px', color: '#475569', fontWeight: '600' }}>
+                                                                        Showing {startIndex + 1} - {Math.min(startIndex + verifyParcelsRowsPerPage, filtered.length)} of {filtered.length} scanned parcels
                                                                     </span>
-                                                                </td>
-                                                                <td style={{ padding: '8px 10px', color: '#64748b', fontSize: '11px' }}>
-                                                                    {bag.createdAt ? new Date(bag.createdAt).toLocaleDateString('en-GB') : '-'}
-                                                                </td>
-                                                            </tr>
-                                                        ))}
-                                                </tbody>
-                                            </table>
-                                        </div>
-                                    ) : (
-                                        <div style={{ textAlign: 'center', padding: '16px', color: '#64748b', fontSize: '12.5px', fontFamily: 'Inter, system-ui, -apple-system, sans-serif' }}>
-                                            No LMD outbound bags created yet for {selectedBin || 'the selected provider'}.
-                                        </div>
-                                    )}
+                                                                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                                                                        <button
+                                                                            onClick={() => setVerifyParcelsPage(prev => Math.max(prev - 1, 1))}
+                                                                            disabled={page <= 1}
+                                                                            style={{
+                                                                                padding: '4px 10px',
+                                                                                fontSize: '11.5px',
+                                                                                fontWeight: '700',
+                                                                                border: '1px solid #cbd5e1',
+                                                                                borderRadius: '4px',
+                                                                                backgroundColor: page <= 1 ? '#f1f5f9' : '#ffffff',
+                                                                                color: page <= 1 ? '#94a3b8' : '#1e293b',
+                                                                                cursor: page <= 1 ? 'not-allowed' : 'pointer'
+                                                                            }}
+                                                                        >
+                                                                            Previous
+                                                                        </button>
+                                                                        <span style={{ fontSize: '11.5px', color: '#334155', fontWeight: '700' }}>
+                                                                            Page {page} of {totalPages || 1}
+                                                                        </span>
+                                                                        <button
+                                                                            onClick={() => setVerifyParcelsPage(prev => Math.min(prev + 1, totalPages))}
+                                                                            disabled={page >= totalPages}
+                                                                            style={{
+                                                                                padding: '4px 10px',
+                                                                                fontSize: '11.5px',
+                                                                                fontWeight: '700',
+                                                                                border: '1px solid #cbd5e1',
+                                                                                borderRadius: '4px',
+                                                                                backgroundColor: page >= totalPages ? '#f1f5f9' : '#ffffff',
+                                                                                color: page >= totalPages ? '#94a3b8' : '#1e293b',
+                                                                                cursor: page >= totalPages ? 'not-allowed' : 'pointer'
+                                                                            }}
+                                                                        >
+                                                                            Next
+                                                                        </button>
+                                                                    </div>
+                                                                </div>
+                                                            </td>
+                                                        </tr>
+                                                    </>
+                                                );
+                                            })()}
+                                        </tbody>
+                                    </table>
                                 </div>
                             </div>
 
