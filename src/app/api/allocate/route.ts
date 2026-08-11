@@ -211,8 +211,8 @@ export async function POST(request: Request) {
             missing_parcels
         } = await request.json();
 
-        const supabaseUrl = process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL;
-        const anonKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+        const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+        const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 
         if (!supabaseUrl || !anonKey) {
             return NextResponse.json({ success: false, error: 'Database environment variables are not configured.' }, { status: 500 });
@@ -840,68 +840,20 @@ export async function GET(request: Request) {
         const bagNumberParam = urlObj.searchParams.get('bagNumber');
         const getUnsealedBags = urlObj.searchParams.get('getUnsealedBags') === 'true';
 
-        const supabaseUrl = process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL;
-        const anonKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-
-        if (!supabaseUrl || !anonKey) {
-            return NextResponse.json({ success: false, error: 'Database environment variables are not configured.' }, { status: 500 });
-        }
-
+        const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+        const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
         const headers = {
-            "apikey": anonKey,
+            "apikey": anonKey!,
             "Authorization": `Bearer ${anonKey}`
         };
 
         if (getMawbs) {
-            let mawbs: any[] = [];
-            // Attempt 1: Fetch MAWBs with service providers allocated
-            try {
-                const res = await fetch(`${supabaseUrl}/rest/v1/mawb?has_service_providers_allocated=eq.true&select=mawb_reference,carrier,declared_bags,has_service_providers_allocated&order=created_at.desc`, { headers });
-                if (res.ok) {
-                    const data = await res.json();
-                    if (Array.isArray(data) && data.length > 0) {
-                        mawbs = data;
-                    }
-                }
-            } catch (e) {
-                console.error('Error fetching allocated MAWBs:', e);
+            const res = await fetch(`${supabaseUrl}/rest/v1/mawb?has_service_providers_allocated=eq.true&select=mawb_reference,carrier,declared_bags,has_service_providers_allocated`, { headers });
+            if (!res.ok) {
+                const errText = await res.text();
+                return NextResponse.json({ success: false, error: errText }, { status: 500 });
             }
-
-            // Attempt 2: Fallback to all MAWBs in `mawb` table if allocated list is empty
-            if (mawbs.length === 0) {
-                try {
-                    const res = await fetch(`${supabaseUrl}/rest/v1/mawb?select=mawb_reference,carrier,declared_bags,has_service_providers_allocated&order=created_at.desc`, { headers });
-                    if (res.ok) {
-                        const data = await res.json();
-                        if (Array.isArray(data) && data.length > 0) {
-                            mawbs = data;
-                        }
-                    }
-                } catch (e) {
-                    console.error('Error fetching all MAWBs:', e);
-                }
-            }
-
-            // Attempt 3: Fallback to distinct MAWB references from `shipments` table
-            if (mawbs.length === 0) {
-                try {
-                    const res = await fetch(`${supabaseUrl}/rest/v1/shipments?select=mawb_reference&mawb_reference=not.is.null&limit=1000`, { headers });
-                    if (res.ok) {
-                        const data = await res.json();
-                        if (Array.isArray(data) && data.length > 0) {
-                            const uniqueMawbs = Array.from(new Set(data.map((s: any) => s.mawb_reference?.trim()).filter(Boolean)));
-                            mawbs = uniqueMawbs.map(ref => ({
-                                mawb_reference: ref,
-                                carrier: 'Cargo Express',
-                                declared_bags: 0
-                            }));
-                        }
-                    }
-                } catch (e) {
-                    console.error('Error fetching MAWBs from shipments:', e);
-                }
-            }
-
+            const mawbs = await res.json();
             return NextResponse.json({ success: true, mawbs });
         }
 
