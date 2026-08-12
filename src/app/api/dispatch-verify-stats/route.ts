@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 
 export const dynamic = 'force-dynamic';
+export const revalidate = 0;
 
 const getSupabaseConfig = () => {
     const url = process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -26,7 +27,10 @@ async function fetchAllSupabaseRows(table: string, selectFields: string, sb: { u
     while (hasMore && attempts < 10) {
         attempts++;
         try {
-            const res = await fetch(`${sb.url}/rest/v1/${table}?select=${selectFields}&order=id.asc&limit=${limit}&offset=${offset}`, { headers: sb.headers });
+            const res = await fetch(`${sb.url}/rest/v1/${table}?select=${selectFields}&order=id.asc&limit=${limit}&offset=${offset}`, {
+                headers: sb.headers,
+                cache: 'no-store'
+            });
             if (res.ok) {
                 const data = await res.json();
                 if (Array.isArray(data) && data.length > 0) {
@@ -329,77 +333,79 @@ export async function GET(request: Request) {
             const hasActivityOnDate = isCreatedOnDate || isUpdatedOnDate;
 
             if (hasActivityOnDate) {
-                const rawRef = alloc.shipment_ref || String(alloc.id);
-                const canonicalRef = getCanonicalTracking(rawRef);
-                const temuCode = getTemuBarcode(canonicalRef, rawRef);
-
                 const statusStr = (alloc.scan_status || '').toUpperCase();
-                const is1stScan = alloc.unsealed === true || statusStr === '1ST_SCAN_DONE' || statusStr === '2ND_SCAN_DONE';
+                const is1stScan = alloc.unsealed === true || statusStr === '1ST_SCAN_DONE' || statusStr === '2ND_SCAN_DONE' || statusStr === 'VERIFIED' || statusStr === 'DISPATCHED';
                 const is2ndScan = statusStr === '2ND_SCAN_DONE' || statusStr === 'VERIFIED' || statusStr === 'DISPATCHED';
 
-                const partnerName = resolvePartnerName(alloc.service_provider);
-                const inboundMawb = (alloc.mawb_ref && typeof alloc.mawb_ref === 'string' && alloc.mawb_ref.trim()) ? alloc.mawb_ref.trim() : 'UNASSIGNED';
+                // ONLY process and display parcels where 1st scan (or 2nd scan) has actually been performed!
+                if (is1stScan || is2ndScan) {
+                    const rawRef = alloc.shipment_ref || String(alloc.id);
+                    const canonicalRef = getCanonicalTracking(rawRef);
+                    const temuCode = getTemuBarcode(canonicalRef, rawRef);
+                    const partnerName = resolvePartnerName(alloc.service_provider);
+                    const inboundMawb = (alloc.mawb_ref && typeof alloc.mawb_ref === 'string' && alloc.mawb_ref.trim()) ? alloc.mawb_ref.trim() : 'UNASSIGNED';
 
-                if (!isParcelProcessed(canonicalRef, temuCode, rawRef)) {
-                    markParcelProcessed(canonicalRef, temuCode, rawRef);
+                    if (!isParcelProcessed(canonicalRef, temuCode, rawRef)) {
+                        markParcelProcessed(canonicalRef, temuCode, rawRef);
 
-                    if (is1stScan || is2ndScan) totalScannedAll++;
-                    if (is1stScan) unsealed1stScanDone++;
-                    if (is2ndScan) verified2ndScanDone++;
+                        totalScannedAll++;
+                        if (is1stScan) unsealed1stScanDone++;
+                        if (is2ndScan) verified2ndScanDone++;
 
-                    if (partnerName === 'PickMe') pickMeScanned++;
-                    else if (partnerName === 'Domex') domexScanned++;
-                    else if (partnerName === 'Pronto') prontoScanned++;
-                    else otherScanned++;
+                        if (partnerName === 'PickMe') pickMeScanned++;
+                        else if (partnerName === 'Domex') domexScanned++;
+                        else if (partnerName === 'Pronto') prontoScanned++;
+                        else otherScanned++;
 
-                    // Update Manifest Breakdown Group
-                    const group = getOrCreateManifestGroup(inboundMawb);
-                    if (is1stScan || is2ndScan) group.dailyScanned++;
-                    if (is1stScan) group.unsealedCount++;
-                    if (is2ndScan) group.verifiedCount++;
+                        // Update Manifest Breakdown Group
+                        const group = getOrCreateManifestGroup(inboundMawb);
+                        group.dailyScanned++;
+                        if (is1stScan) group.unsealedCount++;
+                        if (is2ndScan) group.verifiedCount++;
 
-                    if (partnerName === 'PickMe') group.pickMeScanned++;
-                    else if (partnerName === 'Domex') group.domexScanned++;
-                    else if (partnerName === 'Pronto') group.prontoScanned++;
+                        if (partnerName === 'PickMe') group.pickMeScanned++;
+                        else if (partnerName === 'Domex') group.domexScanned++;
+                        else if (partnerName === 'Pronto') group.prontoScanned++;
 
-                    // Resolve Outbound Bag & Outbound Manifest
-                    const outboundBag = shipmentToBagMap.get(canonicalRef) || shipmentToBagMap.get(rawRef) || 'Pending Bag';
-                    let outboundManifest = shipmentToOmMap.get(canonicalRef) || shipmentToOmMap.get(rawRef) || '';
-                    if (!outboundManifest && mawbPartnerToManifestMap.has(`${inboundMawb}_${partnerName}`)) {
-                        outboundManifest = mawbPartnerToManifestMap.get(`${inboundMawb}_${partnerName}`)!;
-                    }
-                    if (!outboundManifest) outboundManifest = 'Pending Manifest';
-
-                    scannedParcels.push({
-                        id: alloc.id,
-                        trackingNumber: canonicalRef,
-                        senderReference: temuCode || undefined,
-                        temuBarcode: temuCode || undefined,
-                        inboundMawb,
-                        outboundBag,
-                        outboundManifest,
-                        unsealed: is1stScan,
-                        verified: is2ndScan,
-                        scanStatus: alloc.scan_status || (alloc.unsealed ? '1ST_SCAN_DONE' : 'PENDING'),
-                        serviceProvider: partnerName,
-                        scannedAt: alloc.updated_at || alloc.created_at
-                    });
-                } else {
-                    // Update existing record if new info is available
-                    const existing = scannedParcels.find(p => p.trackingNumber.toLowerCase() === canonicalRef.toLowerCase() || (p.senderReference && p.senderReference.toLowerCase() === rawRef.toLowerCase()));
-                    if (existing) {
-                        if (is1stScan && !existing.unsealed) existing.unsealed = true;
-                        if (is2ndScan && !existing.verified) existing.verified = true;
-                        if (partnerName !== 'Other' && partnerName !== 'Unassigned' && (existing.serviceProvider === 'Other' || existing.serviceProvider === 'Unassigned')) {
-                            existing.serviceProvider = partnerName;
+                        // Resolve Outbound Bag & Outbound Manifest
+                        const outboundBag = shipmentToBagMap.get(canonicalRef) || shipmentToBagMap.get(rawRef) || 'Pending Bag';
+                        let outboundManifest = shipmentToOmMap.get(canonicalRef) || shipmentToOmMap.get(rawRef) || '';
+                        if (!outboundManifest && mawbPartnerToManifestMap.has(`${inboundMawb}_${partnerName}`)) {
+                            outboundManifest = mawbPartnerToManifestMap.get(`${inboundMawb}_${partnerName}`)!;
                         }
-                        if (existing.outboundBag === 'Pending Bag') {
-                            const ob = shipmentToBagMap.get(canonicalRef) || shipmentToBagMap.get(rawRef);
-                            if (ob) existing.outboundBag = ob;
-                        }
-                        if (existing.outboundManifest === 'Pending Manifest') {
-                            const om = shipmentToOmMap.get(canonicalRef) || shipmentToOmMap.get(rawRef);
-                            if (om) existing.outboundManifest = om;
+                        if (!outboundManifest) outboundManifest = 'Pending Manifest';
+
+                        scannedParcels.push({
+                            id: alloc.id,
+                            trackingNumber: canonicalRef,
+                            senderReference: temuCode || undefined,
+                            temuBarcode: temuCode || undefined,
+                            inboundMawb,
+                            outboundBag,
+                            outboundManifest,
+                            unsealed: is1stScan,
+                            verified: is2ndScan,
+                            scanStatus: alloc.scan_status || (alloc.unsealed ? '1ST_SCAN_DONE' : '1ST_SCAN_DONE'),
+                            serviceProvider: partnerName,
+                            scannedAt: alloc.updated_at || alloc.created_at
+                        });
+                    } else {
+                        // Update existing record if new info is available
+                        const existing = scannedParcels.find(p => p.trackingNumber.toLowerCase() === canonicalRef.toLowerCase() || (p.senderReference && p.senderReference.toLowerCase() === rawRef.toLowerCase()));
+                        if (existing) {
+                            if (is1stScan && !existing.unsealed) existing.unsealed = true;
+                            if (is2ndScan && !existing.verified) existing.verified = true;
+                            if (partnerName !== 'Other' && partnerName !== 'Unassigned' && (existing.serviceProvider === 'Other' || existing.serviceProvider === 'Unassigned')) {
+                                existing.serviceProvider = partnerName;
+                            }
+                            if (existing.outboundBag === 'Pending Bag') {
+                                const ob = shipmentToBagMap.get(canonicalRef) || shipmentToBagMap.get(rawRef);
+                                if (ob) existing.outboundBag = ob;
+                            }
+                            if (existing.outboundManifest === 'Pending Manifest') {
+                                const om = shipmentToOmMap.get(canonicalRef) || shipmentToOmMap.get(rawRef);
+                                if (om) existing.outboundManifest = om;
+                            }
                         }
                     }
                 }
@@ -518,6 +524,12 @@ export async function GET(request: Request) {
             manifestTable,
             scannedParcels,
             outboundBags
+        }, {
+            headers: {
+                'Cache-Control': 'no-store, no-cache, must-revalidate, proxy-revalidate',
+                'Pragma': 'no-cache',
+                'Expires': '0',
+            }
         });
 
     } catch (e: any) {

@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 
 export const dynamic = 'force-dynamic';
+export const revalidate = 0;
 
 const getSupabaseConfig = () => {
     const url = process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -26,7 +27,10 @@ async function fetchAllSupabaseRows(table: string, selectFields: string, sb: { u
     while (hasMore && attempts < 10) {
         attempts++;
         try {
-            const res = await fetch(`${sb.url}/rest/v1/${table}?select=${selectFields}&limit=${limit}&offset=${offset}`, { headers: sb.headers });
+            const res = await fetch(`${sb.url}/rest/v1/${table}?select=${selectFields}&limit=${limit}&offset=${offset}`, {
+                headers: sb.headers,
+                cache: 'no-store'
+            });
             if (res.ok) {
                 const data = await res.json();
                 if (Array.isArray(data) && data.length > 0) {
