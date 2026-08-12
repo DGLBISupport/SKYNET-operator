@@ -6874,44 +6874,46 @@ export default function WorkstationDashboard() {
                                                                     }}
                                                                 >
                                                                     {/* Left Info: Arrow + Manifest Ref + Partner Badge */}
-                                                                    <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
-                                                                        <div style={{
-                                                                            width: '24px', height: '24px', borderRadius: '6px', backgroundColor: isManifestExpanded ? '#111827' : '#f3f4f6',
-                                                                            color: isManifestExpanded ? '#ffffff' : '#4b5563', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '11px', transition: 'all 0.15s'
-                                                                        }}>
-                                                                            {isManifestExpanded ? '▲' : '▼'}
-                                                                        </div>
-
-                                                                        <div>
-                                                                            <div style={{ fontSize: '10px', fontWeight: '700', color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
-                                                                                OUTBOUND MANIFEST
+                                                                    <div style={{ display: 'flex', alignItems: 'center', gap: '14px', flexWrap: 'wrap' }}>
+                                                                        <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
+                                                                            <div style={{
+                                                                                width: '24px', height: '24px', borderRadius: '6px', backgroundColor: isManifestExpanded ? '#111827' : '#f3f4f6',
+                                                                                color: isManifestExpanded ? '#ffffff' : '#4b5563', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '11px', transition: 'all 0.15s'
+                                                                            }}>
+                                                                                {isManifestExpanded ? '▲' : '▼'}
                                                                             </div>
-                                                                            <div style={{ fontSize: '15px', fontWeight: '800', color: '#111827', display: 'flex', alignItems: 'center', gap: '8px' }}>
-                                                                                <span>{manifest.manifest_reference}</span>
-                                                                                {(() => {
-                                                                                    const rawName = manifest.service_provider_name || (manifest.manifest_reference?.includes('PICKME') ? 'PickMe' : manifest.manifest_reference?.includes('DOMEX') ? 'Domex' : manifest.manifest_reference?.includes('PRONTO') ? 'Pronto' : 'Partner');
-                                                                                    const isPickMe = rawName.toLowerCase().includes('pickme');
-                                                                                    const isDomex = rawName.toLowerCase().includes('domex');
-                                                                                    const isPronto = rawName.toLowerCase().includes('pronto');
-                                                                                    const displayLabel = isPickMe ? 'PickMe' : isDomex ? 'Domex' : isPronto ? 'Pronto' : rawName;
-                                                                                    return (
-                                                                                        <span style={{
-                                                                                            backgroundColor: isPickMe ? '#facc15' : isDomex ? '#7b0f1a' : isPronto ? '#d97706' : '#4b5563',
-                                                                                            color: isPickMe ? '#111827' : '#ffffff',
-                                                                                            fontSize: '10px',
-                                                                                            fontWeight: '800',
-                                                                                            padding: '2px 7px',
-                                                                                            borderRadius: '4px'
-                                                                                        }}>
-                                                                                            {displayLabel}
-                                                                                        </span>
-                                                                                    );
-                                                                                })()}
+
+                                                                            <div>
+                                                                                <div style={{ fontSize: '10px', fontWeight: '700', color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+                                                                                    OUTBOUND MANIFEST
+                                                                                </div>
+                                                                                <div style={{ fontSize: '15px', fontWeight: '800', color: '#111827', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                                                                    <span>{manifest.manifest_reference}</span>
+                                                                                    {(() => {
+                                                                                        const rawName = manifest.service_provider_name || (manifest.manifest_reference?.includes('PICKME') ? 'PickMe' : manifest.manifest_reference?.includes('DOMEX') ? 'Domex' : manifest.manifest_reference?.includes('PRONTO') ? 'Pronto' : 'Partner');
+                                                                                        const isPickMe = rawName.toLowerCase().includes('pickme');
+                                                                                        const isDomex = rawName.toLowerCase().includes('domex');
+                                                                                        const isPronto = rawName.toLowerCase().includes('pronto');
+                                                                                        const displayLabel = isPickMe ? 'PickMe' : isDomex ? 'Domex' : isPronto ? 'Pronto' : rawName;
+                                                                                        return (
+                                                                                            <span style={{
+                                                                                                backgroundColor: isPickMe ? '#facc15' : isDomex ? '#7b0f1a' : isPronto ? '#d97706' : '#4b5563',
+                                                                                                color: isPickMe ? '#111827' : '#ffffff',
+                                                                                                fontSize: '10px',
+                                                                                                fontWeight: '800',
+                                                                                                padding: '2px 7px',
+                                                                                                borderRadius: '4px'
+                                                                                            }}>
+                                                                                                {displayLabel}
+                                                                                            </span>
+                                                                                        );
+                                                                                    })()}
+                                                                                </div>
                                                                             </div>
                                                                         </div>
 
                                                                         {/* Middle Metric Columns */}
-                                                                        <div style={{ borderLeft: '1px solid #e5e7eb', paddingLeft: '16px', display: 'flex', gap: '16px', alignItems: 'center' }}>
+                                                                        <div style={{ borderLeft: '1px solid #e5e7eb', paddingLeft: '16px', display: 'flex', gap: '16px', alignItems: 'center', flexWrap: 'wrap' }}>
                                                                             <div>
                                                                                 <div style={{ fontSize: '10px', color: '#6b7280', textTransform: 'uppercase', fontWeight: '700' }}>Total Bags</div>
                                                                                 <div style={{ fontSize: '14px', fontWeight: '800', color: '#111827' }}>{manifest.bags?.length || manifest.total_bags || 0} Bags</div>
@@ -6921,9 +6923,27 @@ export default function WorkstationDashboard() {
                                                                                 <div style={{ fontSize: '14px', fontWeight: '800', color: '#111827' }}>{manifest.total_parcels || 0} Pcs</div>
                                                                             </div>
                                                                             <div>
+                                                                                <div style={{ fontSize: '10px', color: '#6b7280', textTransform: 'uppercase', fontWeight: '700' }}>Created By</div>
+                                                                                <div style={{ fontSize: '12px', fontWeight: '700', color: '#2563eb' }}>
+                                                                                    {manifest.created_by || manifest.opened_by || 'Staff'}
+                                                                                </div>
+                                                                            </div>
+                                                                            <div>
+                                                                                <div style={{ fontSize: '10px', color: '#6b7280', textTransform: 'uppercase', fontWeight: '700' }}>Closed By</div>
+                                                                                <div style={{ fontSize: '12px', fontWeight: '700', color: manifest.closed_by ? '#dc2626' : '#9ca3af' }}>
+                                                                                    {manifest.closed_by || (manifest.status === 'CLOSED' ? 'Staff' : '—')}
+                                                                                </div>
+                                                                            </div>
+                                                                            <div>
                                                                                 <div style={{ fontSize: '10px', color: '#6b7280', textTransform: 'uppercase', fontWeight: '700' }}>Created At</div>
                                                                                 <div style={{ fontSize: '12px', fontWeight: '700', color: '#374151' }}>
                                                                                     {manifest.created_at ? new Date(manifest.created_at).toLocaleString('en-GB') : '—'}
+                                                                                </div>
+                                                                            </div>
+                                                                            <div>
+                                                                                <div style={{ fontSize: '10px', color: '#6b7280', textTransform: 'uppercase', fontWeight: '700' }}>Closed At</div>
+                                                                                <div style={{ fontSize: '12px', fontWeight: '700', color: '#374151' }}>
+                                                                                    {manifest.closed_at ? new Date(manifest.closed_at).toLocaleString('en-GB') : '—'}
                                                                                 </div>
                                                                             </div>
                                                                         </div>
@@ -6937,6 +6957,7 @@ export default function WorkstationDashboard() {
                                                                             color: '#374151',
                                                                             borderRadius: '8px',
                                                                             padding: '0 14px',
+
                                                                             height: '38px',
                                                                             boxSizing: 'border-box',
                                                                             fontSize: '12px',
@@ -7004,42 +7025,68 @@ export default function WorkstationDashboard() {
                                                                                             <div
                                                                                                 onClick={toggleBag}
                                                                                                 style={{
-                                                                                                    padding: '10px 14px',
+                                                                                                    padding: '10px 16px',
                                                                                                     display: 'flex',
                                                                                                     alignItems: 'center',
                                                                                                     justifyContent: 'space-between',
+                                                                                                    flexWrap: 'wrap',
+                                                                                                    gap: '12px',
                                                                                                     cursor: 'pointer',
-                                                                                                    backgroundColor: isBagExpanded ? '#ffffff' : '#ffffff',
+                                                                                                    backgroundColor: isBagExpanded ? '#f9fafb' : '#ffffff',
                                                                                                     userSelect: 'none'
                                                                                                 }}
                                                                                             >
-                                                                                                <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                                                                                                    <span style={{ fontSize: '11px', color: '#6b7280' }}>
-                                                                                                        {isBagExpanded ? '▼' : '▶'}
-                                                                                                    </span>
-                                                                                                    <span style={{ fontWeight: '700', fontSize: '13px', color: '#111827' }}>
-                                                                                                        {bag.bag_number}
-                                                                                                    </span>
-                                                                                                    <span style={{
-                                                                                                        backgroundColor: bag.status === 'SEALED' ? '#b91c1c' : '',
-                                                                                                        color: bag.status === 'SEALED' ? '#ffffff' : '',
-                                                                                                        padding: '1px 6px', borderRadius: '4px', fontSize: '10px', fontWeight: '700'
-                                                                                                    }}>
-                                                                                                        {bag.status}
-                                                                                                    </span>
-                                                                                                    {/* <span style={{ backgroundColor: '#f3f4f6', color: '#374151', padding: '1px 6px', borderRadius: '4px', fontSize: '10px', fontWeight: '600' }}>
-                                                                                                        Partner: {bag.target_partner}
-                                                                                                    </span> */}
-                                                                                                    {/* <span style={{ backgroundColor: '#f3f4f6', color: '#374151', padding: '1px 6px', borderRadius: '4px', fontSize: '10px', fontWeight: '600' }}>
-                                                                                                        Hub: {bag.destination_hub}
-                                                                                                    </span> */}
+                                                                                                <div style={{ display: 'flex', alignItems: 'center', gap: '14px', flexWrap: 'wrap' }}>
+                                                                                                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                                                                                        <span style={{ fontSize: '11px', color: '#6b7280' }}>
+                                                                                                            {isBagExpanded ? '▼' : '▶'}
+                                                                                                        </span>
+                                                                                                        <span style={{ fontWeight: '800', fontSize: '13px', color: '#111827' }}>
+                                                                                                            {bag.bag_number}
+                                                                                                        </span>
+                                                                                                        <span style={{
+                                                                                                            backgroundColor: bag.status === 'SEALED' ? '#b91c1c' : '#10b981',
+                                                                                                            color: '#ffffff',
+                                                                                                            padding: '1px 6px', borderRadius: '4px', fontSize: '10px', fontWeight: '800'
+                                                                                                        }}>
+                                                                                                            {bag.status}
+                                                                                                        </span>
+                                                                                                    </div>
+
+                                                                                                    {/* Columns matching Outbound Manifest */}
+                                                                                                    <div style={{ borderLeft: '1px solid #e5e7eb', paddingLeft: '14px', display: 'flex', gap: '14px', alignItems: 'center', flexWrap: 'wrap' }}>
+                                                                                                        <div>
+                                                                                                            <div style={{ fontSize: '9px', color: '#6b7280', textTransform: 'uppercase', fontWeight: '700', letterSpacing: '0.4px' }}>OPENED BY</div>
+                                                                                                            <div style={{ fontSize: '12px', fontWeight: '700', color: '#2563eb' }}>
+                                                                                                                {bag.opened_by || bag.created_by || 'Staff'}
+                                                                                                            </div>
+                                                                                                        </div>
+                                                                                                        <div>
+                                                                                                            <div style={{ fontSize: '9px', color: '#6b7280', textTransform: 'uppercase', fontWeight: '700', letterSpacing: '0.4px' }}>CLOSED BY</div>
+                                                                                                            <div style={{ fontSize: '12px', fontWeight: '700', color: (bag.closed_by || bag.sealed_by || bag.status === 'SEALED') ? '#dc2626' : '#9ca3af' }}>
+                                                                                                                {bag.closed_by || bag.sealed_by || (bag.status === 'SEALED' ? 'Staff' : '—')}
+                                                                                                            </div>
+                                                                                                        </div>
+                                                                                                        <div>
+                                                                                                            <div style={{ fontSize: '9px', color: '#6b7280', textTransform: 'uppercase', fontWeight: '700', letterSpacing: '0.4px' }}>CREATED AT</div>
+                                                                                                            <div style={{ fontSize: '12px', fontWeight: '700', color: '#374151' }}>
+                                                                                                                {bag.opened_at || bag.created_at ? new Date(bag.opened_at || bag.created_at).toLocaleString('en-GB') : '—'}
+                                                                                                            </div>
+                                                                                                        </div>
+                                                                                                        <div>
+                                                                                                            <div style={{ fontSize: '9px', color: '#6b7280', textTransform: 'uppercase', fontWeight: '700', letterSpacing: '0.4px' }}>CLOSED AT</div>
+                                                                                                            <div style={{ fontSize: '12px', fontWeight: '700', color: '#374151' }}>
+                                                                                                                {bag.closed_at || bag.sealed_at ? new Date(bag.closed_at || bag.sealed_at).toLocaleString('en-GB') : '—'}
+                                                                                                            </div>
+                                                                                                        </div>
+                                                                                                    </div>
                                                                                                 </div>
 
-                                                                                                <div style={{ display: 'flex', alignItems: 'center', gap: '12px', fontSize: '12px' }}>
-                                                                                                    <span style={{ color: '#4b5563', fontWeight: '600' }}>
+                                                                                                <div style={{ display: 'flex', alignItems: 'center', gap: '10px', fontSize: '12px' }}>
+                                                                                                    <span style={{ color: '#111827', fontWeight: '800' }}>
                                                                                                         {bag.parcel_count || bag.parcels?.length || 0} Parcels
                                                                                                     </span>
-                                                                                                    <span style={{ color: '#6b7280' }}>
+                                                                                                    <span style={{ color: '#6b7280', fontWeight: '600' }}>
                                                                                                         ({bag.total_weight || 0} kg)
                                                                                                     </span>
                                                                                                 </div>
@@ -7127,42 +7174,68 @@ export default function WorkstationDashboard() {
                                                             <div
                                                                 onClick={toggleUnassignedBag}
                                                                 style={{
-                                                                    padding: '12px 16px',
+                                                                    padding: '10px 16px',
                                                                     display: 'flex',
                                                                     alignItems: 'center',
                                                                     justifyContent: 'space-between',
+                                                                    flexWrap: 'wrap',
+                                                                    gap: '12px',
                                                                     cursor: 'pointer',
                                                                     backgroundColor: isUnassignedBagExpanded ? '#f9fafb' : '#ffffff',
                                                                     userSelect: 'none'
                                                                 }}
                                                             >
-                                                                <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                                                                    <span style={{ fontSize: '11px', color: '#6b7280' }}>
-                                                                        {isUnassignedBagExpanded ? '▼' : '▶'}
-                                                                    </span>
-                                                                    <span style={{ fontWeight: '700', fontSize: '13px', color: '#111827' }}>
-                                                                        {bag.bag_number}
-                                                                    </span>
-                                                                    <span style={{
-                                                                        backgroundColor: bag.status === 'SEALED' ? '#e0e7ff' : '#fef3c7',
-                                                                        color: bag.status === 'SEALED' ? '#3730a3' : '#92400e',
-                                                                        padding: '1px 6px', borderRadius: '4px', fontSize: '10px', fontWeight: '700'
-                                                                    }}>
-                                                                        {bag.status}
-                                                                    </span>
-                                                                    <span style={{ backgroundColor: '#f3f4f6', color: '#374151', padding: '1px 6px', borderRadius: '4px', fontSize: '10px', fontWeight: '600' }}>
-                                                                        Partner: {bag.target_partner}
-                                                                    </span>
-                                                                    <span style={{ backgroundColor: '#f3f4f6', color: '#374151', padding: '1px 6px', borderRadius: '4px', fontSize: '10px', fontWeight: '600' }}>
-                                                                        Hub: {bag.destination_hub}
-                                                                    </span>
+                                                                <div style={{ display: 'flex', alignItems: 'center', gap: '14px', flexWrap: 'wrap' }}>
+                                                                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                                                        <span style={{ fontSize: '11px', color: '#6b7280' }}>
+                                                                            {isUnassignedBagExpanded ? '▼' : '▶'}
+                                                                        </span>
+                                                                        <span style={{ fontWeight: '800', fontSize: '13px', color: '#111827' }}>
+                                                                            {bag.bag_number}
+                                                                        </span>
+                                                                        <span style={{
+                                                                            backgroundColor: bag.status === 'SEALED' ? '#b91c1c' : '#10b981',
+                                                                            color: '#ffffff',
+                                                                            padding: '1px 6px', borderRadius: '4px', fontSize: '10px', fontWeight: '800'
+                                                                        }}>
+                                                                            {bag.status}
+                                                                        </span>
+                                                                    </div>
+
+                                                                    {/* Columns matching Outbound Manifest */}
+                                                                    <div style={{ borderLeft: '1px solid #e5e7eb', paddingLeft: '14px', display: 'flex', gap: '14px', alignItems: 'center', flexWrap: 'wrap' }}>
+                                                                        <div>
+                                                                            <div style={{ fontSize: '9px', color: '#6b7280', textTransform: 'uppercase', fontWeight: '700', letterSpacing: '0.4px' }}>OPENED BY</div>
+                                                                            <div style={{ fontSize: '12px', fontWeight: '700', color: '#2563eb' }}>
+                                                                                {bag.opened_by || bag.created_by || 'Staff'}
+                                                                            </div>
+                                                                        </div>
+                                                                        <div>
+                                                                            <div style={{ fontSize: '9px', color: '#6b7280', textTransform: 'uppercase', fontWeight: '700', letterSpacing: '0.4px' }}>CLOSED BY</div>
+                                                                            <div style={{ fontSize: '12px', fontWeight: '700', color: (bag.closed_by || bag.sealed_by || bag.status === 'SEALED') ? '#dc2626' : '#9ca3af' }}>
+                                                                                {bag.closed_by || bag.sealed_by || (bag.status === 'SEALED' ? 'Staff' : '—')}
+                                                                            </div>
+                                                                        </div>
+                                                                        <div>
+                                                                            <div style={{ fontSize: '9px', color: '#6b7280', textTransform: 'uppercase', fontWeight: '700', letterSpacing: '0.4px' }}>CREATED AT</div>
+                                                                            <div style={{ fontSize: '12px', fontWeight: '700', color: '#374151' }}>
+                                                                                {bag.opened_at || bag.created_at ? new Date(bag.opened_at || bag.created_at).toLocaleString('en-GB') : '—'}
+                                                                            </div>
+                                                                        </div>
+                                                                        <div>
+                                                                            <div style={{ fontSize: '9px', color: '#6b7280', textTransform: 'uppercase', fontWeight: '700', letterSpacing: '0.4px' }}>CLOSED AT</div>
+                                                                            <div style={{ fontSize: '12px', fontWeight: '700', color: '#374151' }}>
+                                                                                {bag.closed_at || bag.sealed_at ? new Date(bag.closed_at || bag.sealed_at).toLocaleString('en-GB') : '—'}
+                                                                            </div>
+                                                                        </div>
+                                                                    </div>
                                                                 </div>
 
-                                                                <div style={{ display: 'flex', alignItems: 'center', gap: '12px', fontSize: '12px' }}>
-                                                                    <span style={{ color: '#4b5563', fontWeight: '600' }}>
+                                                                <div style={{ display: 'flex', alignItems: 'center', gap: '10px', fontSize: '12px' }}>
+                                                                    <span style={{ color: '#111827', fontWeight: '800' }}>
                                                                         {bag.parcel_count || bag.parcels?.length || 0} Parcels
                                                                     </span>
-                                                                    <span style={{ color: '#6b7280' }}>
+                                                                    <span style={{ color: '#6b7280', fontWeight: '600' }}>
                                                                         ({bag.total_weight || 0} kg)
                                                                     </span>
                                                                 </div>

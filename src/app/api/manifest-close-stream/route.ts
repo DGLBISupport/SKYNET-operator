@@ -512,7 +512,7 @@ export async function GET(request: Request) {
 
                 // ── Step 2: Mark manifest CLOSED in DB ───────────────────────
                 const closedTimestamp = new Date().toISOString();
-                const manifestUpdatePayload: any = { status: 'CLOSED' };
+                const manifestUpdatePayload: any = { status: 'CLOSED', closed_by: operator || 'Staff', closed_at: closedTimestamp };
                 if (manifestId) {
                     await fetch(`${sb.url}/rest/v1/outbound_manifests?id=eq.${manifestId}`, {
                         method: 'PATCH', headers: sb.headers,
@@ -671,7 +671,7 @@ export async function GET(request: Request) {
 
                 // Update DB totals
                 const allBagNumbers = allBagsList.map(b => b.bagNumber);
-                const finalManifestPayload = { bag_numbers: allBagNumbers, total_bags: allBagNumbers.length, total_parcels: shipmentEntries.length, status: 'CLOSED' };
+                const finalManifestPayload = { bag_numbers: allBagNumbers, total_bags: allBagNumbers.length, total_parcels: shipmentEntries.length, status: 'CLOSED', closed_by: operator || 'Staff', closed_at: closedTimestamp };
                 if (manifestId) {
                     await fetch(`${sb.url}/rest/v1/outbound_manifests?id=eq.${manifestId}`, { method: 'PATCH', headers: sb.headers, body: JSON.stringify(finalManifestPayload) }).catch(() => { });
                 } else {

@@ -38,7 +38,36 @@ export async function GET(request: Request) {
             console.error('[manifest-tracking] Error fetching service_providers:', e);
         }
 
-        // 2. Fetch Outbound Manifests
+        // 2. Fetch Users to map User ID -> Real Name
+        let usersMap = new Map<string, string>();
+        try {
+            const usersRes = await fetch(`${sb.url}/rest/v1/users?select=id,username,first_name,last_name,email`, { headers: sb.headers, cache: 'no-store' });
+            const usersData = await usersRes.json();
+            if (Array.isArray(usersData)) {
+                usersData.forEach((u: any) => {
+                    const fullName = [u.first_name, u.last_name].filter(Boolean).join(' ').trim();
+                    const displayName = fullName || u.username || u.email || `User #${u.id}`;
+                    if (u.id !== undefined && u.id !== null) {
+                        usersMap.set(String(u.id), displayName);
+                    }
+                    if (u.username) {
+                        usersMap.set(String(u.username).toLowerCase(), displayName);
+                    }
+                });
+            }
+        } catch (e) {
+            console.error('[manifest-tracking] Error fetching users lookup:', e);
+        }
+
+        const resolveUserName = (val: any): string => {
+            if (val === undefined || val === null || val === '') return '';
+            const strVal = String(val).trim();
+            if (usersMap.has(strVal)) return usersMap.get(strVal)!;
+            if (usersMap.has(strVal.toLowerCase())) return usersMap.get(strVal.toLowerCase())!;
+            return strVal;
+        };
+
+        // 3. Fetch Outbound Manifests
         let rawManifests: any[] = [];
         try {
             const omRes = await fetch(`${sb.url}/rest/v1/outbound_manifests?order=created_at.desc`, { headers: sb.headers, cache: 'no-store' });
@@ -48,7 +77,7 @@ export async function GET(request: Request) {
             console.error('[manifest-tracking] Error fetching outbound_manifests:', e);
         }
 
-        // 3. Fetch Outbound LMD Bags
+        // 4. Fetch Outbound LMD Bags
         let rawBags: any[] = [];
         try {
             const bagsRes = await fetch(`${sb.url}/rest/v1/outbound_lmd_bags?order=created_at.desc`, { headers: sb.headers, cache: 'no-store' });
@@ -58,7 +87,7 @@ export async function GET(request: Request) {
             console.error('[manifest-tracking] Error fetching outbound_lmd_bags:', e);
         }
 
-        // 4. Fetch Outbound Bag Items (for parcel list fallback or detail enrichment)
+        // 5. Fetch Outbound Bag Items (for parcel list fallback or detail enrichment)
         let bagItemsMap = new Map<string, any[]>();
         try {
             const itemsRes = await fetch(`${sb.url}/rest/v1/outbound_lmd_bag_items?select=*&order=created_at.desc`, { headers: sb.headers, cache: 'no-store' });
@@ -76,7 +105,7 @@ export async function GET(request: Request) {
             console.error('[manifest-tracking] Error fetching outbound_lmd_bag_items:', e);
         }
 
-        // 5. Build Shipments lookup for consignee & city data
+        // 6. Build Shipments lookup for consignee & city data
         let shipmentsMap = new Map<string, any>();
         try {
             const shipRes = await fetch(`${sb.url}/rest/v1/shipments?select=reference_number,recipient_name,consignee_name,city,destination_city,status&limit=2000`, { headers: sb.headers, cache: 'no-store' });
@@ -104,7 +133,7 @@ export async function GET(request: Request) {
                     return {
                         trackingNumber: ref,
                         weight: p.weight || 0,
-                        scannedBy: p.scannedBy || p.scanned_by || 'Staff',
+                        scannedBy: resolveUserName(p.scannedBy || p.scanned_by) || 'Staff',
                         recipientName: p.recipientName || shipInfo?.recipient_name || shipInfo?.consignee_name || '—',
                         city: p.city || shipInfo?.city || shipInfo?.destination_city || '—',
                         timestamp: p.timestamp || p.created_at || bag.created_at
@@ -120,7 +149,7 @@ export async function GET(request: Request) {
                             return {
                                 trackingNumber: ref,
                                 weight: p.weight || 0,
-                                scannedBy: p.scannedBy || p.scanned_by || 'Staff',
+                                scannedBy: resolveUserName(p.scannedBy || p.scanned_by) || 'Staff',
                                 recipientName: p.recipientName || shipInfo?.recipient_name || shipInfo?.consignee_name || '—',
                                 city: p.city || shipInfo?.city || shipInfo?.destination_city || '—',
                                 timestamp: p.timestamp || p.created_at || bag.created_at
@@ -139,13 +168,16 @@ export async function GET(request: Request) {
                     return {
                         trackingNumber: ref,
                         weight: it.weight || 0,
-                        scannedBy: it.scanned_by || 'Staff',
+                        scannedBy: resolveUserName(it.scanned_by) || 'Staff',
                         recipientName: shipInfo?.recipient_name || shipInfo?.consignee_name || '—',
                         city: shipInfo?.city || shipInfo?.destination_city || '—',
                         timestamp: it.created_at
                     };
                 });
             }
+
+            const rawOpenedBy = bag.opened_by || bag.created_by;
+            const rawClosedBy = bag.closed_by || bag.sealed_by;
 
             return {
                 id: bag.id,
@@ -155,10 +187,14 @@ export async function GET(request: Request) {
                 status: (bag.status as 'OPEN' | 'SEALED') || 'OPEN',
                 parcel_count: bag.parcel_count || parcelsList.length,
                 total_weight: bag.total_weight || parcelsList.reduce((acc, p) => acc + (Number(p.weight) || 0), 0),
-                created_by: bag.created_by || 'Staff',
+                created_by: resolveUserName(bag.created_by) || 'Staff',
                 created_at: bag.created_at,
+                opened_by: resolveUserName(rawOpenedBy) || 'Staff',
+                opened_at: bag.opened_at || bag.created_at,
+                closed_by: resolveUserName(rawClosedBy) || (bag.status === 'SEALED' ? 'Staff' : null),
+                closed_at: bag.closed_at || bag.sealed_at || null,
                 sealed_at: bag.sealed_at,
-                sealed_by: bag.sealed_by,
+                sealed_by: resolveUserName(bag.sealed_by),
                 new_manifest_reference: bag.new_manifest_reference ? Number(bag.new_manifest_reference) : null,
                 is_bag_in_a_manifest: Boolean(bag.is_bag_in_a_manifest),
                 parcels: parcelsList
@@ -195,6 +231,10 @@ export async function GET(request: Request) {
             const calculatedTotalParcels = manifestBags.reduce((acc, b) => acc + (b.parcel_count || 0), 0);
             const providerName = manifest.service_provider ? (serviceProvidersMap[manifest.service_provider] || `Partner #${manifest.service_provider}`) : 'All Partners';
 
+            const rawOpenedBy = manifest.opened_by || manifest.created_by;
+            const resolvedOpenedBy = resolveUserName(rawOpenedBy);
+            const resolvedClosedBy = resolveUserName(manifest.closed_by);
+
             return {
                 id: manifestId,
                 manifest_reference: refStr,
@@ -203,7 +243,10 @@ export async function GET(request: Request) {
                 service_provider_name: providerName,
                 total_bags: manifest.total_bags || manifestBags.length,
                 total_parcels: manifest.total_parcels || calculatedTotalParcels,
-                created_by: manifest.created_by,
+                created_by: resolveUserName(manifest.created_by),
+                opened_by: resolvedOpenedBy || 'Staff',
+                closed_by: resolvedClosedBy || (manifest.status === 'CLOSED' ? 'Staff' : null),
+                closed_at: manifest.closed_at || null,
                 created_at: manifest.created_at,
                 json_path: manifest.json_path,
                 xml_path: manifest.xml_path,
