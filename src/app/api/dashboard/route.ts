@@ -70,8 +70,8 @@ export async function GET(request: Request) {
             fetchAllSupabaseRows('bag_unsealing', 'id,bag_number,mawb_ref,status,unsealed_by,scanned_count,expected_count,created_at,scanned_parcels', sb),
             fetchAllSupabaseRows('service_provider_allocation', 'id', sb),
             fetchAllSupabaseRows('service_providers', 'id,name,code', sb),
-            fetchAllSupabaseRows('service_provider_allocation', 'shipment_ref,service_provider,unsealed,scan_status,mawb_ref', sb),
-            fetchAllSupabaseRows('mawb', 'id,mawb_reference,carrier,declared_bags,declared_wt,mawb_created,shipper_name,notes', sb),
+            fetchAllSupabaseRows('service_provider_allocation', 'shipment_ref,service_provider,unsealed,scan_status,mawb_ref,created_at,updated_at', sb),
+            fetchAllSupabaseRows('mawb', 'id,mawb_reference,carrier,declared_bags,declared_wt,mawb_created,shipper_name,notes,created_at', sb),
             fetchAllSupabaseRows('outbound_manifests', 'id,manifest_reference', sb)
         ]);
 
@@ -88,9 +88,18 @@ export async function GET(request: Request) {
 
         // Build UUID -> MAWB reference string lookup map (shipments.mawb_reference stores mawb.id as UUID)
         const mawbUuidToRef: Record<string, string> = {};
+        const mawbCreatedMap: Record<string, string> = {};
         mawbData.forEach((m: any) => {
-            if (m.id && m.mawb_reference) {
-                mawbUuidToRef[String(m.id).trim().toLowerCase()] = m.mawb_reference.trim();
+            const dateVal = m.mawb_created || m.created_at || '';
+            if (m.mawb_reference) {
+                const refKey = m.mawb_reference.trim().toLowerCase();
+                mawbUuidToRef[refKey] = m.mawb_reference.trim();
+                if (dateVal) mawbCreatedMap[refKey] = dateVal;
+            }
+            if (m.id) {
+                const idKey = String(m.id).trim().toLowerCase();
+                if (m.mawb_reference) mawbUuidToRef[idKey] = m.mawb_reference.trim();
+                if (dateVal) mawbCreatedMap[idKey] = dateVal;
             }
         });
 
@@ -122,7 +131,7 @@ export async function GET(request: Request) {
 
         // Build Shipment Ref -> Partner Name + Scan Status Map from service_provider_allocation
         const shipmentToPartnerMap: Record<string, string> = {};
-        const shipmentToScanStatusMap: Record<string, { firstScanDone: boolean; scanStatus: string; unsealed: boolean }> = {};
+        const shipmentToScanStatusMap: Record<string, { firstScanDone: boolean; secondScanDone: boolean; scanStatus: string; unsealed: boolean; createdAt?: string; updatedAt?: string }> = {};
 
         spAllocData.forEach((alloc: any) => {
             if (alloc.shipment_ref && alloc.service_provider) {
@@ -133,11 +142,17 @@ export async function GET(request: Request) {
             }
             if (alloc.shipment_ref) {
                 const refLower = String(alloc.shipment_ref).trim().toLowerCase();
-                // Store the raw scan_status exactly from service_provider_allocation
+                const statusStr = (alloc.scan_status || '').toUpperCase();
+                const is1st = alloc.unsealed === true || statusStr === '1ST_SCAN_DONE' || statusStr === '2ND_SCAN_DONE' || statusStr === 'VERIFIED' || statusStr === 'DISPATCHED' || statusStr === 'COMPLETED';
+                const is2nd = statusStr === '2ND_SCAN_DONE' || statusStr === 'VERIFIED' || statusStr === 'DISPATCHED' || statusStr === 'COMPLETED';
+
                 const scanObj = {
-                    firstScanDone: alloc.scan_status === '1ST_SCAN_DONE',
+                    firstScanDone: is1st,
+                    secondScanDone: is2nd,
                     unsealed: alloc.unsealed === true,
-                    scanStatus: alloc.scan_status || 'PENDING'
+                    scanStatus: alloc.scan_status || 'ALLOCATED',
+                    createdAt: alloc.created_at || '',
+                    updatedAt: alloc.updated_at || ''
                 };
                 shipmentToScanStatusMap[alloc.shipment_ref] = scanObj;
                 shipmentToScanStatusMap[refLower] = scanObj;
@@ -160,25 +175,29 @@ export async function GET(request: Request) {
         const receivedParcels = shipData.map(s => {
             const refLower = String(s.reference_number || '').trim().toLowerCase();
             const scanInfo = shipmentToScanStatusMap[s.reference_number] || shipmentToScanStatusMap[refLower];
-
-            // Parcels Sorted = STRICTLY only parcels where service_provider_allocation.scan_status = '1ST_SCAN_DONE'
-            const isSorted = scanInfo?.scanStatus === '1ST_SCAN_DONE';
-            if (isSorted) totalSorted++;
+            const isUnsealedInBag = unsealedParcelRefsSet.has(refLower);
 
             // Allocation Status Stage Breakdown:
-            // Stage 2: 2nd Scan Done
-            // Stage 1: 1st Scan Done (scan_status = '1ST_SCAN_DONE' in service_provider_allocation)
-            // Stage 0: Pending 1st Scan
+            // Stage 2: 2nd Scan Done (2ND_SCAN_DONE, VERIFIED, DISPATCHED, COMPLETED)
+            // Stage 1: 1st Scan Done (scan_status = '1ST_SCAN_DONE', unsealed = true, or in bag_unsealing)
+            // Stage 0: Pending 1st Scan (ALLOCATED, PENDING, or no scan record yet)
             let allocationStage: 'PENDING_1ST_SCAN' | '1ST_SCAN_DONE' | '2ND_SCAN_DONE' = 'PENDING_1ST_SCAN';
             let allocationStatusLabel = 'Pending 1st Scan';
 
-            if (scanInfo?.scanStatus === '2ND_SCAN_DONE' || scanInfo?.scanStatus === 'COMPLETED' || scanInfo?.scanStatus === 'ALLOCATED') {
+            if (scanInfo?.secondScanDone) {
                 allocationStage = '2ND_SCAN_DONE';
                 allocationStatusLabel = '2nd Scan Done';
-            } else if (scanInfo?.scanStatus === '1ST_SCAN_DONE') {
+            } else if (scanInfo?.firstScanDone || scanInfo?.unsealed || isUnsealedInBag) {
                 allocationStage = '1ST_SCAN_DONE';
                 allocationStatusLabel = '1st Scan Done';
+            } else {
+                allocationStage = 'PENDING_1ST_SCAN';
+                allocationStatusLabel = 'Pending 1st Scan';
             }
+
+            // Parcels Sorted = Parcels that have completed 1st scan or 2nd scan
+            const isSorted = allocationStage === '1ST_SCAN_DONE' || allocationStage === '2ND_SCAN_DONE';
+            if (isSorted) totalSorted++;
 
             // Resolve LMD Courier Partner strictly via service_provider_allocation table
             let rawPartner = shipmentToPartnerMap[s.reference_number] || shipmentToPartnerMap[refLower] || s.delivery_agent_code || '';
@@ -208,6 +227,9 @@ export async function GET(request: Request) {
                 ? (mawbUuidToRef[rawMawbRef.trim().toLowerCase()] || '-')
                 : (rawMawbRef.trim() || '-');
 
+            // Resolve real Received Date: shipments created_at -> allocation created_at -> MAWB created date -> empty string (no fake today date)
+            const resolvedCreatedAt = s.created_at || scanInfo?.createdAt || (resolvedMawbRef !== '-' ? mawbCreatedMap[resolvedMawbRef.toLowerCase()] : '') || (rawMawbRef ? mawbCreatedMap[rawMawbRef.toLowerCase()] : '') || '';
+
             return {
                 referenceNumber: s.reference_number || 'N/A',
                 senderReference: s.sender_reference || '-',
@@ -216,7 +238,7 @@ export async function GET(request: Request) {
                 bagNumber: s.bag_number || '',
                 consigneeLocation: s.consignee_location_name || 'N/A',
                 weight: s.weight ? `${s.weight} kg` : '-',
-                createdAt: s.created_at || new Date().toISOString(),
+                createdAt: resolvedCreatedAt,
                 isSorted,
                 firstScanDone: isSorted,
                 scanStatus: scanInfo?.scanStatus || (isSorted ? '1ST_SCAN_DONE' : 'PENDING_1ST_SCAN'),

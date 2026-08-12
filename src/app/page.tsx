@@ -7681,11 +7681,11 @@ export default function WorkstationDashboard() {
                                                                                         <td style={{ padding: '10px 8px', color: '#374151' }}>{p.consigneeLocation || 'N/A'}</td>
                                                                                         <td style={{ padding: '10px 8px', color: '#6b7280' }}>{p.weight}</td>
                                                                                         <td style={{ padding: '10px 8px' }}>
-                                                                                            {p.allocationStage === '2ND_SCAN_DONE' || p.bagNumber ? (
+                                                                                            {p.allocationStage === '2ND_SCAN_DONE' ? (
                                                                                                 <span style={{ padding: '3px 8px', borderRadius: '8px', fontSize: '10px', fontWeight: '700', backgroundColor: '#ffffff', color: '#b91c1c', border: '1px solid #b91c1c' }}>
                                                                                                     2nd Scan Done
                                                                                                 </span>
-                                                                                            ) : p.allocationStage === '1ST_SCAN_DONE' || p.isSorted ? (
+                                                                                            ) : p.allocationStage === '1ST_SCAN_DONE' ? (
                                                                                                 <span style={{ padding: '3px 8px', borderRadius: '4px', fontSize: '11px', fontWeight: '700', backgroundColor: '#e0f2fe', color: '#0369a1' }}>
                                                                                                     1st Scan Done
                                                                                                 </span>
@@ -7695,7 +7695,9 @@ export default function WorkstationDashboard() {
                                                                                                 </span>
                                                                                             )}
                                                                                         </td>
-                                                                                        <td style={{ padding: '10px 8px', color: '#6b7280', fontSize: '11px' }}>{p.createdAt ? new Date(p.createdAt).toLocaleDateString() : '-'}</td>
+                                                                                        <td style={{ padding: '10px 8px', color: '#6b7280', fontSize: '11px' }}>
+                                                                                            {p.createdAt && !isNaN(new Date(p.createdAt).getTime()) ? new Date(p.createdAt).toLocaleDateString('en-GB') : '-'}
+                                                                                        </td>
                                                                                     </tr>
                                                                                 );
                                                                             })}
@@ -7766,7 +7768,7 @@ export default function WorkstationDashboard() {
                                                                                         <td style={{ padding: '10px 8px', color: '#374151' }}>{p.consigneeLocation || 'N/A'}</td>
                                                                                         <td style={{ padding: '10px 8px', color: '#6b7280' }}>{p.weight}</td>
                                                                                         <td style={{ padding: '10px 8px' }}>
-                                                                                            {p.allocationStage === '2ND_SCAN_DONE' || p.bagNumber ? (
+                                                                                            {p.allocationStage === '2ND_SCAN_DONE' ? (
                                                                                                 <span style={{ padding: '3px 8px', borderRadius: '4px', fontSize: '11px', fontWeight: '700', backgroundColor: '#dcfce7', color: '#15803d' }}>
                                                                                                     2nd Scan Done
                                                                                                 </span>
@@ -7845,7 +7847,9 @@ export default function WorkstationDashboard() {
                                                                                                 Pending 1st Scan
                                                                                             </span>
                                                                                         </td>
-                                                                                        <td style={{ padding: '10px 8px', color: '#6b7280', fontSize: '11px' }}>{p.createdAt ? new Date(p.createdAt).toLocaleDateString() : '-'}</td>
+                                                                                        <td style={{ padding: '10px 8px', color: '#6b7280', fontSize: '11px' }}>
+                                                                                            {p.createdAt && !isNaN(new Date(p.createdAt).getTime()) ? new Date(p.createdAt).toLocaleDateString('en-GB') : '-'}
+                                                                                        </td>
                                                                                     </tr>
                                                                                 );
                                                                             })}
