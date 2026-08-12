@@ -118,7 +118,7 @@ export async function GET(request: Request) {
         // 2. SEARCH OUTBOUND LMD BAGS (By Bag Number, MAWB Ref, or Destination Hub)
         try {
             const bagRes = await fetch(
-                `${sb.url}/rest/v1/outbound_lmd_bags?or=(bag_number.ilike.*${cleanQ}*,mawb_ref.ilike.*${cleanQ}*,destination_hub.ilike.*${cleanQ}*)&order=created_at.desc&limit=30&select=*,outbound_manifests(id,manifest_reference)`,
+                `${sb.url}/rest/v1/outbound_lmd_bags?or=(bag_number.ilike.*${cleanQ}*,target_partner.ilike.*${cleanQ}*,destination_hub.ilike.*${cleanQ}*)&order=created_at.desc&limit=30&select=*,outbound_manifests(id,manifest_reference)`,
                 { headers: sb.headers }
             );
             if (bagRes.ok) {

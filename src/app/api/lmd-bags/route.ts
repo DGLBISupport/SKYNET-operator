@@ -63,6 +63,45 @@ const getSupabaseConfig = () => {
     };
 };
 
+// Helper: Resolve numeric user ID from public.users table using user ID, email, username, or operator name
+async function resolveUserId(sb: any, userVal: any): Promise<number | null> {
+    if (userVal === null || userVal === undefined || userVal === '') return null;
+    if (typeof userVal === 'number' && !isNaN(userVal)) return userVal;
+    if (typeof userVal === 'string' && /^\d+$/.test(userVal.trim())) return parseInt(userVal.trim(), 10);
+
+    if (!sb || typeof userVal !== 'string') return null;
+    const strVal = userVal.trim();
+    if (!strVal || strVal === 'Staff') return null;
+
+    try {
+        // 1. Try exact match on email or username
+        const res1 = await fetch(
+            `${sb.url}/rest/v1/users?or=(email.eq.${encodeURIComponent(strVal)},username.eq.${encodeURIComponent(strVal)})&select=id&limit=1`,
+            { headers: sb.headers, cache: 'no-store' }
+        );
+        const data1 = await res1.json();
+        if (Array.isArray(data1) && data1.length > 0 && data1[0]?.id) {
+            return Number(data1[0].id);
+        }
+
+        // 2. Try match on first_name
+        const firstName = strVal.split(/\s+/)[0];
+        if (firstName) {
+            const res2 = await fetch(
+                `${sb.url}/rest/v1/users?first_name=ilike.${encodeURIComponent(firstName)}&select=id&limit=1`,
+                { headers: sb.headers, cache: 'no-store' }
+            );
+            const data2 = await res2.json();
+            if (Array.isArray(data2) && data2.length > 0 && data2[0]?.id) {
+                return Number(data2[0].id);
+            }
+        }
+    } catch (e) {
+        console.error('resolveUserId error:', e);
+    }
+    return null;
+}
+
 // Helper: Format current date as DDMMYYYY (e.g., 07082026)
 function getFormattedDateDDMMYYYY(dateObj: Date = new Date()): string {
     const dd = String(dateObj.getDate()).padStart(2, '0');
@@ -423,15 +462,28 @@ export async function POST(request: Request) {
             let newManifestDbId: number | null = null;
             if (sb) {
                 try {
+                    const manifestPayload: any = {
+                        manifest_reference: manifestReference,
+                        bag_numbers: [],
+                        total_bags: 0,
+                        service_provider: spId,
+                        total_parcels: 0,
+                        status: 'OPEN'
+                    };
+                    const openedUserId = (await resolveUserId(sb, openedBy ?? opened_by ?? body.userId ?? body.user_id)) ?? (await resolveUserId(sb, operator));
+                    if (openedUserId) manifestPayload.opened_by = openedUserId;
+
                     const insertRes = await fetch(`${sb.url}/rest/v1/outbound_manifests`, {
                         method: 'POST', headers: sb.headers,
-                        body: JSON.stringify({ manifest_reference: manifestReference, bag_numbers: [], total_bags: 0, service_provider: spId, total_parcels: 0, created_by: 1, opened_by: activeOpenedBy, status: 'OPEN' })
+                        body: JSON.stringify(manifestPayload)
                     });
                     const insertData = await insertRes.json();
                     if (Array.isArray(insertData) && insertData.length > 0 && insertData[0].id) {
                         newManifestDbId = Number(insertData[0].id);
                         const session = manifestsMap.get(manifestReference);
                         if (session) session.dbId = newManifestDbId;
+                    } else {
+                        console.error("Error inserting outbound_manifests response:", insertData);
                     }
                 } catch (err) { console.error("Error inserting new outbound_manifests:", err); }
             }
@@ -452,26 +504,45 @@ export async function POST(request: Request) {
             const partnerCode = partner && partner !== 'ALL' ? `-${partner.toUpperCase()}` : '';
             const defaultBagNumber = `${mawbRef ? mawbRef : 'LMD'}${partnerCode}-BAG-${String(nextIndex).padStart(2, '0')}`;
             const newBagNumber = (body.customBagNumber || body.bagNumber || defaultBagNumber).trim();
-            const manifestDbId: number | null = mawbRef ? await getManifestDbId(sb, mawbRef) : null;
+
+            let manifestDbId: number | null = mawbRef ? await getManifestDbId(sb, mawbRef) : null;
+            if (mawbRef && !manifestDbId && sb) {
+                await updateOutboundManifestInDB(sb, mawbRef, serviceProviderId ? Number(serviceProviderId) : null);
+                manifestDbId = await getManifestDbId(sb, mawbRef);
+            }
+
             const newBag: OutboundBag = {
                 bagNumber: newBagNumber, mawbRef: effectiveMawbRef, manifestDbId: manifestDbId || undefined,
                 targetPartner: partner || 'ALL', destinationHub: destinationHub || (partner && partner !== 'ALL' ? `${partner}` : 'Main Sort Hub'),
-                status: 'OPEN', parcelCount: 0, totalWeight: 0, createdAt: new Date().toISOString(), operator: operator || 'Staff', parcels: []
+                status: 'OPEN', parcelCount: 0, totalWeight: 0, createdAt: new Date().toISOString(), operator: typeof operator === 'string' ? operator : 'Staff', parcels: []
             };
             outboundBagsMap.set(newBagNumber, newBag);
             if (mawbRef && !manifestsMap.has(mawbRef)) manifestsMap.set(mawbRef, { mawbRef, dbId: manifestDbId || undefined, status: 'OPEN' });
+
             if (sb) {
                 try {
-                    // outbound_lmd_bags links to outbound_manifests via new_manifest_reference (no mawb_ref column)
                     const openTimestamp = new Date().toISOString();
                     const bagPayload: any = {
-                        bag_number: newBagNumber, target_partner: partner || 'ALL', destination_hub: newBag.destinationHub,
-                        status: 'OPEN', parcel_count: 0, total_weight: 0, created_by: operator || 'Staff',
-                        opened_by: operator || 'Staff', opened_at: openTimestamp,
+                        bag_number: newBagNumber,
+                        target_partner: partner || 'ALL',
+                        destination_hub: newBag.destinationHub,
+                        status: 'OPEN',
+                        parcel_count: 0,
+                        total_weight: 0,
+                        created_by: typeof operator === 'string' ? operator : 'Staff',
+                        opened_at: openTimestamp,
                         is_bag_in_a_manifest: !!manifestDbId
                     };
+                    const openedUserId = (await resolveUserId(sb, openedBy ?? opened_by ?? body.userId ?? body.user_id)) ?? (await resolveUserId(sb, operator));
+                    if (openedUserId) bagPayload.opened_by = openedUserId;
                     if (manifestDbId) bagPayload.new_manifest_reference = manifestDbId;
-                    await fetch(`${sb.url}/rest/v1/outbound_lmd_bags`, { method: 'POST', headers: sb.headers, body: JSON.stringify(bagPayload) });
+
+                    const bagInsertRes = await fetch(`${sb.url}/rest/v1/outbound_lmd_bags`, {
+                        method: 'POST', headers: sb.headers, body: JSON.stringify(bagPayload)
+                    });
+                    if (!bagInsertRes.ok) {
+                        console.error("Supabase insert outbound_lmd_bags error:", await bagInsertRes.text());
+                    }
                     await updateOutboundManifestInDB(sb, effectiveMawbRef, serviceProviderId ? Number(serviceProviderId) : null, newBagNumber);
                 } catch (err) { console.error("Supabase insert outbound_lmd_bags error:", err); }
             }
@@ -481,21 +552,39 @@ export async function POST(request: Request) {
         if (action === 'add-parcel') {
             if (!bagNumber) return NextResponse.json({ success: false, error: 'Missing bagNumber' }, { status: 400 });
             let bag = outboundBagsMap.get(bagNumber);
-            if (!bag) bag = { bagNumber, mawbRef: mawbRef, targetPartner: partner || body.targetPartner || 'ALL', destinationHub: destinationHub || 'Main Sort Hub', status: 'OPEN', parcelCount: 0, totalWeight: 0, createdAt: new Date().toISOString(), operator: operator || 'Staff', parcels: [] };
+            if (!bag) bag = { bagNumber, mawbRef: mawbRef, targetPartner: partner || body.targetPartner || 'ALL', destinationHub: destinationHub || 'Main Sort Hub', status: 'OPEN', parcelCount: 0, totalWeight: 0, createdAt: new Date().toISOString(), operator: typeof operator === 'string' ? operator : 'Staff', parcels: [] };
             if (bag.status === 'SEALED') return NextResponse.json({ success: false, error: `Bag "${bagNumber}" is SEALED & CLOSED. No additional parcels can be added.` }, { status: 400 });
             const newParcel = body.parcel;
             if (newParcel) {
-                bag.parcels.unshift(newParcel);
+                const tracking = String(newParcel.trackingNumber || newParcel.reference_number || newParcel.scannedBarcode || '').trim();
+                const exists = bag.parcels.some(p => String(p.trackingNumber || p.reference_number || p.scannedBarcode || '').trim().toLowerCase() === tracking.toLowerCase());
+                if (!exists) {
+                    bag.parcels.unshift(newParcel);
+                }
                 bag.parcelCount = bag.parcels.length;
                 bag.totalWeight = Number((bag.parcels.reduce((acc, p) => acc + (Number(p.weight) || 0.1), 0)).toFixed(2));
             }
             outboundBagsMap.set(bagNumber, bag);
             if (sb) {
                 try {
-                    await fetch(`${sb.url}/rest/v1/outbound_lmd_bags?bag_number=eq.${encodeURIComponent(bagNumber)}`, { method: 'PATCH', headers: sb.headers, body: JSON.stringify({ parcel_count: bag.parcelCount, total_weight: bag.totalWeight, parcels: bag.parcels || [] }) });
+                    const patchRes = await fetch(`${sb.url}/rest/v1/outbound_lmd_bags?bag_number=eq.${encodeURIComponent(bagNumber)}`, { method: 'PATCH', headers: sb.headers, body: JSON.stringify({ parcel_count: bag.parcelCount, total_weight: bag.totalWeight, parcels: bag.parcels || [] }) });
+                    if (!patchRes.ok) {
+                        console.error("Supabase add-parcel PATCH error:", await patchRes.text());
+                    }
                     if (newParcel) {
                         const tracking = newParcel.trackingNumber || newParcel.reference_number;
-                        if (tracking) await fetch(`${sb.url}/rest/v1/outbound_lmd_bag_items`, { method: 'POST', headers: sb.headers, body: JSON.stringify({ bag_number: bagNumber, shipment_ref: tracking, weight: Number(newParcel.weight) || 0.1, scanned_by: operator || 'Staff' }) }).catch(e => console.error("Optional bag items table update ignored:", e));
+                        if (tracking) {
+                            await fetch(`${sb.url}/rest/v1/outbound_lmd_bag_items`, {
+                                method: 'POST',
+                                headers: sb.headers,
+                                body: JSON.stringify({
+                                    bag_number: bagNumber,
+                                    shipment_ref: tracking,
+                                    weight: Number(newParcel.weight) || 0.1,
+                                    scanned_by: typeof operator === 'string' ? operator : 'Staff'
+                                })
+                            }).catch(e => console.error("Optional bag items table update ignored:", e));
+                        }
                     }
                     if (bag.mawbRef) await updateOutboundManifestInDB(sb, bag.mawbRef, serviceProviderId ? Number(serviceProviderId) : null);
                 } catch (err) { console.error("Supabase add-parcel update error:", err); }
@@ -507,7 +596,7 @@ export async function POST(request: Request) {
         if (action === 'seal') {
             if (!bagNumber) return NextResponse.json({ success: false, error: 'Missing bagNumber' }, { status: 400 });
             const sealedTimestamp = new Date().toISOString();
-            const sealingOperator = operator || 'Staff';
+            const sealingOperator = typeof operator === 'string' ? operator : 'Staff';
             let bag = outboundBagsMap.get(bagNumber);
             if (!bag) {
                 bag = { bagNumber, mawbRef: mawbRef, targetPartner: partner || body.targetPartner || 'ALL', destinationHub: destinationHub || 'Main Sort Hub', status: 'SEALED', parcelCount: parcelCount || 0, totalWeight: totalWeight || 0, createdAt: sealedTimestamp, sealedAt: sealedTimestamp, sealedBy: sealingOperator, operator: sealingOperator, parcels: parcels || [] };
@@ -520,7 +609,24 @@ export async function POST(request: Request) {
             outboundBagsMap.set(bagNumber, bag);
             if (sb) {
                 try {
-                    await fetch(`${sb.url}/rest/v1/outbound_lmd_bags?bag_number=eq.${encodeURIComponent(bagNumber)}`, { method: 'PATCH', headers: sb.headers, body: JSON.stringify({ status: 'SEALED', sealed_at: sealedTimestamp, sealed_by: sealingOperator, closed_at: sealedTimestamp, closed_by: sealingOperator, parcel_count: bag.parcelCount, total_weight: bag.totalWeight, parcels: bag.parcels || [] }) });
+                    const sealPayload: any = {
+                        status: 'SEALED',
+                        sealed_at: sealedTimestamp,
+                        sealed_by: sealingOperator,
+                        closed_at: sealedTimestamp,
+                        parcel_count: bag.parcelCount,
+                        total_weight: bag.totalWeight,
+                        parcels: bag.parcels || []
+                    };
+                    const closedUserId = (await resolveUserId(sb, body.closedBy ?? body.closed_by ?? body.userId ?? body.user_id)) ?? (await resolveUserId(sb, sealingOperator));
+                    if (closedUserId) sealPayload.closed_by = closedUserId;
+
+                    const sealRes = await fetch(`${sb.url}/rest/v1/outbound_lmd_bags?bag_number=eq.${encodeURIComponent(bagNumber)}`, {
+                        method: 'PATCH', headers: sb.headers, body: JSON.stringify(sealPayload)
+                    });
+                    if (!sealRes.ok) {
+                        console.error("Supabase seal bag PATCH error:", await sealRes.text());
+                    }
                     if (bag.mawbRef) await updateOutboundManifestInDB(sb, bag.mawbRef, serviceProviderId ? Number(serviceProviderId) : null);
                 } catch (err) { console.error("Supabase seal bag update error:", err); }
             }
@@ -638,13 +744,16 @@ export async function POST(request: Request) {
                     const totalParcelsCount = allBagsList.reduce((sum, b) => sum + (b.parcels?.length || 0), 0);
 
 
+                    const closedUserId = (await resolveUserId(sb, body.closedBy ?? body.closed_by ?? body.userId ?? body.user_id)) ?? (await resolveUserId(sb, closingOperator));
                     // Step 6 – Update outbound_manifests with full accurate data
                     const manifestUpdatePayload: any = {
                         bag_numbers: allBagNumbers,
                         total_bags: allBagNumbers.length,
                         total_parcels: totalParcelsCount,
-                        status: 'CLOSED'
+                        status: 'CLOSED',
+                        closed_at: closedTimestamp
                     };
+                    if (closedUserId) manifestUpdatePayload.closed_by = closedUserId;
 
                     // Resolve service_provider id from manifest session or body
                     const manifestSession = manifestsMap.get(mawbRef);

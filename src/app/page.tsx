@@ -2027,7 +2027,8 @@ export default function WorkstationDashboard() {
                 body: JSON.stringify({
                     action: 'create-manifest',
                     providerName: selectedProviderForManifest,
-                    operator: activeOperator
+                    operator: activeOperator,
+                    openedBy: currentUser?.id
                 })
             });
             const data = await res.json();
@@ -2101,7 +2102,8 @@ export default function WorkstationDashboard() {
                     partner: newBagPartner,
                     customBagNumber: finalBagNumber,
                     destinationHub: newBagHub || `${newBagPartner}`,
-                    operator: currentUser ? `${currentUser.firstName} ${currentUser.lastName}` : 'Staff'
+                    operator: currentUser ? `${currentUser.firstName} ${currentUser.lastName}` : 'Staff',
+                    openedBy: currentUser?.id
                 })
             });
             const data = await res.json();
@@ -2173,7 +2175,7 @@ export default function WorkstationDashboard() {
         });
 
         // Open SSE Connection
-        const sseUrl = `/api/manifest-close-stream?mawbRef=${encodeURIComponent(mawbToClose)}&operator=${encodeURIComponent(activeOperator)}&serviceProviderName=${encodeURIComponent(providerCode)}`;
+        const sseUrl = `/api/manifest-close-stream?mawbRef=${encodeURIComponent(mawbToClose)}&operator=${encodeURIComponent(activeOperator)}&serviceProviderName=${encodeURIComponent(providerCode)}&closedBy=${encodeURIComponent(currentUser?.id || '')}`;
         const es = new EventSource(sseUrl);
 
         es.onmessage = (event) => {
@@ -2295,6 +2297,7 @@ export default function WorkstationDashboard() {
                     targetPartner: activeOutboundBag.targetPartner || 'ALL',
                     destinationHub: activeOutboundBag.destinationHub || (activeOutboundBag.targetPartner && activeOutboundBag.targetPartner !== 'ALL' ? `${activeOutboundBag.targetPartner}` : 'Main Sort Hub'),
                     operator: activeOperator,
+                    closedBy: currentUser?.id,
                     parcelCount: activeOutboundBag.parcelCount,
                     totalWeight: activeOutboundBag.totalWeight,
                     parcels: activeOutboundBag.parcels

@@ -64,7 +64,7 @@ export async function GET(request: Request) {
         // Fetch all tables concurrently using Promise.allSettled
         const [shipResult, bagResult, manResult, damResult, unsealResult, spaResult, spResult, spAllocResult, mawbResult, omResult] = await Promise.allSettled([
             fetchAllSupabaseRows('shipments', 'reference_number,sender_reference,mawb_reference,delivery_agent_code,bag_number,consignee_location_name,created_at,weight', sb),
-            fetchAllSupabaseRows('outbound_lmd_bags', 'id,bag_number,mawb_ref,new_manifest_reference,target_partner,destination_hub,status,parcel_count,total_weight,created_by,sealed_by,created_at,sealed_at', sb),
+            fetchAllSupabaseRows('outbound_lmd_bags', 'id,bag_number,new_manifest_reference,target_partner,destination_hub,status,parcel_count,total_weight,created_by,sealed_by,created_at,sealed_at', sb),
             fetchAllSupabaseRows('manifest_sessions', 'id,manifest_id,mawb_ref,status,total_bags,total_parcels,closed_by,created_at,closed_at', sb),
             fetchAllSupabaseRows('damaged_barcodes', 'id,barcode,reason,reported_by,created_at', sb),
             fetchAllSupabaseRows('bag_unsealing', 'id,bag_number,mawb_ref,status,unsealed_by,scanned_count,expected_count,created_at,scanned_parcels', sb),

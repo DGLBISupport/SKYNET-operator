@@ -67,7 +67,7 @@ export async function GET(request: Request) {
         const [spaResult, unsealResult, outboundResult, providerResult, outboundManifestResult, bagItemsResult, shipResult] = await Promise.allSettled([
             fetchAllSupabaseRows('service_provider_allocation', 'id,shipment_ref,mawb_ref,service_provider,unsealed,scan_status,created_at,updated_at,mapped_zone', sb),
             fetchAllSupabaseRows('bag_unsealing', 'id,bag_number,mawb_ref,created_at,scanned_count,scanned_parcels', sb),
-            fetchAllSupabaseRows('outbound_lmd_bags', 'id,bag_number,mawb_ref,target_partner,destination_hub,status,parcel_count,total_weight,created_by,sealed_by,created_at,sealed_at,new_manifest_reference,parcels', sb),
+            fetchAllSupabaseRows('outbound_lmd_bags', 'id,bag_number,target_partner,destination_hub,status,parcel_count,total_weight,created_by,sealed_by,created_at,sealed_at,new_manifest_reference,parcels', sb),
             fetchAllSupabaseRows('service_providers', 'id,name,code', sb),
             fetchAllSupabaseRows('outbound_manifests', 'id,manifest_reference,service_provider,total_parcels,bag_numbers', sb),
             fetchAllSupabaseRows('outbound_lmd_bag_items', 'id,bag_number,shipment_ref', sb),

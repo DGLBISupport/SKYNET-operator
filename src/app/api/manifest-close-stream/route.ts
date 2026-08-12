@@ -47,6 +47,42 @@ const FFDX_ENTITY_PIN = process.env.FFDX_ENTITY_PIN || 'VeeVA4?37kd';
 const FFDX_UPDATE_ENTITY_ID = process.env.FFDX_UPDATE_ENTITY_ID || 'LK7171';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
+async function resolveUserId(sb: any, userVal: any): Promise<number | null> {
+    if (userVal === null || userVal === undefined || userVal === '') return null;
+    if (typeof userVal === 'number' && !isNaN(userVal)) return userVal;
+    if (typeof userVal === 'string' && /^\d+$/.test(userVal.trim())) return parseInt(userVal.trim(), 10);
+
+    if (!sb || typeof userVal !== 'string') return null;
+    const strVal = userVal.trim();
+    if (!strVal || strVal === 'Staff') return null;
+
+    try {
+        const res1 = await fetch(
+            `${sb.url}/rest/v1/users?or=(email.eq.${encodeURIComponent(strVal)},username.eq.${encodeURIComponent(strVal)})&select=id&limit=1`,
+            { headers: sb.headers, cache: 'no-store' }
+        );
+        const data1 = await res1.json();
+        if (Array.isArray(data1) && data1.length > 0 && data1[0]?.id) {
+            return Number(data1[0].id);
+        }
+
+        const firstName = strVal.split(/\s+/)[0];
+        if (firstName) {
+            const res2 = await fetch(
+                `${sb.url}/rest/v1/users?first_name=ilike.${encodeURIComponent(firstName)}&select=id&limit=1`,
+                { headers: sb.headers, cache: 'no-store' }
+            );
+            const data2 = await res2.json();
+            if (Array.isArray(data2) && data2.length > 0 && data2[0]?.id) {
+                return Number(data2[0].id);
+            }
+        }
+    } catch (e) {
+        console.error('resolveUserId error:', e);
+    }
+    return null;
+}
+
 function escapeXml(str: string | number | null | undefined): string {
     if (str === null || str === undefined) return '';
     return String(str)
@@ -512,7 +548,12 @@ export async function GET(request: Request) {
 
                 // ── Step 2: Mark manifest CLOSED in DB ───────────────────────
                 const closedTimestamp = new Date().toISOString();
-                const manifestUpdatePayload: any = { status: 'CLOSED', closed_by: operator || 'Staff', closed_at: closedTimestamp };
+                const closedByParam = searchParams.get('closedBy') || searchParams.get('closed_by') || searchParams.get('userId') || searchParams.get('operator');
+                const closedUserId = (await resolveUserId(sb, closedByParam)) ?? (await resolveUserId(sb, operator));
+
+                const manifestUpdatePayload: any = { status: 'CLOSED', closed_at: closedTimestamp };
+                if (closedUserId) manifestUpdatePayload.closed_by = closedUserId;
+
                 if (manifestId) {
                     await fetch(`${sb.url}/rest/v1/outbound_manifests?id=eq.${manifestId}`, {
                         method: 'PATCH', headers: sb.headers,
@@ -671,7 +712,8 @@ export async function GET(request: Request) {
 
                 // Update DB totals
                 const allBagNumbers = allBagsList.map(b => b.bagNumber);
-                const finalManifestPayload = { bag_numbers: allBagNumbers, total_bags: allBagNumbers.length, total_parcels: shipmentEntries.length, status: 'CLOSED', closed_by: operator || 'Staff', closed_at: closedTimestamp };
+                const finalManifestPayload: any = { bag_numbers: allBagNumbers, total_bags: allBagNumbers.length, total_parcels: shipmentEntries.length, status: 'CLOSED', closed_at: closedTimestamp };
+                if (closedUserId) finalManifestPayload.closed_by = closedUserId;
                 if (manifestId) {
                     await fetch(`${sb.url}/rest/v1/outbound_manifests?id=eq.${manifestId}`, { method: 'PATCH', headers: sb.headers, body: JSON.stringify(finalManifestPayload) }).catch(() => { });
                 } else {

@@ -277,8 +277,15 @@ CREATE TABLE public.outbound_lmd_bags (
   parcels jsonb NOT NULL DEFAULT '[]'::jsonb,
   new_manifest_reference bigint,
   is_bag_in_a_manifest boolean DEFAULT false,
+  opened_by bigint,
+  opened_at timestamp with time zone DEFAULT now(),
+  closed_by bigint,
+  closed_at timestamp with time zone,
   CONSTRAINT outbound_lmd_bags_pkey PRIMARY KEY (id),
-  CONSTRAINT outbound_lmd_bags_new_manifest_reference_fkey FOREIGN KEY (new_manifest_reference) REFERENCES public.outbound_manifests(id)
+  CONSTRAINT outbound_lmd_bags_bag_number_key UNIQUE (bag_number),
+  CONSTRAINT outbound_lmd_bags_closed_by_fkey FOREIGN KEY (closed_by) REFERENCES public.users(id) ON UPDATE CASCADE,
+  CONSTRAINT outbound_lmd_bags_new_manifest_reference_fkey FOREIGN KEY (new_manifest_reference) REFERENCES public.outbound_manifests(id) ON UPDATE CASCADE ON DELETE SET NULL,
+  CONSTRAINT outbound_lmd_bags_opened_by_fkey FOREIGN KEY (opened_by) REFERENCES public.users(id) ON UPDATE CASCADE
 );
 CREATE TABLE public.outbound_lmd_bag_items (
   id bigint GENERATED ALWAYS AS IDENTITY NOT NULL,
@@ -380,11 +387,14 @@ CREATE TABLE public.outbound_manifests (
   bag_numbers ARRAY,
   total_bags bigint,
   service_provider bigint,
-  created_by bigint,
   json_path text,
   xml_path text,
   total_parcels bigint,
   is_uploaded boolean DEFAULT false,
   status text NOT NULL DEFAULT 'OPEN'::text CHECK (status = ANY (ARRAY['OPEN'::text, 'CLOSED'::text])),
-  CONSTRAINT outbound_manifests_pkey PRIMARY KEY (id)
+  opened_by bigint,
+  closed_by bigint,
+  closed_at timestamp with time zone,
+  CONSTRAINT outbound_manifests_pkey PRIMARY KEY (id),
+  CONSTRAINT outbound_manifests_opened_by_fkey FOREIGN KEY (opened_by) REFERENCES public.users(id)
 );
