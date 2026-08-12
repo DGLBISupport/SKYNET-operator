@@ -6924,7 +6924,7 @@ export default function WorkstationDashboard() {
                                                                             </div>
                                                                             <div>
                                                                                 <div style={{ fontSize: '10px', color: '#6b7280', textTransform: 'uppercase', fontWeight: '700' }}>Created By</div>
-                                                                                <div style={{ fontSize: '12px', fontWeight: '700', color: '#2563eb' }}>
+                                                                                <div style={{ fontSize: '12px', fontWeight: '700', color: '#000000' }}>
                                                                                     {manifest.created_by || manifest.opened_by || 'Staff'}
                                                                                 </div>
                                                                             </div>
@@ -7057,7 +7057,7 @@ export default function WorkstationDashboard() {
                                                                                                     <div style={{ borderLeft: '1px solid #e5e7eb', paddingLeft: '14px', display: 'flex', gap: '14px', alignItems: 'center', flexWrap: 'wrap' }}>
                                                                                                         <div>
                                                                                                             <div style={{ fontSize: '9px', color: '#6b7280', textTransform: 'uppercase', fontWeight: '700', letterSpacing: '0.4px' }}>OPENED BY</div>
-                                                                                                            <div style={{ fontSize: '12px', fontWeight: '700', color: '#2563eb' }}>
+                                                                                                            <div style={{ fontSize: '12px', fontWeight: '700', color: '#000000' }}>
                                                                                                                 {bag.opened_by || bag.created_by || 'Staff'}
                                                                                                             </div>
                                                                                                         </div>
@@ -7396,12 +7396,6 @@ export default function WorkstationDashboard() {
                                             }}>
                                                 <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
                                                     <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '13px', fontWeight: '700', color: '#111827' }}>
-                                                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#e21b22" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                                                            <path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z" />
-                                                            <polyline points="14 2 14 8 20 8" />
-                                                            <line x1="16" y1="13" x2="8" y2="13" />
-                                                            <line x1="16" y1="17" x2="8" y2="17" />
-                                                        </svg>
                                                         Available Manifest (MAWB View):
                                                     </div>
                                                     <select
@@ -8054,79 +8048,150 @@ export default function WorkstationDashboard() {
                                         {/* ═══════════════════════════════════════════════════════
                                         DETAIL TAB 8: COURIER PARTNER DISTRIBUTION
                                     ═══════════════════════════════════════════════════════ */}
-                                        {dashboardSubTab === 'partner' && (
-                                            <div style={card}>
-                                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
-                                                    <div style={label}>Courier Partner Allocation Distribution</div>
-                                                    <div style={{ fontSize: '12px', color: '#6b7280' }}>Total Inbound: <strong>{dashboardData.totalReceived} parcels</strong></div>
-                                                </div>
+                                        {dashboardSubTab === 'partner' && (() => {
+                                            // ── Build per-partner stats from manifest-filtered parcel & bag lists ──
+                                            const partnerColors: Record<string, string> = {
+                                                PickMe: '#facc15',
+                                                Domex: '#7b0f1a',
+                                                Pronto: '#ea580c',
+                                                Other: '#6b7280'
+                                            };
+                                            const partnerTextColors: Record<string, string> = {
+                                                PickMe: '#000000',
+                                                Domex: '#ffffff',
+                                                Pronto: '#ffffff',
+                                                Other: '#ffffff'
+                                            };
+                                            const knownPartners = ['PickMe', 'Domex', 'Pronto', 'Other'];
+                                            const filteredPartnerMap: Record<string, { partnerName: string; totalParcels: number; allocatedParcels: number; pendingParcels: number; totalBags: number }> = {};
+                                            knownPartners.forEach(p => {
+                                                filteredPartnerMap[p] = { partnerName: p, totalParcels: 0, allocatedParcels: 0, pendingParcels: 0, totalBags: 0 };
+                                            });
 
-                                                {(() => {
-                                                    const list = dashboardData.partnerDetails || [
-                                                        { partnerName: 'PickMe', totalParcels: dashboardData.partnerDistribution?.PickMe || 0, allocatedParcels: dashboardData.partnerDistribution?.PickMe || 0, pendingParcels: 0, totalBags: dashboardData.bagPartnerCounts?.PickMe || 0 },
-                                                        { partnerName: 'Domex', totalParcels: dashboardData.partnerDistribution?.Domex || 0, allocatedParcels: dashboardData.partnerDistribution?.Domex || 0, pendingParcels: 0, totalBags: dashboardData.bagPartnerCounts?.Domex || 0 },
-                                                        { partnerName: 'Pronto', totalParcels: dashboardData.partnerDistribution?.Pronto || 0, allocatedParcels: dashboardData.partnerDistribution?.Pronto || 0, pendingParcels: 0, totalBags: dashboardData.bagPartnerCounts?.Pronto || 0 },
-                                                        { partnerName: 'Other', totalParcels: dashboardData.partnerDistribution?.Other || 0, allocatedParcels: dashboardData.partnerDistribution?.Other || 0, pendingParcels: 0, totalBags: dashboardData.bagPartnerCounts?.General || 0 }
-                                                    ];
-                                                    const paginatedList = list.slice((dashTablePage - 1) * dashTableRowsPerPage, dashTablePage * dashTableRowsPerPage);
-                                                    return (
-                                                        <>
-                                                            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px', textAlign: 'left' }}>
-                                                                <thead>
-                                                                    <tr style={{ borderBottom: '2px solid #e5e7eb', backgroundColor: '#f9fafb' }}>
-                                                                        <th style={{ padding: '12px 10px', color: '#6b7280', fontWeight: '700', fontSize: '11px', textTransform: 'uppercase' }}>Partner Name</th>
-                                                                        <th style={{ padding: '12px 10px', color: '#6b7280', fontWeight: '700', fontSize: '11px', textTransform: 'uppercase' }}>No. of Parcels</th>
-                                                                        <th style={{ padding: '12px 10px', color: '#6b7280', fontWeight: '700', fontSize: '11px', textTransform: 'uppercase' }}>Allocated Parcels</th>
-                                                                        <th style={{ padding: '12px 10px', color: '#6b7280', fontWeight: '700', fontSize: '11px', textTransform: 'uppercase' }}>Pending / Search Parcels</th>
-                                                                        <th style={{ padding: '12px 10px', color: '#6b7280', fontWeight: '700', fontSize: '11px', textTransform: 'uppercase' }}>No. of Bags</th>
-                                                                        <th style={{ padding: '12px 10px', color: '#6b7280', fontWeight: '700', fontSize: '11px', textTransform: 'uppercase', width: '180px' }}>Allocation %</th>
+                                            // Count parcels per partner from manifest-filtered parcels
+                                            filteredParcels.forEach((p: any) => {
+                                                let pName = 'Other';
+                                                const agent = (p.deliveryAgentCode || '').toLowerCase();
+                                                if (agent.includes('pickme')) pName = 'PickMe';
+                                                else if (agent.includes('domex')) pName = 'Domex';
+                                                else if (agent.includes('pronto')) pName = 'Pronto';
+                                                else if (knownPartners.includes(p.deliveryAgentCode)) pName = p.deliveryAgentCode;
+
+                                                filteredPartnerMap[pName].totalParcels++;
+                                                if (p.isSorted) {
+                                                    filteredPartnerMap[pName].allocatedParcels++;
+                                                } else {
+                                                    filteredPartnerMap[pName].pendingParcels++;
+                                                }
+                                            });
+
+                                            // Count bags per partner from manifest-filtered bags
+                                            filteredBags.forEach((b: any) => {
+                                                let pName = 'Other';
+                                                const tp = (b.targetPartner || '').toLowerCase();
+                                                if (tp.includes('pickme')) pName = 'PickMe';
+                                                else if (tp.includes('domex')) pName = 'Domex';
+                                                else if (tp.includes('pronto')) pName = 'Pronto';
+                                                else if (knownPartners.includes(b.targetPartner)) pName = b.targetPartner;
+                                                filteredPartnerMap[pName].totalBags++;
+                                            });
+
+                                            const list = Object.values(filteredPartnerMap).filter(p => p.totalParcels > 0 || p.totalBags > 0);
+                                            // Show all partners even with 0 if no data (so table isn't empty)
+                                            const displayList = list.length > 0 ? list : Object.values(filteredPartnerMap);
+                                            const paginatedList = displayList.slice((dashTablePage - 1) * dashTableRowsPerPage, dashTablePage * dashTableRowsPerPage);
+
+                                            return (
+                                                <div style={card}>
+                                                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', flexWrap: 'wrap', gap: '8px' }}>
+                                                        <div style={label}>Courier Partner Allocation Distribution</div>
+                                                        <div style={{ fontSize: '12px', color: '#6b7280' }}>
+                                                            Manifest: <strong style={{ color: '#e21b22' }}>{activeMawb !== 'ALL' ? activeMawb : 'All Manifests'}</strong>
+                                                            {' · '}Total Inbound: <strong>{totalRec} parcels</strong>
+                                                        </div>
+                                                    </div>
+
+                                                    {/* Summary bar chart */}
+                                                    {totalRec > 0 && (
+                                                        <div style={{ display: 'flex', height: '28px', borderRadius: '6px', overflow: 'hidden', marginBottom: '20px', border: '1px solid #e5e7eb' }}>
+                                                            {displayList.filter(p => p.totalParcels > 0).map(p => {
+                                                                const w = totalRec > 0 ? (p.totalParcels / totalRec) * 100 : 0;
+                                                                return (
+                                                                    <div key={p.partnerName} title={`${p.partnerName}: ${p.totalParcels} parcels (${Math.round(w)}%)`}
+                                                                        style={{ width: `${w}%`, backgroundColor: partnerColors[p.partnerName] || '#6b7280', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '10px', fontWeight: '800', color: partnerTextColors[p.partnerName] || '#ffffff', overflow: 'hidden', whiteSpace: 'nowrap', minWidth: w > 5 ? undefined : '0px' }}>
+                                                                        {w > 8 ? `${p.partnerName} ${Math.round(w)}%` : ''}
+                                                                    </div>
+                                                                );
+                                                            })}
+                                                        </div>
+                                                    )}
+
+                                                    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px', textAlign: 'left' }}>
+                                                        <thead>
+                                                            <tr style={{ borderBottom: '2px solid #e5e7eb', backgroundColor: '#f9fafb' }}>
+                                                                <th style={{ padding: '12px 10px', color: '#6b7280', fontWeight: '700', fontSize: '11px', textTransform: 'uppercase' }}>Partner Name</th>
+                                                                <th style={{ padding: '12px 10px', color: '#6b7280', fontWeight: '700', fontSize: '11px', textTransform: 'uppercase' }}>No. of Parcels</th>
+                                                                <th style={{ padding: '12px 10px', color: '#6b7280', fontWeight: '700', fontSize: '11px', textTransform: 'uppercase' }}>Allocated (Sorted)</th>
+                                                                <th style={{ padding: '12px 10px', color: '#6b7280', fontWeight: '700', fontSize: '11px', textTransform: 'uppercase' }}>Pending / Unscanned</th>
+                                                                <th style={{ padding: '12px 10px', color: '#6b7280', fontWeight: '700', fontSize: '11px', textTransform: 'uppercase' }}>No. of Bags</th>
+                                                                <th style={{ padding: '12px 10px', color: '#6b7280', fontWeight: '700', fontSize: '11px', textTransform: 'uppercase', width: '180px' }}>Distribution %</th>
+                                                            </tr>
+                                                        </thead>
+                                                        <tbody>
+                                                            {paginatedList.map((partner: any) => {
+                                                                const pct = totalRec > 0 ? Math.round((partner.totalParcels / totalRec) * 100) : 0;
+                                                                const barColor = partnerColors[partner.partnerName] || '#6b7280';
+                                                                return (
+                                                                    <tr key={partner.partnerName} style={{ borderBottom: '1px solid #f3f4f6' }}>
+                                                                        <td style={{ padding: '12px 10px', fontWeight: '700', color: '#111827', fontSize: '13px' }}>
+                                                                            <span style={{
+                                                                                display: 'inline-block',
+                                                                                padding: '3px 10px',
+                                                                                borderRadius: '5px',
+                                                                                fontSize: '12px',
+                                                                                fontWeight: '800',
+                                                                                backgroundColor: partnerColors[partner.partnerName] || '#6b7280',
+                                                                                color: partnerTextColors[partner.partnerName] || '#ffffff',
+                                                                                letterSpacing: '0.02em'
+                                                                            }}>
+                                                                                {partner.partnerName}
+                                                                            </span>
+                                                                        </td>
+                                                                        <td style={{ padding: '12px 10px', fontWeight: '700', color: '#111827' }}>
+                                                                            {partner.totalParcels} parcels
+                                                                        </td>
+                                                                        <td style={{ padding: '12px 10px', fontWeight: '700', color: '#166534' }}>
+                                                                            {partner.allocatedParcels} sorted
+                                                                        </td>
+                                                                        <td style={{ padding: '12px 10px', fontWeight: '700', color: '#b45309' }}>
+                                                                            {partner.pendingParcels} pending
+                                                                        </td>
+                                                                        <td style={{ padding: '12px 10px', fontWeight: '700', color: '#111827' }}>
+                                                                            {partner.totalBags} bags
+                                                                        </td>
+                                                                        <td style={{ padding: '12px 10px' }}>
+                                                                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                                                                <div style={{ flex: 1, height: '8px', backgroundColor: '#f3f4f6', borderRadius: '4px', overflow: 'hidden' }}>
+                                                                                    <div style={{ width: `${pct}%`, height: '100%', backgroundColor: barColor, borderRadius: '4px', transition: 'width 0.5s ease' }} />
+                                                                                </div>
+                                                                                <span style={{ fontWeight: '700', color: '#374151', fontSize: '12px', minWidth: '35px' }}>{pct}%</span>
+                                                                            </div>
+                                                                        </td>
                                                                     </tr>
-                                                                </thead>
-                                                                <tbody>
-                                                                    {paginatedList.map((partner: any) => {
-                                                                        const pct = dashboardData.totalReceived > 0 ? Math.round((partner.totalParcels / dashboardData.totalReceived) * 100) : 0;
-                                                                        return (
-                                                                            <tr key={partner.partnerName} style={{ borderBottom: '1px solid #f3f4f6' }}>
-                                                                                <td style={{ padding: '12px 10px', fontWeight: '700', color: '#111827', fontSize: '13px' }}>
-                                                                                    {partner.partnerName}
-                                                                                </td>
-                                                                                <td style={{ padding: '12px 10px', fontWeight: '700', color: '#111827' }}>
-                                                                                    {partner.totalParcels} parcels
-                                                                                </td>
-                                                                                <td style={{ padding: '12px 10px', fontWeight: '700', color: '#166534' }}>
-                                                                                    {partner.allocatedParcels} allocated
-                                                                                </td>
-                                                                                <td style={{ padding: '12px 10px', fontWeight: '700', color: '#b45309' }}>
-                                                                                    {partner.pendingParcels} pending
-                                                                                </td>
-                                                                                <td style={{ padding: '12px 10px', fontWeight: '700', color: '#111827' }}>
-                                                                                    {partner.totalBags} bags
-                                                                                </td>
-                                                                                <td style={{ padding: '12px 10px' }}>
-                                                                                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                                                                                        <div style={{ flex: 1, height: '8px', backgroundColor: '#f3f4f6', borderRadius: '4px', overflow: 'hidden' }}>
-                                                                                            <div style={{ width: `${pct}%`, height: '100%', backgroundColor: '#111827', borderRadius: '4px', transition: 'width 0.5s ease' }} />
-                                                                                        </div>
-                                                                                        <span style={{ fontWeight: '700', color: '#374151', fontSize: '12px', minWidth: '35px' }}>{pct}%</span>
-                                                                                    </div>
-                                                                                </td>
-                                                                            </tr>
-                                                                        );
-                                                                    })}
-                                                                </tbody>
-                                                            </table>
-                                                            <PaginationControl
-                                                                currentPage={dashTablePage}
-                                                                totalItems={list.length}
-                                                                rowsPerPage={dashTableRowsPerPage}
-                                                                onPageChange={(page) => setDashTablePage(page)}
-                                                                onRowsPerPageChange={(rows) => setDashTableRowsPerPage(rows)}
-                                                            />
-                                                        </>
-                                                    );
-                                                })()}
-                                            </div>
-                                        )}
+                                                                );
+                                                            })}
+                                                        </tbody>
+                                                    </table>
+                                                    <PaginationControl
+                                                        currentPage={dashTablePage}
+                                                        totalItems={displayList.length}
+                                                        rowsPerPage={dashTableRowsPerPage}
+                                                        onPageChange={(page) => setDashTablePage(page)}
+                                                        onRowsPerPageChange={(rows) => setDashTableRowsPerPage(rows)}
+                                                    />
+                                                </div>
+                                            );
+                                        })()}
                                     </>
                                 );
                             })() : (
