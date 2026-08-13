@@ -144,6 +144,21 @@ export async function GET(request: Request) {
             if (sp.name) providerIdMap[String(sp.name).trim().toLowerCase()] = norm;
         });
 
+        const resolvePartnerName = (spVal: any): string => {
+            if (spVal === null || spVal === undefined || spVal === '') return 'Other';
+            const strVal = String(spVal).trim();
+            const lowerVal = strVal.toLowerCase();
+
+            if (providerIdMap[strVal]) return providerIdMap[strVal];
+            if (providerIdMap[lowerVal]) return providerIdMap[lowerVal];
+
+            if (lowerVal.includes('pickme') || lowerVal === '1') return 'PickMe';
+            if (lowerVal.includes('domex') || lowerVal === '2') return 'Domex';
+            if (lowerVal.includes('pronto')) return 'Pronto';
+
+            return 'Other';
+        };
+
         // Build Outbound Manifest ID -> Reference string map
         const omIdMap: Record<number, string> = {};
         outboundManifestData.forEach((om: any) => {
@@ -206,21 +221,6 @@ export async function GET(request: Request) {
                 });
             }
         });
-
-        const resolvePartnerName = (spVal: any): string => {
-            if (spVal === null || spVal === undefined || spVal === '') return 'Other';
-            const strVal = String(spVal).trim();
-            const lowerVal = strVal.toLowerCase();
-
-            if (providerIdMap[strVal]) return providerIdMap[strVal];
-            if (providerIdMap[lowerVal]) return providerIdMap[lowerVal];
-
-            if (lowerVal.includes('pickme') || lowerVal === '1') return 'PickMe';
-            if (lowerVal.includes('domex') || lowerVal === '2') return 'Domex';
-            if (lowerVal.includes('pronto')) return 'Pronto';
-
-            return 'Other';
-        };
 
         // Filter rows by date string (YYYY-MM-DD), checking local timezone (Asia/Colombo) & UTC
         const isTargetDate = (dateStr?: string | null) => {
