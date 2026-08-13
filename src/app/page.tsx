@@ -103,6 +103,17 @@ export default function WorkstationDashboard() {
         }
     }, [router]);
 
+    // Preload partner logos into browser cache for instant rendering upon barcode scan
+    useEffect(() => {
+        if (typeof window !== 'undefined') {
+            const logoAssets = ['/domex_logo.webp', '/pick_me_logo.webp', '/domex_logo.png', '/pick_me_logo.png', '/logo.webp', '/logo.png'];
+            logoAssets.forEach(src => {
+                const img = new Image();
+                img.src = src;
+            });
+        }
+    }, []);
+
     const handleLogout = () => {
         localStorage.removeItem('skynet_user');
         router.push('/login');
@@ -2759,23 +2770,15 @@ export default function WorkstationDashboard() {
             const response = await fetch('/api/allocate', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ trackingNumber: barcode, stage: 'second' }),
+                body: JSON.stringify({ trackingNumber: barcode, stage: 'damaged-lookup' }),
             });
             const data: AllocationResponse = await response.json();
             if (data.success) {
                 setDamagedCurrentScan(data);
                 setDamagedHistory((prev) => [data, ...prev].slice(0, 10));
-                setScannedToday((prev) => prev + 1);
                 setDamagedStatus('SUCCESS');
-
-                // Increment real bin count for this partner so Dispatch Verify shows accurate numbers
-                const partner = data.assignedPartner as 'PickMe' | 'Domex' | 'Pronto';
-                if (partner === 'PickMe' || partner === 'Domex' || partner === 'Pronto') {
-                    setBinCounts((prev) => ({ ...prev, [partner]: prev[partner] + 1 }));
-                    setPendingDispatch((prev) => prev + 1);
-                }
             } else {
-                throw new Error(data.error || 'Unknown allocation failure');
+                throw new Error(data.error || 'Unknown lookup failure');
             }
         } catch (err: any) {
             setDamagedErrorMessage(err.message || 'API connection failure');
@@ -4083,11 +4086,17 @@ export default function WorkstationDashboard() {
                                         boxSizing: 'border-box'
                                     }}>
                                         {firstScanCurrentScan.assignedPartner === 'Domex' ? (
-                                            <img src="/domex_logo.png" alt="Domex" style={{ maxHeight: '95px', maxWidth: '90%', objectFit: 'contain' }} />
+                                            <picture style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: '100%', height: '100%' }}>
+                                                <source srcSet="/domex_logo.webp" type="image/webp" />
+                                                <img src="/domex_logo.png" alt="Domex" decoding="async" fetchPriority="high" style={{ maxHeight: '95px', maxWidth: '90%', objectFit: 'contain' }} />
+                                            </picture>
                                         ) : firstScanCurrentScan.assignedPartner === 'Pronto' ? (
                                             <span style={{ color: '#ea580c', fontWeight: '900', fontSize: '34px', letterSpacing: '1px' }}>PRONTO</span>
                                         ) : (
-                                            <img src="/pick_me_logo.png" alt="PickMe" style={{ maxHeight: '95px', maxWidth: '90%', objectFit: 'contain' }} />
+                                            <picture style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: '100%', height: '100%' }}>
+                                                <source srcSet="/pick_me_logo.webp" type="image/webp" />
+                                                <img src="/pick_me_logo.png" alt="PickMe" decoding="async" fetchPriority="high" style={{ maxHeight: '95px', maxWidth: '90%', objectFit: 'contain' }} />
+                                            </picture>
                                         )}
                                     </div>
 
@@ -5112,11 +5121,17 @@ export default function WorkstationDashboard() {
                                                         boxSizing: 'border-box'
                                                     }}>
                                                         {validationCard.assignedPartner === 'Domex' ? (
-                                                            <img src="/domex_logo.png" alt="Domex" style={{ maxHeight: '95px', maxWidth: '90%', objectFit: 'contain' }} />
+                                                            <picture style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: '100%', height: '100%' }}>
+                                                                <source srcSet="/domex_logo.webp" type="image/webp" />
+                                                                <img src="/domex_logo.png" alt="Domex" decoding="async" fetchPriority="high" style={{ maxHeight: '95px', maxWidth: '90%', objectFit: 'contain' }} />
+                                                            </picture>
                                                         ) : validationCard.assignedPartner === 'Pronto' ? (
                                                             <span style={{ color: '#ea580c', fontWeight: '900', fontSize: '34px', letterSpacing: '1px' }}>PRONTO</span>
                                                         ) : (
-                                                            <img src="/pick_me_logo.png" alt="PickMe" style={{ maxHeight: '95px', maxWidth: '90%', objectFit: 'contain' }} />
+                                                            <picture style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: '100%', height: '100%' }}>
+                                                                <source srcSet="/pick_me_logo.webp" type="image/webp" />
+                                                                <img src="/pick_me_logo.png" alt="PickMe" decoding="async" fetchPriority="high" style={{ maxHeight: '95px', maxWidth: '90%', objectFit: 'contain' }} />
+                                                            </picture>
                                                         )}
                                                     </div>
 
@@ -5438,9 +5453,15 @@ export default function WorkstationDashboard() {
                                                         boxShadow: '0 4px 12px rgba(0,0,0,0.15)'
                                                     }}>
                                                         {damagedCurrentScan.assignedPartner === 'PickMe' ? (
-                                                            <img src="/pick_me_logo.png" alt="PickMe" style={{ maxHeight: '100%', maxWidth: '100%', objectFit: 'contain' }} />
+                                                            <picture style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: '100%', height: '100%' }}>
+                                                                <source srcSet="/pick_me_logo.webp" type="image/webp" />
+                                                                <img src="/pick_me_logo.png" alt="PickMe" decoding="async" fetchPriority="high" style={{ maxHeight: '100%', maxWidth: '100%', objectFit: 'contain' }} />
+                                                            </picture>
                                                         ) : damagedCurrentScan.assignedPartner === 'Domex' ? (
-                                                            <img src="/domex_logo.png" alt="Domex" style={{ maxHeight: '100%', maxWidth: '100%', objectFit: 'contain' }} />
+                                                            <picture style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: '100%', height: '100%' }}>
+                                                                <source srcSet="/domex_logo.webp" type="image/webp" />
+                                                                <img src="/domex_logo.png" alt="Domex" decoding="async" fetchPriority="high" style={{ maxHeight: '100%', maxWidth: '100%', objectFit: 'contain' }} />
+                                                            </picture>
                                                         ) : (
                                                             <span style={{ color: '#ea580c', fontWeight: '900', fontSize: '28px', letterSpacing: '1px' }}>PRONTO</span>
                                                         )}
@@ -5475,7 +5496,7 @@ export default function WorkstationDashboard() {
                                                             gap: '6px',
                                                             boxShadow: '0 2px 4px rgba(0,0,0,0.1)'
                                                         }}>
-                                                            <span>⚠️ MISSED 1ST SCAN (AUTO RECORDED)</span>
+                                                            <span>⚠️ 1ST SCAN NOT DONE YET</span>
                                                         </div>
                                                     )}
                                                 </div>

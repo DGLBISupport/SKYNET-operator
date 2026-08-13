@@ -393,6 +393,94 @@ export async function POST(request: Request) {
         );
 
         // ═══════════════════════════════════════════════════════
+        // STAGE: DAMAGED LABEL LOOKUP (READ-ONLY)
+        // ═══════════════════════════════════════════════════════
+        if (stage === 'damaged-lookup' || stage === 'lookup') {
+            let shipment = resolvedShipment;
+            if (!shipment) {
+                const shipRes = await fetch(`${supabaseUrl}/rest/v1/shipments?reference_number=eq.${encodeURIComponent(shipmentRef)}`, { headers });
+                if (shipRes.ok) {
+                    const shipments = await shipRes.json();
+                    shipment = shipments && shipments[0];
+                }
+            }
+
+            if (!shipment) {
+                return NextResponse.json({
+                    success: false,
+                    error: 'NOT_FOUND',
+                    message: `Shipment reference number "${cleanBar}" not found in database.`
+                }, { status: 404 });
+            }
+
+            // Read-only allocation record lookup
+            const spaRes = await fetch(`${supabaseUrl}/rest/v1/service_provider_allocation?shipment_ref=eq.${encodeURIComponent(shipmentRef)}`, { headers });
+            let allocation = null;
+            if (spaRes.ok) {
+                const allocations = await spaRes.json();
+                allocation = allocations && allocations[0];
+            }
+
+            // Check if 1st scan was performed (informational only, does NOT mutate DB)
+            const firstScanConfirmed = Boolean(
+                allocation?.unsealed === true ||
+                allocation?.scan_status === '1ST_SCAN_DONE' ||
+                allocation?.scan_status === '2ND_SCAN_DONE'
+            );
+            const missedFirstScan = !firstScanConfirmed;
+
+            // Resolve zone and partner using existing helper
+            const { assignedZone, assignedPartner } = await resolveZoneAndPartner(supabaseUrl, headers, shipment, allocation);
+
+            const initialManifestRef = allocation?.mawb_ref || shipment.mawb_reference || shipment.mawb_ref || "Initial Manifest";
+
+            const skynetData: SkyNetParcelData = {
+                trackingNumber: shipment.reference_number.toString(),
+                recipientName: shipment.consignee_name || "Unknown Recipient",
+                recipientPhone: shipment.consignee_phone || "No Phone",
+                recipientAddress: cleanAddress(
+                    shipment.consignee_address_1,
+                    shipment.consignee_address_2,
+                    shipment.consignee_address_3,
+                    shipment.consignee_address_4,
+                    shipment.consignee_address_5
+                ),
+                senderName: shipment.consignor_name || "Unknown Sender",
+                senderAddress: cleanAddress(
+                    shipment.consignor_address_1,
+                    shipment.consignor_address_2,
+                    shipment.consignor_address_3,
+                    shipment.consignor_address_4,
+                    shipment.consignor_address_5
+                ),
+                province: shipment.consignee_state || "Unknown Province",
+                district: shipment.consignee_address_3 || "Unknown District",
+                city: shipment.consignee_location_name || "Unknown City",
+                weight: shipment.weight_measure?.toUpperCase() === 'G' ? (shipment.weight || 0) / 1000 : (shipment.weight || 0),
+                value: shipment.customs_value ? `${shipment.customs_currency_code || 'LKR'} ${shipment.customs_value.toFixed(2)}` : undefined,
+                account: shipment.shipper_code || undefined,
+                apiSync: allocation?.validated ? "Validated" : "Pending",
+                goodsDesc: shipment.goods_desc || undefined,
+                mawbRef: initialManifestRef,
+                serviceType: shipment.service_type || undefined,
+                businessType: shipment.business_type || undefined,
+                senderReference: shipment.sender_reference || undefined,
+                _scannedVia: isTemuScan ? 'TEMU' : 'SKYNET',
+                isTemuScan: isTemuScan,
+                scannedMethod: isTemuScan ? 'TEMU' : 'SKYNET'
+            };
+
+            return NextResponse.json({
+                success: true,
+                parcel: skynetData,
+                assignedZone,
+                assignedPartner,
+                missedFirstScan,
+                scanStatus: allocation?.scan_status || 'NOT_SCANNED'
+            });
+        }
+
+        // ═══════════════════════════════════════════════════════
         // STAGE 1 — BOX UNSEALING (FIRST SCAN)
         // ═══════════════════════════════════════════════════════
         if (stage === 'first') {
