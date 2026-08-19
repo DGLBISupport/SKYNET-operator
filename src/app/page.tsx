@@ -247,7 +247,13 @@ export default function WorkstationDashboard() {
     // Tab 1: Box Unsealing (First Scan)
     const [mawbsList, setMawbsList] = useState<any[]>([]);
     const [firstScanMawb, setFirstScanMawb] = useState('');
-    const [firstScanBags, setFirstScanBags] = useState<{ bagNumber: string; expectedCount: number }[]>([]);
+    const [firstScanBags, setFirstScanBags] = useState<{
+        bagNumber: string;
+        expectedCount: number;
+        scannedCount?: number;
+        pendingCount?: number;
+        status?: string;
+    }[]>([]);
     const [isBagsLoading, setIsBagsLoading] = useState(false);
     const [firstScanSelectedBag, setFirstScanSelectedBag] = useState('');
     const [bagBarcodeInput, setBagBarcodeInput] = useState('');
@@ -865,8 +871,45 @@ export default function WorkstationDashboard() {
                 if (data.success && Array.isArray(data.parcels)) {
                     const actualCount = data.count !== undefined ? data.count : data.parcels.length;
                     setFirstScanExpected(actualCount);
-                    setFirstScanBags(prev => prev.map(b => b.bagNumber === firstScanSelectedBag ? { ...b, expectedCount: actualCount } : b));
+                    const scannedCount = data.scannedCount !== undefined ? data.scannedCount : (data.scannedParcels ? data.scannedParcels.length : 0);
+                    const pendingCount = data.pendingCount !== undefined ? data.pendingCount : Math.max(0, actualCount - scannedCount);
+
+                    setFirstScanBags(prev => prev.map(b => b.bagNumber === firstScanSelectedBag ? {
+                        ...b,
+                        expectedCount: actualCount,
+                        scannedCount: scannedCount,
+                        pendingCount: pendingCount,
+                        status: b.status === 'COMPLETED' ? 'COMPLETED' : (scannedCount > 0 ? 'IN_PROGRESS' : 'PENDING')
+                    } : b));
+
                     setFirstScanBagParcels(data.parcels);
+
+                    if (Array.isArray(data.scannedParcels) && data.scannedParcels.length > 0) {
+                        setFirstScanHistory(data.scannedParcels);
+                        const last = data.scannedParcels[0];
+                        setFirstScanCurrentScan({
+                            assignedPartner: last.assignedPartner,
+                            assignedZone: last.assignedZone,
+                            parcel: {
+                                trackingNumber: last.skynetTrackingNumber || last.trackingNumber,
+                                recipientName: last.recipientName,
+                                city: last.city,
+                                province: '',
+                                district: '',
+                                weight: last.weight || 0.1,
+                                mawbRef: firstScanMawb,
+                                senderReference: last.senderReference,
+                                _scannedVia: last.isTemuScan ? 'TEMU' : 'SKYNET',
+                                isTemuScan: last.isTemuScan,
+                                scannedMethod: last.isTemuScan ? 'TEMU' : 'SKYNET'
+                            }
+                        });
+                        setFirstScanStatus('READY');
+                    } else {
+                        setFirstScanHistory([]);
+                        setFirstScanCurrentScan(null);
+                        setFirstScanStatus('READY');
+                    }
                 }
             } catch (err) {
                 console.error("Failed to fetch bag parcel count:", err);
@@ -1364,6 +1407,10 @@ export default function WorkstationDashboard() {
         if (unsealed) {
             return unsealed.scanned;
         }
+        const foundBag = firstScanBags.find(b => b.bagNumber === bagNumber);
+        if (foundBag && foundBag.scannedCount !== undefined) {
+            return foundBag.scannedCount;
+        }
         return 0;
     };
 
@@ -1378,6 +1425,11 @@ export default function WorkstationDashboard() {
             }
             return 'ONGOING';
         }
+        const foundBag = firstScanBags.find(b => b.bagNumber === bagNumber);
+        if (foundBag) {
+            if (foundBag.status === 'COMPLETED') return 'COMPLETED';
+            if ((foundBag.scannedCount || 0) > 0 || foundBag.status === 'IN_PROGRESS') return 'IN_PROGRESS';
+        }
         return 'PENDING';
     };
 
@@ -1388,17 +1440,29 @@ export default function WorkstationDashboard() {
             if (aIsActive && !bIsActive) return -1;
             if (!aIsActive && bIsActive) return 1;
 
-            const aUnsealedIndex = unsealedBoxes.findIndex(ub => ub.mawb?.toLowerCase() === firstScanMawb?.toLowerCase() && ub.bagNumber?.toLowerCase() === a.bagNumber?.toLowerCase());
-            const bUnsealedIndex = unsealedBoxes.findIndex(ub => ub.mawb?.toLowerCase() === firstScanMawb?.toLowerCase() && ub.bagNumber?.toLowerCase() === b.bagNumber?.toLowerCase());
+            const aStatus = getBagStatus(a.bagNumber, a.expectedCount);
+            const bStatus = getBagStatus(b.bagNumber, b.expectedCount);
 
-            const aIsCompleted = aUnsealedIndex !== -1;
-            const bIsCompleted = bUnsealedIndex !== -1;
+            const statusOrder: Record<string, number> = {
+                'ONGOING': 0,
+                'IN_PROGRESS': 1,
+                'PENDING': 2,
+                'COMPLETED': 3
+            };
 
-            if (aIsCompleted && !bIsCompleted) return -1;
-            if (!aIsCompleted && bIsCompleted) return 1;
+            const aOrder = statusOrder[aStatus] ?? 2;
+            const bOrder = statusOrder[bStatus] ?? 2;
 
-            if (aIsCompleted && bIsCompleted) {
-                return aUnsealedIndex - bUnsealedIndex;
+            if (aOrder !== bOrder) {
+                return aOrder - bOrder;
+            }
+
+            if (aStatus === 'COMPLETED' && bStatus === 'COMPLETED') {
+                const aUnsealedIndex = unsealedBoxes.findIndex(ub => ub.mawb?.toLowerCase() === firstScanMawb?.toLowerCase() && ub.bagNumber?.toLowerCase() === a.bagNumber?.toLowerCase());
+                const bUnsealedIndex = unsealedBoxes.findIndex(ub => ub.mawb?.toLowerCase() === firstScanMawb?.toLowerCase() && ub.bagNumber?.toLowerCase() === b.bagNumber?.toLowerCase());
+                if (aUnsealedIndex !== -1 && bUnsealedIndex !== -1) {
+                    return aUnsealedIndex - bUnsealedIndex;
+                }
             }
 
             return a.bagNumber.localeCompare(b.bagNumber);
@@ -1680,7 +1744,7 @@ export default function WorkstationDashboard() {
                     return;
                 }
                 const now = new Date();
-                const timeStr = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+                const timeStr = now.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true });
 
                 const isTemuScan = Boolean(
                     data.parcel?.senderReference && (
@@ -1713,6 +1777,21 @@ export default function WorkstationDashboard() {
                 });
                 setScannedToday((prev) => prev + 1);
                 setFirstScanStatus('SUCCESS');
+
+                // Update firstScanBags in real-time
+                setFirstScanBags(prev => prev.map(b => {
+                    if (b.bagNumber === firstScanSelectedBag) {
+                        const scn = newHistory.length;
+                        const exp = b.expectedCount;
+                        return {
+                            ...b,
+                            scannedCount: scn,
+                            pendingCount: Math.max(0, exp - scn),
+                            status: scn >= exp && exp > 0 ? 'COMPLETED' : 'IN_PROGRESS'
+                        };
+                    }
+                    return b;
+                }));
 
                 // Show warning popup modal if no LMD partner is assigned
                 if (!data.assignedPartner || data.assignedPartner === 'Unknown') {
@@ -1857,7 +1936,7 @@ export default function WorkstationDashboard() {
                     return;
                 }
                 const now = new Date();
-                const timeStr = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+                const timeStr = now.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true });
 
                 const isTemuScan = Boolean(
                     data.parcel?.senderReference && (
@@ -1890,6 +1969,21 @@ export default function WorkstationDashboard() {
                 });
                 setScannedToday((prev) => prev + 1);
                 setFirstScanStatus('SUCCESS');
+
+                // Update firstScanBags in real-time
+                setFirstScanBags(prev => prev.map(b => {
+                    if (b.bagNumber === firstScanSelectedBag) {
+                        const scn = newHistory.length;
+                        const exp = b.expectedCount;
+                        return {
+                            ...b,
+                            scannedCount: scn,
+                            pendingCount: Math.max(0, exp - scn),
+                            status: scn >= exp && exp > 0 ? 'COMPLETED' : 'IN_PROGRESS'
+                        };
+                    }
+                    return b;
+                }));
 
                 // Show warning popup modal if no LMD partner is assigned
                 if (!data.assignedPartner || data.assignedPartner === 'Unknown') {
@@ -2531,10 +2625,14 @@ export default function WorkstationDashboard() {
                 setScannedToday((prev) => prev + 1);
 
                 const initialManifest = data.initialManifest || data.parcel?.initialManifest || data.parcel?.mawbRef || 'Initial Manifest';
+                const initialBag = data.parcel?.inboundBag || data.parcel?.initialBag || data.parcel?.bagNumber || data.parcel?.bag_number || '';
                 const cleanTracking = (data.parcel?.trackingNumber || barcode || '').toString().replace(/SKYT-?/gi, '').trim();
                 const parcelToStore = {
                     ...data.parcel,
                     initialManifest,
+                    inboundManifest: initialManifest,
+                    inboundBag: initialBag,
+                    initialBag,
                     mawbRef: initialManifest,
                     scannedBarcode: barcode,
                     displayTrackingNumber: data.parcel?.senderReference && data.parcel.senderReference.trim().toLowerCase() === barcode.trim().toLowerCase()

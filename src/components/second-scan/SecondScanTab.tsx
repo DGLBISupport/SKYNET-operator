@@ -727,7 +727,7 @@ export default function SecondScanTab({
                                 <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px', textAlign: 'left' }}>
                                     <thead>
                                         <tr style={{ borderBottom: '2px solid #e5e7eb' }}>
-                                            {['Tracking no.', 'Initial Manifest', 'Consignee', 'LMD Partner', 'Zone', 'Weight (kg)', 'City', 'Validation Status'].map(h => (
+                                            {['Tracking no.', 'Initial Manifest', 'LMD Partner', 'Zone', 'Weight (kg)', 'Validation Status'].map(h => (
                                                 <th key={h} style={{ padding: '8px', color: '#6b7280', fontWeight: '600', fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.4px' }}>{h}</th>
                                             ))}
                                         </tr>
@@ -756,7 +756,6 @@ export default function SecondScanTab({
                                                             {initManifest}
                                                         </span>
                                                     </td>
-                                                    <td style={{ padding: '8px', color: '#374151' }}>{parcel.recipientName}</td>
                                                     <td style={{ padding: '8px' }}>
                                                         {partner !== '-' ? (
                                                             <span style={{
@@ -776,7 +775,6 @@ export default function SecondScanTab({
                                                     </td>
                                                     <td style={{ padding: '8px', color: '#4b5563' }}>{parcel.province || parcel.assignedZone || 'Zone'}</td>
                                                     <td style={{ padding: '8px', fontWeight: '600' }}>{parcel.weight || '0.1'} kg</td>
-                                                    <td style={{ padding: '8px', color: '#6b7280' }}>{parcel.city}</td>
                                                     <td style={{ padding: '8px', color: '#6b7280' }}>
                                                         <span style={{
                                                             backgroundColor: '#ffffff',
@@ -795,7 +793,7 @@ export default function SecondScanTab({
                                         })}
                                         {(!activeOutboundBag?.parcels || activeOutboundBag.parcels.length === 0) && (
                                             <tr>
-                                                <td colSpan={8} style={{ padding: '24px 8px', textAlign: 'center', color: '#9ca3af' }}>
+                                                <td colSpan={6} style={{ padding: '24px 8px', textAlign: 'center', color: '#9ca3af' }}>
                                                     No parcels allocated to this outbound bag yet. Scan parcels above to fill bag.
                                                 </td>
                                             </tr>

@@ -105,21 +105,116 @@ export async function GET(request: Request) {
             console.error('[manifest-tracking] Error fetching outbound_lmd_bag_items:', e);
         }
 
-        // 6. Build Shipments lookup for consignee & city data
-        let shipmentsMap = new Map<string, any>();
-        try {
-            const shipRes = await fetch(`${sb.url}/rest/v1/shipments?select=reference_number,recipient_name,consignee_name,city,destination_city,status&limit=2000`, { headers: sb.headers, cache: 'no-store' });
-            const shipData = await shipRes.json();
-            if (Array.isArray(shipData)) {
-                shipData.forEach((s: any) => {
-                    if (s.reference_number) {
-                        shipmentsMap.set(String(s.reference_number).trim(), s);
-                    }
+        // Collect all distinct tracking references across all bags
+        const allParcelRefs = new Set<string>();
+        rawBags.forEach((bag: any) => {
+            let pList: any[] = [];
+            if (Array.isArray(bag.parcels)) pList = bag.parcels;
+            else if (typeof bag.parcels === 'string' && bag.parcels.trim()) {
+                try { pList = JSON.parse(bag.parcels); } catch(e) {}
+            }
+            if (Array.isArray(pList)) {
+                pList.forEach((p: any) => {
+                    const r = p.trackingNumber || p.shipment_ref || p.reference_number || p.scannedBarcode;
+                    if (r) allParcelRefs.add(String(r).trim());
                 });
             }
-        } catch (e) {
-            console.error('[manifest-tracking] Error fetching shipments lookup:', e);
+        });
+        bagItemsMap.forEach((items) => {
+            items.forEach((it: any) => {
+                if (it.shipment_ref) allParcelRefs.add(String(it.shipment_ref).trim());
+            });
+        });
+
+        // 6. Build Shipments & Allocations lookups for inbound manifest, inbound bag & LMD partner data
+        let shipmentsMap = new Map<string, any>();
+        let spaMap = new Map<string, any>();
+
+        const refArray = Array.from(allParcelRefs);
+        const chunkSize = 40;
+        for (let i = 0; i < refArray.length; i += chunkSize) {
+            const chunk = refArray.slice(i, i + chunkSize);
+            const orFilters = chunk.map(r => `reference_number.eq.${encodeURIComponent(r)},sender_reference.eq.${encodeURIComponent(r)}`).join(',');
+            const spaFilters = chunk.map(r => `shipment_ref.eq.${encodeURIComponent(r)}`).join(',');
+
+            try {
+                const [shipRes, spaRes] = await Promise.all([
+                    fetch(`${sb.url}/rest/v1/shipments?or=(${orFilters})&select=reference_number,sender_reference,consignee_name,consignee_location_name,dest_location_name,bag_number,mawb_reference,weight`, { headers: sb.headers, cache: 'no-store' }),
+                    fetch(`${sb.url}/rest/v1/service_provider_allocation?or=(${spaFilters})&select=shipment_ref,service_provider,mawb_ref`, { headers: sb.headers, cache: 'no-store' })
+                ]);
+
+                const shipData = await shipRes.json();
+                if (Array.isArray(shipData)) {
+                    shipData.forEach((s: any) => {
+                        const addKey = (key: any) => {
+                            if (!key) return;
+                            const kStr = String(key).trim();
+                            if (!kStr) return;
+                            shipmentsMap.set(kStr, s);
+                            shipmentsMap.set(kStr.toLowerCase(), s);
+                            const noPrefix = kStr.replace(/^SKYT-?/i, '').trim();
+                            if (noPrefix) {
+                                shipmentsMap.set(noPrefix, s);
+                                shipmentsMap.set(noPrefix.toLowerCase(), s);
+                            }
+                        };
+                        addKey(s.reference_number);
+                        addKey(s.sender_reference);
+                    });
+                }
+
+                const spaData = await spaRes.json();
+                if (Array.isArray(spaData)) {
+                    spaData.forEach((a: any) => {
+                        if (a.shipment_ref) {
+                            const kStr = String(a.shipment_ref).trim();
+                            spaMap.set(kStr, a);
+                            spaMap.set(kStr.toLowerCase(), a);
+                            const noPrefix = kStr.replace(/^SKYT-?/i, '').trim();
+                            if (noPrefix) {
+                                spaMap.set(noPrefix, a);
+                                spaMap.set(noPrefix.toLowerCase(), a);
+                            }
+                        }
+                    });
+                }
+            } catch (e) {
+                console.error('[manifest-tracking] Error fetching shipments/spa chunk:', e);
+            }
         }
+
+        const getShipmentInfo = (ref: string) => {
+            if (!ref) return null;
+            const cleanRef = String(ref).trim();
+            if (shipmentsMap.has(cleanRef)) return shipmentsMap.get(cleanRef);
+            if (shipmentsMap.has(cleanRef.toLowerCase())) return shipmentsMap.get(cleanRef.toLowerCase());
+            const noPrefix = cleanRef.replace(/^SKYT-?/i, '').trim();
+            if (shipmentsMap.has(noPrefix)) return shipmentsMap.get(noPrefix);
+            if (shipmentsMap.has(noPrefix.toLowerCase())) return shipmentsMap.get(noPrefix.toLowerCase());
+            return null;
+        };
+
+        const getSpaInfo = (ref: string) => {
+            if (!ref) return null;
+            const cleanRef = String(ref).trim();
+            if (spaMap.has(cleanRef)) return spaMap.get(cleanRef);
+            if (spaMap.has(cleanRef.toLowerCase())) return spaMap.get(cleanRef.toLowerCase());
+            const noPrefix = cleanRef.replace(/^SKYT-?/i, '').trim();
+            if (spaMap.has(noPrefix)) return spaMap.get(noPrefix);
+            if (spaMap.has(noPrefix.toLowerCase())) return spaMap.get(noPrefix.toLowerCase());
+            return null;
+        };
+
+        const resolveLmdPartner = (p: any, shipInfo: any, spaInfo: any, bagPartner: string) => {
+            if (p.assignedPartner && p.assignedPartner !== 'Unknown' && p.assignedPartner !== '—') return p.assignedPartner;
+            if (p.partner && p.partner !== 'Unknown' && p.partner !== '—') return p.partner;
+            if (spaInfo?.service_provider) {
+                const spName = serviceProvidersMap[spaInfo.service_provider];
+                if (spName) return spName;
+            }
+            if (bagPartner && bagPartner !== 'ALL') return bagPartner;
+            return '—';
+        };
 
         // Process Bags & format parcel contents
         const processedBags = rawBags.map((bag: any) => {
@@ -129,9 +224,19 @@ export async function GET(request: Request) {
             if (Array.isArray(bag.parcels) && bag.parcels.length > 0) {
                 parcelsList = bag.parcels.map((p: any) => {
                     const ref = p.trackingNumber || p.shipment_ref || p.reference_number || '';
-                    const shipInfo = ref ? shipmentsMap.get(String(ref).trim()) : null;
+                    const shipInfo = getShipmentInfo(ref);
+                    const spaInfo = getSpaInfo(ref);
+                    const inboundManifest = shipInfo?.mawb_reference || p.inboundManifest || p.initialManifest || p.mawbRef || spaInfo?.mawb_ref || '—';
+                    const inboundBag = shipInfo?.bag_number || p.inboundBag || p.initialBag || p.bagNumber || p.bag_number || '—';
+                    const assignedPartner = resolveLmdPartner(p, shipInfo, spaInfo, bag.target_partner);
                     return {
                         trackingNumber: ref,
+                        inboundManifest,
+                        inboundBag,
+                        initialManifest: inboundManifest,
+                        initialBag: inboundBag,
+                        assignedPartner,
+                        partner: assignedPartner,
                         weight: p.weight || 0,
                         scannedBy: resolveUserName(p.scannedBy || p.scanned_by) || 'Staff',
                         recipientName: p.recipientName || shipInfo?.recipient_name || shipInfo?.consignee_name || '—',
@@ -145,9 +250,19 @@ export async function GET(request: Request) {
                     if (Array.isArray(parsed)) {
                         parcelsList = parsed.map((p: any) => {
                             const ref = p.trackingNumber || p.shipment_ref || p.reference_number || '';
-                            const shipInfo = ref ? shipmentsMap.get(String(ref).trim()) : null;
+                            const shipInfo = getShipmentInfo(ref);
+                            const spaInfo = getSpaInfo(ref);
+                            const inboundManifest = shipInfo?.mawb_reference || p.inboundManifest || p.initialManifest || p.mawbRef || spaInfo?.mawb_ref || '—';
+                            const inboundBag = shipInfo?.bag_number || p.inboundBag || p.initialBag || p.bagNumber || p.bag_number || '—';
+                            const assignedPartner = resolveLmdPartner(p, shipInfo, spaInfo, bag.target_partner);
                             return {
                                 trackingNumber: ref,
+                                inboundManifest,
+                                inboundBag,
+                                initialManifest: inboundManifest,
+                                initialBag: inboundBag,
+                                assignedPartner,
+                                partner: assignedPartner,
                                 weight: p.weight || 0,
                                 scannedBy: resolveUserName(p.scannedBy || p.scanned_by) || 'Staff',
                                 recipientName: p.recipientName || shipInfo?.recipient_name || shipInfo?.consignee_name || '—',
@@ -164,9 +279,19 @@ export async function GET(request: Request) {
                 const dbItems = bagItemsMap.get(bag.bag_number) || [];
                 parcelsList = dbItems.map((it: any) => {
                     const ref = it.shipment_ref || '';
-                    const shipInfo = ref ? shipmentsMap.get(String(ref).trim()) : null;
+                    const shipInfo = getShipmentInfo(ref);
+                    const spaInfo = getSpaInfo(ref);
+                    const inboundManifest = shipInfo?.mawb_reference || it.inbound_manifest || it.initial_manifest || spaInfo?.mawb_ref || '—';
+                    const inboundBag = shipInfo?.bag_number || it.inbound_bag || it.initial_bag || '—';
+                    const assignedPartner = resolveLmdPartner(it, shipInfo, spaInfo, bag.target_partner);
                     return {
                         trackingNumber: ref,
+                        inboundManifest,
+                        inboundBag,
+                        initialManifest: inboundManifest,
+                        initialBag: inboundBag,
+                        assignedPartner,
+                        partner: assignedPartner,
                         weight: it.weight || 0,
                         scannedBy: resolveUserName(it.scanned_by) || 'Staff',
                         recipientName: shipInfo?.recipient_name || shipInfo?.consignee_name || '—',

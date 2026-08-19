@@ -515,23 +515,55 @@ export default function ManifestTrackingTab({
                                                                                                                 <tr style={{ borderBottom: '1px solid #e5e7eb' }}>
                                                                                                                     <th style={{ padding: '6px 8px', color: '#6b7280', fontWeight: '600', fontSize: '10px', textTransform: 'uppercase' }}>#</th>
                                                                                                                     <th style={{ padding: '6px 8px', color: '#6b7280', fontWeight: '600', fontSize: '10px', textTransform: 'uppercase' }}>Tracking Ref</th>
-                                                                                                                    <th style={{ padding: '6px 8px', color: '#6b7280', fontWeight: '600', fontSize: '10px', textTransform: 'uppercase' }}>Recipient</th>
-                                                                                                                    <th style={{ padding: '6px 8px', color: '#6b7280', fontWeight: '600', fontSize: '10px', textTransform: 'uppercase' }}>Destination</th>
+                                                                                                                    <th style={{ padding: '6px 8px', color: '#6b7280', fontWeight: '600', fontSize: '10px', textTransform: 'uppercase' }}>Inbound Manifest</th>
+                                                                                                                    <th style={{ padding: '6px 8px', color: '#6b7280', fontWeight: '600', fontSize: '10px', textTransform: 'uppercase' }}>Inbound Bag</th>
+                                                                                                                    <th style={{ padding: '6px 8px', color: '#6b7280', fontWeight: '600', fontSize: '10px', textTransform: 'uppercase' }}>LMD Partner</th>
                                                                                                                     <th style={{ padding: '6px 8px', color: '#6b7280', fontWeight: '600', fontSize: '10px', textTransform: 'uppercase' }}>Weight (kg)</th>
-                                                                                                                    <th style={{ padding: '6px 8px', color: '#6b7280', fontWeight: '600', fontSize: '10px', textTransform: 'uppercase' }}>Scanned By</th>
                                                                                                                 </tr>
                                                                                                             </thead>
                                                                                                             <tbody>
-                                                                                                                {bag.parcels.map((p: any, idx: number) => (
-                                                                                                                    <tr key={`p-${idx}`} style={{ borderBottom: '1px solid #f9fafb' }}>
-                                                                                                                        <td style={{ padding: '6px 8px', color: '#9ca3af' }}>{idx + 1}</td>
-                                                                                                                        <td style={{ padding: '6px 8px', fontWeight: '600', color: '#111827' }}>{p.trackingNumber || '—'}</td>
-                                                                                                                        <td style={{ padding: '6px 8px', color: '#374151' }}>{p.recipientName || '—'}</td>
-                                                                                                                        <td style={{ padding: '6px 8px', color: '#4b5563' }}>{p.city || '—'}</td>
-                                                                                                                        <td style={{ padding: '6px 8px', fontWeight: '500', color: '#111827' }}>{p.weight ? `${p.weight} kg` : '—'}</td>
-                                                                                                                        <td style={{ padding: '6px 8px', color: '#6b7280' }}>{p.scannedBy || 'Staff'}</td>
-                                                                                                                    </tr>
-                                                                                                                ))}
+                                                                                                                {bag.parcels.map((p: any, idx: number) => {
+                                                                                                                    const partner = (p.assignedPartner && p.assignedPartner !== '—' && p.assignedPartner !== 'Unknown')
+                                                                                                                        ? p.assignedPartner
+                                                                                                                        : (p.partner && p.partner !== '—' && p.partner !== 'Unknown')
+                                                                                                                            ? p.partner
+                                                                                                                            : (bag.target_partner && bag.target_partner !== 'ALL') ? bag.target_partner : '—';
+                                                                                                                    return (
+                                                                                                                        <tr key={`p-${idx}`} style={{ borderBottom: '1px solid #f9fafb' }}>
+                                                                                                                            <td style={{ padding: '6px 8px', color: '#9ca3af' }}>{idx + 1}</td>
+                                                                                                                            <td style={{ padding: '6px 8px', fontWeight: '600', color: '#111827' }}>{p.trackingNumber || '—'}</td>
+                                                                                                                            <td style={{ padding: '6px 8px', color: '#374151', fontSize: '11px', fontWeight: '600' }}>
+                                                                                                                                <span style={{ backgroundColor: '#f3f4f6', padding: '2px 6px', borderRadius: '4px', border: '1px solid #e5e7eb' }}>
+                                                                                                                                    {p.inboundManifest || p.initialManifest || p.mawbRef || '—'}
+                                                                                                                                </span>
+                                                                                                                            </td>
+                                                                                                                            <td style={{ padding: '6px 8px', color: '#374151', fontSize: '11px', fontWeight: '600' }}>
+                                                                                                                                <span style={{ backgroundColor: '#f3f4f6', padding: '2px 6px', borderRadius: '4px', border: '1px solid #e5e7eb' }}>
+                                                                                                                                    {p.inboundBag || p.initialBag || p.bagNumber || p.bag_number || '—'}
+                                                                                                                                </span>
+                                                                                                                            </td>
+                                                                                                                            <td style={{ padding: '6px 8px' }}>
+                                                                                                                                {partner !== '—' ? (
+                                                                                                                                    <span style={{
+                                                                                                                                        backgroundColor: partner === 'PickMe' ? '#ffcc00' : partner === 'Pronto' ? '#ea580c' : partner === 'Domex' ? '#7b0f1a' : '#4b5563',
+                                                                                                                                        color: partner === 'PickMe' ? '#000000' : '#ffffff',
+                                                                                                                                        padding: '2px 7px',
+                                                                                                                                        borderRadius: '4px',
+                                                                                                                                        fontWeight: '700',
+                                                                                                                                        fontSize: '10.5px',
+                                                                                                                                        textTransform: 'uppercase',
+                                                                                                                                        display: 'inline-block'
+                                                                                                                                    }}>
+                                                                                                                                        {partner}
+                                                                                                                                    </span>
+                                                                                                                                ) : (
+                                                                                                                                    <span style={{ color: '#9ca3af' }}>—</span>
+                                                                                                                                )}
+                                                                                                                            </td>
+                                                                                                                            <td style={{ padding: '6px 8px', fontWeight: '500', color: '#111827' }}>{p.weight ? `${p.weight} kg` : '—'}</td>
+                                                                                                                        </tr>
+                                                                                                                    );
+                                                                                                                })}
                                                                                                             </tbody>
                                                                                                         </table>
                                                                                                     )}
@@ -662,23 +694,55 @@ export default function ManifestTrackingTab({
                                                                                 <tr style={{ borderBottom: '1px solid #e5e7eb' }}>
                                                                                     <th style={{ padding: '6px 8px', color: '#6b7280', fontWeight: '600', fontSize: '10px', textTransform: 'uppercase' }}>#</th>
                                                                                     <th style={{ padding: '6px 8px', color: '#6b7280', fontWeight: '600', fontSize: '10px', textTransform: 'uppercase' }}>Tracking Ref</th>
-                                                                                    <th style={{ padding: '6px 8px', color: '#6b7280', fontWeight: '600', fontSize: '10px', textTransform: 'uppercase' }}>Recipient</th>
-                                                                                    <th style={{ padding: '6px 8px', color: '#6b7280', fontWeight: '600', fontSize: '10px', textTransform: 'uppercase' }}>Destination</th>
+                                                                                    <th style={{ padding: '6px 8px', color: '#6b7280', fontWeight: '600', fontSize: '10px', textTransform: 'uppercase' }}>Inbound Manifest</th>
+                                                                                    <th style={{ padding: '6px 8px', color: '#6b7280', fontWeight: '600', fontSize: '10px', textTransform: 'uppercase' }}>Inbound Bag</th>
+                                                                                    <th style={{ padding: '6px 8px', color: '#6b7280', fontWeight: '600', fontSize: '10px', textTransform: 'uppercase' }}>LMD Partner</th>
                                                                                     <th style={{ padding: '6px 8px', color: '#6b7280', fontWeight: '600', fontSize: '10px', textTransform: 'uppercase' }}>Weight (kg)</th>
-                                                                                    <th style={{ padding: '6px 8px', color: '#6b7280', fontWeight: '600', fontSize: '10px', textTransform: 'uppercase' }}>Scanned By</th>
                                                                                 </tr>
                                                                             </thead>
                                                                             <tbody>
-                                                                                {bag.parcels.map((p: any, idx: number) => (
-                                                                                    <tr key={`ub-${idx}`} style={{ borderBottom: '1px solid #f9fafb' }}>
-                                                                                        <td style={{ padding: '6px 8px', color: '#9ca3af' }}>{idx + 1}</td>
-                                                                                        <td style={{ padding: '6px 8px', fontWeight: '600', color: '#111827' }}>{p.trackingNumber || '—'}</td>
-                                                                                        <td style={{ padding: '6px 8px', color: '#374151' }}>{p.recipientName || '—'}</td>
-                                                                                        <td style={{ padding: '6px 8px', color: '#4b5563' }}>{p.city || '—'}</td>
-                                                                                        <td style={{ padding: '6px 8px', fontWeight: '500', color: '#111827' }}>{p.weight ? `${p.weight} kg` : '—'}</td>
-                                                                                        <td style={{ padding: '6px 8px', color: '#6b7280' }}>{p.scannedBy || 'Staff'}</td>
-                                                                                    </tr>
-                                                                                ))}
+                                                                                {bag.parcels.map((p: any, idx: number) => {
+                                                                                    const partner = (p.assignedPartner && p.assignedPartner !== '—' && p.assignedPartner !== 'Unknown')
+                                                                                        ? p.assignedPartner
+                                                                                        : (p.partner && p.partner !== '—' && p.partner !== 'Unknown')
+                                                                                            ? p.partner
+                                                                                            : (bag.target_partner && bag.target_partner !== 'ALL') ? bag.target_partner : '—';
+                                                                                    return (
+                                                                                        <tr key={`ub-${idx}`} style={{ borderBottom: '1px solid #f9fafb' }}>
+                                                                                            <td style={{ padding: '6px 8px', color: '#9ca3af' }}>{idx + 1}</td>
+                                                                                            <td style={{ padding: '6px 8px', fontWeight: '600', color: '#111827' }}>{p.trackingNumber || '—'}</td>
+                                                                                            <td style={{ padding: '6px 8px', color: '#374151', fontSize: '11px', fontWeight: '600' }}>
+                                                                                                <span style={{ backgroundColor: '#f3f4f6', padding: '2px 6px', borderRadius: '4px', border: '1px solid #e5e7eb' }}>
+                                                                                                    {p.inboundManifest || p.initialManifest || p.mawbRef || '—'}
+                                                                                                </span>
+                                                                                            </td>
+                                                                                            <td style={{ padding: '6px 8px', color: '#374151', fontSize: '11px', fontWeight: '600' }}>
+                                                                                                <span style={{ backgroundColor: '#f3f4f6', padding: '2px 6px', borderRadius: '4px', border: '1px solid #e5e7eb' }}>
+                                                                                                    {p.inboundBag || p.initialBag || p.bagNumber || p.bag_number || '—'}
+                                                                                                </span>
+                                                                                            </td>
+                                                                                            <td style={{ padding: '6px 8px' }}>
+                                                                                                {partner !== '—' ? (
+                                                                                                    <span style={{
+                                                                                                        backgroundColor: partner === 'PickMe' ? '#ffcc00' : partner === 'Pronto' ? '#ea580c' : partner === 'Domex' ? '#7b0f1a' : '#4b5563',
+                                                                                                        color: partner === 'PickMe' ? '#000000' : '#ffffff',
+                                                                                                        padding: '2px 7px',
+                                                                                                        borderRadius: '4px',
+                                                                                                        fontWeight: '700',
+                                                                                                        fontSize: '10.5px',
+                                                                                                        textTransform: 'uppercase',
+                                                                                                        display: 'inline-block'
+                                                                                                    }}>
+                                                                                                        {partner}
+                                                                                                    </span>
+                                                                                                ) : (
+                                                                                                    <span style={{ color: '#9ca3af' }}>—</span>
+                                                                                                )}
+                                                                                            </td>
+                                                                                            <td style={{ padding: '6px 8px', fontWeight: '500', color: '#111827' }}>{p.weight ? `${p.weight} kg` : '—'}</td>
+                                                                                        </tr>
+                                                                                    );
+                                                                                })}
                                                                             </tbody>
                                                                         </table>
                                                                     )}

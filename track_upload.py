@@ -1,4 +1,4 @@
-﻿"""
+"""
 track_upload.py - FFDX GetonLine Tracking Batch Uploader (Batch Fallback Tool)
 --------------------------------------------------------------------------------
 The primary upload now happens automatically per-scan inside the Next.js API
@@ -68,7 +68,7 @@ SUPABASE_HEADERS = {
 # ---------------------------------------------------------------------------
 # FFDX XML Builder
 # ---------------------------------------------------------------------------
-def build_tracking_xml(reference_number):
+def build_tracking_xml(reference_number, event_id="1558", remarks="Skynet Warehouse"):
     root   = ET.Element("WSGET")
     access = ET.SubElement(root, "AccessRequest")
     ET.SubElement(access, "WSVersion").text = WS_VERSION
@@ -82,8 +82,8 @@ def build_tracking_xml(reference_number):
     ET.SubElement(event, "ReferenceNumber").text         = str(reference_number)
     ET.SubElement(event, "ReferenceType").text           = "C"
     ET.SubElement(event, "EventDateTime").text           = datetime.now().strftime("%Y/%m/%d %I:%M:%S %p")
-    ET.SubElement(event, "EventID").text                 = "1558"
-    ET.SubElement(event, "Remarks").text                 = "Skynet Warehouse"
+    ET.SubElement(event, "EventID").text                 = str(event_id)
+    ET.SubElement(event, "Remarks").text                 = str(remarks)
     ET.SubElement(event, "OriginByPrefix").text          = "0"
     ET.SubElement(event, "OriginEntityID").text          = ""
     ET.SubElement(event, "UpdateEntityID").text          = FFDX_UPDATE_ID
@@ -96,13 +96,13 @@ def build_tracking_xml(reference_number):
 # ---------------------------------------------------------------------------
 # FFDX Upload
 # ---------------------------------------------------------------------------
-def upload_tracking(reference_number, dry_run=False):
+def upload_tracking(reference_number, dry_run=False, event_id="1558", remarks="Skynet Warehouse"):
     """Returns True on successful upload, False on failure."""
     if dry_run:
-        print(f"  [DRY-RUN] Would upload: {reference_number}")
+        print(f"  [DRY-RUN] Would upload: {reference_number} (EventID {event_id}: {remarks})")
         return True
 
-    xml_data = build_tracking_xml(reference_number)
+    xml_data = build_tracking_xml(reference_number, event_id=event_id, remarks=remarks)
     payload  = {
         'Username':     FFDX_USERNAME,
         'Password':     FFDX_PASSWORD,
@@ -176,14 +176,16 @@ def update_track_status(allocation_id, status):
 def main():
     parser = argparse.ArgumentParser(description='FFDX Batch Tracking Uploader')
     parser.add_argument('--ref',          help='Upload a single reference number')
+    parser.add_argument('--event-id',     default='1558', help='Event ID to send (e.g. 1558 for warehouse scan, 85 for damaged)')
+    parser.add_argument('--remarks',      default='Skynet Warehouse', help='Event remarks string (e.g. "Skynet Warehouse")')
     parser.add_argument('--dry-run',      action='store_true', help='Preview without uploading')
     parser.add_argument('--retry-failed', action='store_true', help='Retry only FAILED rows')
     args = parser.parse_args()
 
     # Single reference upload
     if args.ref:
-        print(f"\nSingle upload mode: {args.ref}")
-        success = upload_tracking(args.ref, dry_run=args.dry_run)
+        print(f"\nSingle upload mode: {args.ref} (Event {args.event_id}: {args.remarks})")
+        success = upload_tracking(args.ref, dry_run=args.dry_run, event_id=args.event_id, remarks=args.remarks)
         sys.exit(0 if success else 1)
 
     # Batch upload

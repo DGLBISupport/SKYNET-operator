@@ -196,11 +196,21 @@ export default function FirstScanTab({
                                                 style={{ ...inputStyle, width: '100%', backgroundColor: (!firstScanMawb || isBagsLoading) ? '#f3f4f6' : '#ffffff' }}
                                             >
                                                 <option value="">{isBagsLoading ? "-- Loading bags... --" : "-- Choose bag --"}</option>
-                                                {firstScanBags.map((b) => (
-                                                    <option key={b.bagNumber} value={b.bagNumber}>
-                                                        {b.bagNumber} ({b.expectedCount} expected)
-                                                    </option>
-                                                ))}
+                                                {firstScanBags.map((b: any) => {
+                                                    const bagStatus = getBagStatus(b.bagNumber, b.expectedCount);
+                                                    const scanned = getBagScannedCount(b.bagNumber);
+                                                    let statusLabel = `${b.expectedCount} expected`;
+                                                    if (bagStatus === 'COMPLETED') {
+                                                        statusLabel = `Completed (${scanned}/${b.expectedCount})`;
+                                                    } else if (scanned > 0 || bagStatus === 'IN_PROGRESS' || bagStatus === 'ONGOING') {
+                                                        statusLabel = `In Progress (${scanned}/${b.expectedCount} unsealed)`;
+                                                    }
+                                                    return (
+                                                        <option key={b.bagNumber} value={b.bagNumber}>
+                                                            {b.bagNumber} — {statusLabel}
+                                                        </option>
+                                                    );
+                                                })}
                                                 {firstScanMawb && firstScanBags.length === 0 && (
                                                     <option value="" disabled>No bags found</option>
                                                 )}
@@ -471,7 +481,7 @@ export default function FirstScanTab({
                                         <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px', textAlign: 'left' }}>
                                             <thead>
                                                 <tr style={{ borderBottom: '2px solid #e5e7eb' }}>
-                                                    {['Timestamp', 'Tracking Number', 'Consignee', 'LMD Partner', 'Destination City', 'Status'].map(h => (
+                                                    {['Timestamp', 'Tracking Number', 'LMD Partner', 'Status'].map(h => (
                                                         <th key={h} style={{ padding: '8px', color: '#6b7280', fontWeight: '600', fontSize: '11px', textTransform: 'uppercase' }}>{h}</th>
                                                     ))}
                                                 </tr>
@@ -479,9 +489,8 @@ export default function FirstScanTab({
                                             <tbody>
                                                 {firstScanHistory.slice((firstScanHistoryPage - 1) * firstScanHistoryRowsPerPage, firstScanHistoryPage * firstScanHistoryRowsPerPage).map((item, idx) => (
                                                     <tr key={`first-${idx}`} style={{ borderBottom: '1px solid #f3f4f6' }}>
-                                                        <td style={{ padding: '8px', color: '#6b7280' }}>{item.timestamp}</td>
+                                                        <td style={{ padding: '8px', color: '#6b7280', fontSize: '12px', whiteSpace: 'nowrap' }}>{item.timestamp || '—'}</td>
                                                         <td style={{ padding: '8px', fontWeight: '600', color: '#111827' }}>{item.trackingNumber}</td>
-                                                        <td style={{ padding: '8px', color: '#374151' }}>{item.recipientName}</td>
                                                         <td style={{ padding: '8px' }}>
                                                             {item.assignedPartner ? (
                                                                 <span style={{
@@ -503,13 +512,12 @@ export default function FirstScanTab({
                                                                 <span style={{ color: '#9ca3af' }}>—</span>
                                                             )}
                                                         </td>
-                                                        <td style={{ padding: '8px', color: '#4b5563' }}>{item.city}</td>
                                                         <td style={{ padding: '8px' }}><span style={{ backgroundColor: '#ffffffff', color: '#4c5262ff', border: '1px solid #b6acacff', padding: '1px 6px', borderRadius: '4px', fontSize: '11px', fontWeight: '600' }}>First Scanned</span></td>
                                                     </tr>
                                                 ))}
                                                 {firstScanHistory.length === 0 && (
                                                     <tr>
-                                                        <td colSpan={6} style={{ padding: '24px 8px', textAlign: 'center', color: '#9ca3af' }}>
+                                                        <td colSpan={4} style={{ padding: '24px 8px', textAlign: 'center', color: '#9ca3af' }}>
                                                             Pull scanner trigger to start counting parcels.
                                                         </td>
                                                     </tr>
@@ -581,7 +589,7 @@ export default function FirstScanTab({
                                                                 const expected = bag.expectedCount;
                                                                 const scanned = getBagScannedCount(bag.bagNumber);
                                                                 const status = getBagStatus(bag.bagNumber, expected);
-                                                                const remaining = expected - scanned;
+                                                                const remaining = Math.max(0, expected - scanned);
                                                                 const unsealed = unsealedBoxes.find(ub => ub.mawb?.toLowerCase() === firstScanMawb?.toLowerCase() && ub.bagNumber?.toLowerCase() === bag.bagNumber?.toLowerCase());
 
                                                                 let bgColor = '#ffffff';
@@ -608,6 +616,14 @@ export default function FirstScanTab({
                                                                     statusText = 'Scanning';
                                                                     statusColor = '#111827';
                                                                     statusBg = '#e5e7eb';
+                                                                } else if (status === 'IN_PROGRESS') {
+                                                                    bgColor = '#fffbeb';
+                                                                    borderColor = '#fde68a';
+                                                                    textColor = '#92400e';
+                                                                    descColor = '#b45309';
+                                                                    statusText = 'In Progress';
+                                                                    statusColor = '#b45309';
+                                                                    statusBg = '#fef3c7';
                                                                 }
 
                                                                 return (
@@ -650,8 +666,10 @@ export default function FirstScanTab({
                                                                                         ? `Unsealed with note: ${unsealed.status}`
                                                                                         : 'Unsealed successfully')
                                                                                     : status === 'ONGOING'
-                                                                                        ? `${remaining} parcels remaining`
-                                                                                        : `Awaiting unsealing (${expected} expected)`
+                                                                                        ? `${remaining} parcels remaining (${scanned} unsealed)`
+                                                                                        : status === 'IN_PROGRESS'
+                                                                                            ? `${scanned} unsealed, ${remaining} pending`
+                                                                                            : `Awaiting unsealing (${expected} expected)`
                                                                                 }
                                                                             </span>
                                                                         </div>

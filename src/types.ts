@@ -14,6 +14,11 @@ export interface SkyNetParcelData {
     apiSync?: string;
     goodsDesc?: string;
     mawbRef?: string;
+    initialManifest?: string;
+    inboundManifest?: string;
+    inboundBag?: string;
+    initialBag?: string;
+    bagNumber?: string;
     mawbCarrier?: string;
     mawbFlight?: string;
     mawbBags?: number;

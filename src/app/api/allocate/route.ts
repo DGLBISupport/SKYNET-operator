@@ -104,11 +104,10 @@ async function resolveZoneAndPartner(
 
 // ─────────────────────────────────────────────────────────────────────────────
 // FFDX GetonLine Tracking Upload
-// Mirrors track_upload.py — sends EventID 1558 "Collected by Courier Provider"
-// after every successful 1st scan (box unsealing). Fire-and-forget: never
-// blocks the scan response; errors are logged only.
+// Sends EventID 1558 ("Collected by Courier Provider") and/or EventID 85 (Damaged parcel via Temu barcode)
+// after 1st scan (box unsealing). Fire-and-forget: never blocks the scan response; errors are logged.
 // ─────────────────────────────────────────────────────────────────────────────
-function buildFfdxXml(referenceNumber: string): string {
+function buildFfdxXml(referenceNumber: string, eventId: string = '1558', remarks: string = 'Skynet Warehouse'): string {
     const entityId   = process.env.FFDX_ENTITY_ID   || '';
     const entityPin  = process.env.FFDX_ENTITY_PIN  || '';
     const updateId   = process.env.FFDX_UPDATE_ENTITY_ID || 'LK7171';
@@ -135,21 +134,23 @@ function buildFfdxXml(referenceNumber: string): string {
     const eventDT = `${m.year}/${m.month}/${m.day} ${h12}:${m.minute}:${m.second} ${ampm}`;
 
     return `<?xml version='1.0' encoding='ISO-8859-1' ?>
-<WSGET><AccessRequest><WSVersion>WS1.0</WSVersion><FileType>2</FileType><Action>upload</Action><EntityID>${entityId}</EntityID><EntityPIN>${entityPin}</EntityPIN><MessageID>0001</MessageID></AccessRequest><Event><ReferenceNumber>${referenceNumber}</ReferenceNumber><ReferenceType>C</ReferenceType><EventDateTime>${eventDT}</EventDateTime><EventID>1558</EventID><Remarks>Skynet Warehouse</Remarks><OriginByPrefix>0</OriginByPrefix><OriginEntityID></OriginEntityID><UpdateEntityID>${updateId}</UpdateEntityID><UpdateEntityLocationName>Colombo</UpdateEntityLocationName></Event></WSGET>`;
+<WSGET><AccessRequest><WSVersion>WS1.0</WSVersion><FileType>2</FileType><Action>upload</Action><EntityID>${entityId}</EntityID><EntityPIN>${entityPin}</EntityPIN><MessageID>0001</MessageID></AccessRequest><Event><ReferenceNumber>${referenceNumber}</ReferenceNumber><ReferenceType>C</ReferenceType><EventDateTime>${eventDT}</EventDateTime><EventID>${eventId}</EventID><Remarks>${remarks}</Remarks><OriginByPrefix>0</OriginByPrefix><OriginEntityID></OriginEntityID><UpdateEntityID>${updateId}</UpdateEntityID><UpdateEntityLocationName>Colombo</UpdateEntityLocationName></Event></WSGET>`;
 }
 
 async function uploadToFfdx(
     referenceNumber: string,
     supabaseUrl: string,
     supabaseHeaders: Record<string, string>,
-    allocationId?: number | null
+    allocationId?: number | null,
+    eventId: string = '1558',
+    remarks: string = 'Skynet Warehouse'
 ): Promise<void> {
     const apiUrl   = `https://ws05.ffdx.net/ffdx_ws/v12/service_ffdx.asmx/WSDataTransfer`;
     const username = process.env.FFDX_USERNAME || '';
     const password = process.env.FFDX_PASSWORD || '';
 
     try {
-        const xmlStream = buildFfdxXml(referenceNumber);
+        const xmlStream = buildFfdxXml(referenceNumber, eventId, remarks);
         const body = new URLSearchParams({
             Username:     username,
             Password:     password,
@@ -157,7 +158,7 @@ async function uploadToFfdx(
             LevelConfirm: '0'
         });
 
-        console.log(`[FFDX] Uploading tracking event for parcel: ${referenceNumber}`);
+        console.log(`[FFDX] Uploading tracking event (EventID ${eventId} - ${remarks}) for parcel: ${referenceNumber}`);
         const res = await fetch(apiUrl, {
             method:  'POST',
             headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
@@ -166,7 +167,7 @@ async function uploadToFfdx(
         });
 
         const rawText = (await res.text()).trim();
-        console.log(`[FFDX] HTTP ${res.status} for ${referenceNumber}: ${rawText.slice(0, 200)}`);
+        console.log(`[FFDX] HTTP ${res.status} for ${referenceNumber} (EventID ${eventId}): ${rawText.slice(0, 200)}`);
 
         // Determine success: FFDX returns XML; a successful upload contains <Status>1</Status>
         const success = res.ok && rawText.includes('<Status>1</Status>');
@@ -185,12 +186,12 @@ async function uploadToFfdx(
         }
 
         if (!success) {
-            console.warn(`[FFDX] Upload may have failed for ${referenceNumber}. Raw: ${rawText.slice(0, 400)}`);
+            console.warn(`[FFDX] Upload may have failed for ${referenceNumber} (EventID ${eventId}). Raw: ${rawText.slice(0, 400)}`);
         } else {
-            console.log(`[FFDX] ✅ Successfully uploaded tracking event for ${referenceNumber}`);
+            console.log(`[FFDX] ✅ Successfully uploaded tracking event (${eventId}) for ${referenceNumber}`);
         }
     } catch (err: any) {
-        console.error(`[FFDX] ❌ Connection error for ${referenceNumber}:`, err?.message || err);
+        console.error(`[FFDX] ❌ Connection error for ${referenceNumber} (EventID ${eventId}):`, err?.message || err);
         // Still try to mark as FAILED in Supabase
         if (allocationId) {
             fetch(
@@ -633,6 +634,9 @@ export async function POST(request: Request) {
             const finalMawb = mawbRef || shipment.mawb_ref || '';
 
             // Mark 1st scan done on service_provider_allocation (source of truth for scan status)
+            const eventIdToSend = isTemuScan ? '85' : '1558';
+            const remarksToSend = 'Skynet Warehouse';
+
             if (finalAllocation && finalAllocation.id) {
                 fetch(`${supabaseUrl}/rest/v1/service_provider_allocation?id=eq.${finalAllocation.id}`, {
                     method: 'PATCH',
@@ -640,8 +644,8 @@ export async function POST(request: Request) {
                     body: JSON.stringify({ unsealed: true, scan_status: '1ST_SCAN_DONE', updated_at: new Date().toISOString() })
                 }).catch(e => console.error("Failed to set 1ST_SCAN_DONE on allocation:", e));
 
-                // Fire-and-forget: push "Collected by Courier Provider" event to FFDX GetonLine
-                uploadToFfdx(shipmentRef, supabaseUrl, headers, finalAllocation.id);
+                // Fire-and-forget: push tracking event (85 for damaged/Temu parcel, 1558 for normal parcel) to FFDX GetonLine
+                uploadToFfdx(shipmentRef, supabaseUrl, headers, finalAllocation.id, eventIdToSend, remarksToSend);
             } else {
                 // Parcel has no allocation row yet — create a minimal one to record scan status
                 fetch(`${supabaseUrl}/rest/v1/service_provider_allocation`, {
@@ -656,9 +660,8 @@ export async function POST(request: Request) {
                     })
                 }).catch(e => console.error("Failed to create minimal allocation for 1ST_SCAN_DONE:", e));
 
-                // Fire-and-forget: push "Collected by Courier Provider" event to FFDX GetonLine
-                // (no allocationId yet since row was just created — track_status will be set via allocationId=null)
-                uploadToFfdx(shipmentRef, supabaseUrl, headers, null);
+                // Fire-and-forget: push tracking event (85 for damaged/Temu parcel, 1558 for normal parcel) to FFDX GetonLine
+                uploadToFfdx(shipmentRef, supabaseUrl, headers, null, eventIdToSend, remarksToSend);
             }
 
             // Resolve zone and partner using helper
@@ -848,6 +851,11 @@ export async function POST(request: Request) {
             apiSync: allocation?.validated ? "Validated" : "Pending",
             goodsDesc: shipment.goods_desc || undefined,
             mawbRef: initialManifestRef,
+            initialManifest: initialManifestRef,
+            inboundManifest: initialManifestRef,
+            inboundBag: shipment.bag_number || undefined,
+            initialBag: shipment.bag_number || undefined,
+            bagNumber: shipment.bag_number || undefined,
             mawbCarrier: mawbDetails ? mawbDetails.carrier : undefined,
             mawbFlight: mawbDetails ? mawbDetails.travel_id : undefined,
             mawbBags: mawbDetails ? mawbDetails.declared_bags : undefined,
@@ -1032,26 +1040,68 @@ export async function GET(request: Request) {
                 }
             }
 
-            // Fetch unsealed bags registered for this MAWB
+            // Concurrently fetch unsealed bags registered for this MAWB and allocations
             let unsealedBagsData: any[] = [];
+            let spAllocList: any[] = [];
+
             try {
-                const unsealRes = await fetch(`${supabaseUrl}/rest/v1/bag_unsealing?mawb_ref=ilike.${cleanSearchMawb}&select=bag_number,expected_count`, { headers });
+                const [unsealRes, spaRes] = await Promise.all([
+                    fetch(`${supabaseUrl}/rest/v1/bag_unsealing?mawb_ref=ilike.${cleanSearchMawb}&select=bag_number,expected_count,scanned_count,scanned_parcels,status,unsealed`, { headers }),
+                    fetch(`${supabaseUrl}/rest/v1/service_provider_allocation?mawb_ref=ilike.${cleanSearchMawb}&select=shipment_ref,unsealed,scan_status`, { headers })
+                ]);
                 if (unsealRes.ok) {
                     const data = await unsealRes.json();
                     if (Array.isArray(data)) unsealedBagsData = data;
                 }
+                if (spaRes.ok) {
+                    const data = await spaRes.json();
+                    if (Array.isArray(data)) spAllocList = data;
+                }
             } catch (e) {
-                console.error("Failed to fetch unsealed bags:", e);
+                console.error("Failed to fetch unsealed bags or allocations:", e);
             }
 
-            // Group distinct bag numbers and calculate expected parcel count (count of reference_number)
-            const bagCountsMap: Record<string, number> = {};
+            // Build set of all unsealed shipment reference numbers from service_provider_allocation & bag_unsealing
+            const unsealedRefs = new Set<string>();
+            spAllocList.forEach((alloc: any) => {
+                const statusStr = (alloc.scan_status || '').toUpperCase();
+                if (alloc.unsealed === true || ['1ST_SCAN_DONE', '2ND_SCAN_DONE', 'VERIFIED', 'DISPATCHED', 'COMPLETED'].includes(statusStr)) {
+                    if (alloc.shipment_ref) {
+                        unsealedRefs.add(String(alloc.shipment_ref).trim().toLowerCase());
+                    }
+                }
+            });
+
+            // Map completed bags from bag_unsealing
+            const completedBagMap = new Map<string, any>();
+            unsealedBagsData.forEach((u: any) => {
+                if (u.bag_number) {
+                    const key = String(u.bag_number).trim().toLowerCase();
+                    completedBagMap.set(key, u);
+                    if (Array.isArray(u.scanned_parcels)) {
+                        u.scanned_parcels.forEach((p: any) => {
+                            const ref = p.skynetTrackingNumber || p.trackingNumber || p.tracking_number || (typeof p === 'string' ? p : '');
+                            if (ref) unsealedRefs.add(String(ref).trim().toLowerCase());
+                        });
+                    }
+                }
+            });
+
+            // Group distinct bag numbers, calculate expected count, and count unsealed parcels
+            const bagStatsMap: Record<string, { expectedCount: number; scannedCount: number }> = {};
             let unassignedCount = 0;
 
             allShipments.forEach((s: any) => {
                 const rawBag = s.bag_number ? String(s.bag_number).trim() : '';
                 if (rawBag !== '') {
-                    bagCountsMap[rawBag] = (bagCountsMap[rawBag] || 0) + 1;
+                    if (!bagStatsMap[rawBag]) {
+                        bagStatsMap[rawBag] = { expectedCount: 0, scannedCount: 0 };
+                    }
+                    bagStatsMap[rawBag].expectedCount += 1;
+                    const refLower = String(s.reference_number || '').trim().toLowerCase();
+                    if (refLower && unsealedRefs.has(refLower)) {
+                        bagStatsMap[rawBag].scannedCount += 1;
+                    }
                 } else {
                     unassignedCount++;
                 }
@@ -1061,16 +1111,37 @@ export async function GET(request: Request) {
             unsealedBagsData.forEach((u: any) => {
                 if (u.bag_number) {
                     const trimmedBag = String(u.bag_number).trim();
-                    if (!bagCountsMap[trimmedBag]) {
-                        bagCountsMap[trimmedBag] = u.expected_count || 0;
+                    if (!bagStatsMap[trimmedBag]) {
+                        bagStatsMap[trimmedBag] = {
+                            expectedCount: u.expected_count || 0,
+                            scannedCount: u.scanned_count || u.expected_count || 0
+                        };
                     }
                 }
             });
 
-            const bagsList = Object.entries(bagCountsMap).map(([bagNumber, expectedCount]) => ({
-                bagNumber,
-                expectedCount
-            }));
+            const bagsList = Object.entries(bagStatsMap).map(([bagNumber, stats]) => {
+                const comp = completedBagMap.get(bagNumber.toLowerCase());
+                const isCompleted = Boolean(comp);
+                const scannedCount = isCompleted ? (comp.scanned_count ?? stats.expectedCount) : stats.scannedCount;
+                const expectedCount = isCompleted ? (comp.expected_count ?? stats.expectedCount) : stats.expectedCount;
+                const pendingCount = Math.max(0, expectedCount - scannedCount);
+
+                let status = 'PENDING';
+                if (isCompleted) {
+                    status = 'COMPLETED';
+                } else if (scannedCount > 0) {
+                    status = 'IN_PROGRESS';
+                }
+
+                return {
+                    bagNumber,
+                    expectedCount,
+                    scannedCount,
+                    pendingCount,
+                    status
+                };
+            });
 
             return NextResponse.json({ success: true, bags: bagsList });
         }
@@ -1190,35 +1261,43 @@ export async function GET(request: Request) {
             }
 
             let partnerMap: Record<string, string> = {};
+            let allocationMap: Record<string, any> = {};
+
             if (Array.isArray(shipments) && shipments.length > 0) {
                 const refs = shipments.map((s: any) => s.reference_number).filter(Boolean);
                 if (refs.length > 0) {
                     const refsQuery = refs.map((r: string) => `shipment_ref.eq.${encodeURIComponent(r)}`).join(',');
                     try {
-                        const spaRes = await fetch(
-                            `${supabaseUrl}/rest/v1/service_provider_allocation?or=(${refsQuery})&select=shipment_ref,service_provider`,
-                            { headers }
-                        );
+                        const [spaRes, spRes] = await Promise.all([
+                            fetch(`${supabaseUrl}/rest/v1/service_provider_allocation?or=(${refsQuery})&select=shipment_ref,service_provider,unsealed,scan_status,created_at,updated_at`, { headers }),
+                            fetch(`${supabaseUrl}/rest/v1/service_providers?select=id,name`, { headers })
+                        ]);
+
+                        const spMap: Record<number, string> = { 1: 'PickMe', 2: 'Domex' };
+                        if (spRes.ok) {
+                            const spData = await spRes.json();
+                            (spData || []).forEach((sp: any) => {
+                                spMap[sp.id] = sp.name;
+                            });
+                        }
+
                         if (spaRes.ok) {
                             const spaData = await spaRes.json();
-                            const spRes = await fetch(`${supabaseUrl}/rest/v1/service_providers?select=id,name`, { headers });
-                            if (spRes.ok) {
-                                const spData = await spRes.json();
-                                const spMap: Record<number, string> = { 1: 'PickMe', 2: 'Domex' };
-                                (spData || []).forEach((sp: any) => {
-                                    spMap[sp.id] = sp.name;
-                                });
-                                (spaData || []).forEach((alloc: any) => {
-                                    if (alloc.shipment_ref && alloc.service_provider) {
+                            (spaData || []).forEach((alloc: any) => {
+                                if (alloc.shipment_ref) {
+                                    allocationMap[alloc.shipment_ref] = alloc;
+                                    allocationMap[String(alloc.shipment_ref).trim().toLowerCase()] = alloc;
+                                    if (alloc.service_provider) {
                                         const numId = Number(alloc.service_provider);
                                         let name = spMap[numId] || spMap[alloc.service_provider] || 'Unknown';
                                         if (name.toLowerCase().includes('pickme')) name = 'PickMe';
                                         else if (name.toLowerCase().includes('domex')) name = 'Domex';
                                         else if (name.toLowerCase().includes('pronto')) name = 'Pronto';
                                         partnerMap[alloc.shipment_ref] = name;
+                                        partnerMap[String(alloc.shipment_ref).trim().toLowerCase()] = name;
                                     }
-                                });
-                            }
+                                }
+                            });
                         }
                     } catch (err) {
                         console.error("Error loading allocations for bag parcels:", err);
@@ -1226,18 +1305,91 @@ export async function GET(request: Request) {
                 }
             }
 
-            const parcels = (Array.isArray(shipments) ? shipments : []).map((s: any) => ({
-                trackingNumber: s.reference_number,
-                skynetTrackingNumber: s.reference_number,
-                senderReference: s.sender_reference || s.alternate_reference || '',
-                recipientName: s.consignee_name || 'Unknown Recipient',
-                city: s.consignee_location_name || s.consignee_address_3 || 'Unknown City',
-                assignedPartner: partnerMap[s.reference_number] || 'Unknown',
-                assignedZone: s.delivery_route_code || 'Default-Zone',
-                weight: s.weight || s.dead_weight || 0.1
-            }));
+            // Check if there are completed bag records in bag_unsealing
+            let bagUnsealRecord: any = null;
+            try {
+                const buRes = await fetch(`${supabaseUrl}/rest/v1/bag_unsealing?bag_number=eq.${cleanBagNum}&order=created_at.desc&limit=1`, { headers });
+                if (buRes.ok) {
+                    const buList = await buRes.json();
+                    if (Array.isArray(buList) && buList.length > 0) {
+                        bagUnsealRecord = buList[0];
+                    }
+                }
+            } catch (e) {
+                console.error("Failed to check bag_unsealing for bag parcels:", e);
+            }
 
-            return NextResponse.json({ success: true, count: parcels.length, parcels });
+            const unsealedParcelsSet = new Set<string>();
+            if (bagUnsealRecord && Array.isArray(bagUnsealRecord.scanned_parcels)) {
+                bagUnsealRecord.scanned_parcels.forEach((p: any) => {
+                    const ref = p.skynetTrackingNumber || p.trackingNumber || p.tracking_number || (typeof p === 'string' ? p : '');
+                    if (ref) unsealedParcelsSet.add(String(ref).trim().toLowerCase());
+                });
+            }
+
+            const scannedParcels: any[] = [];
+            const parcels = (Array.isArray(shipments) ? shipments : []).map((s: any) => {
+                const refStr = String(s.reference_number || '').trim();
+                const refLower = refStr.toLowerCase();
+                const alloc = allocationMap[refStr] || allocationMap[refLower];
+                const statusStr = (alloc?.scan_status || '').toUpperCase();
+                const isUnsealed = Boolean(
+                    alloc?.unsealed === true ||
+                    ['1ST_SCAN_DONE', '2ND_SCAN_DONE', 'VERIFIED', 'DISPATCHED', 'COMPLETED'].includes(statusStr) ||
+                    unsealedParcelsSet.has(refLower)
+                );
+
+                const isTemuScan = Boolean(
+                    s.sender_reference &&
+                    s.sender_reference.trim() !== '' &&
+                    s.sender_reference.trim() !== s.reference_number
+                );
+                const displayTrackingNumber = isTemuScan ? (s.sender_reference || s.reference_number) : s.reference_number;
+
+                const timeStr = alloc?.updated_at
+                    ? new Date(alloc.updated_at).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true })
+                    : alloc?.created_at
+                    ? new Date(alloc.created_at).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true })
+                    : new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true });
+
+                const parcelObj = {
+                    trackingNumber: s.reference_number,
+                    skynetTrackingNumber: s.reference_number,
+                    senderReference: s.sender_reference || s.alternate_reference || '',
+                    recipientName: s.consignee_name || 'Unknown Recipient',
+                    city: s.consignee_location_name || s.consignee_address_3 || 'Unknown City',
+                    assignedPartner: partnerMap[s.reference_number] || partnerMap[refLower] || 'Unknown',
+                    assignedZone: s.delivery_route_code || 'Default-Zone',
+                    weight: s.weight || s.dead_weight || 0.1,
+                    isUnsealed: isUnsealed
+                };
+
+                if (isUnsealed) {
+                    scannedParcels.push({
+                        trackingNumber: displayTrackingNumber,
+                        skynetTrackingNumber: String(s.reference_number),
+                        senderReference: s.sender_reference || s.alternate_reference || '',
+                        isTemuScan: isTemuScan,
+                        recipientName: s.consignee_name || 'Unknown Recipient',
+                        city: s.consignee_location_name || s.consignee_address_3 || 'Unknown City',
+                        timestamp: timeStr,
+                        assignedPartner: partnerMap[s.reference_number] || partnerMap[refLower] || 'Unknown',
+                        assignedZone: s.delivery_route_code || 'Default-Zone',
+                        weight: s.weight || s.dead_weight || 0.1
+                    });
+                }
+
+                return parcelObj;
+            });
+
+            return NextResponse.json({
+                success: true,
+                count: parcels.length,
+                scannedCount: scannedParcels.length,
+                pendingCount: Math.max(0, parcels.length - scannedParcels.length),
+                parcels,
+                scannedParcels
+            });
         }
 
         if (getUnsealedBags) {
