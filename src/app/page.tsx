@@ -645,7 +645,6 @@ export default function WorkstationDashboard() {
                 };
                 const availableMawbsSet = new Set<string>();
                 (data.dashboard.mawbTableList || []).forEach((m: any) => { if (isValidMawbRef(m.mawbReference)) availableMawbsSet.add(m.mawbReference.trim()); });
-                (data.dashboard.receivedParcels || []).forEach((p: any) => { if (isValidMawbRef(p.mawbReference)) availableMawbsSet.add(p.mawbReference.trim()); });
                 const mList = Array.from(availableMawbsSet).sort();
                 if (mList.length > 0) {
                     setDashMawbFilter(prev => (!prev || prev === 'ALL' || !mList.includes(prev)) ? mList[0] : prev);

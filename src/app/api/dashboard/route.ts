@@ -71,7 +71,7 @@ export async function GET(request: Request) {
             fetchAllSupabaseRows('service_provider_allocation', 'id', sb),
             fetchAllSupabaseRows('service_providers', 'id,name,code', sb),
             fetchAllSupabaseRows('service_provider_allocation', 'shipment_ref,service_provider,unsealed,scan_status,mawb_ref,created_at,updated_at', sb),
-            fetchAllSupabaseRows('mawb', 'id,mawb_reference,carrier,declared_bags,declared_wt,mawb_created,shipper_name,notes,created_at', sb),
+            fetchAllSupabaseRows('mawb', 'mawb_reference,carrier,declared_bags,declared_wt,mawb_created,shipper_name,notes,has_service_providers_allocated', sb),
             fetchAllSupabaseRows('outbound_manifests', 'id,manifest_reference', sb)
         ]);
 
@@ -86,20 +86,15 @@ export async function GET(request: Request) {
         const mawbData = mawbResult.status === 'fulfilled' ? mawbResult.value : [];
         const omBags = omResult.status === 'fulfilled' ? omResult.value : [];
 
-        // Build UUID -> MAWB reference string lookup map (shipments.mawb_reference stores mawb.id as UUID)
+        // Build MAWB reference lookup map
         const mawbUuidToRef: Record<string, string> = {};
         const mawbCreatedMap: Record<string, string> = {};
         mawbData.forEach((m: any) => {
-            const dateVal = m.mawb_created || m.created_at || '';
+            const dateVal = m.mawb_created || '';
             if (m.mawb_reference) {
                 const refKey = m.mawb_reference.trim().toLowerCase();
                 mawbUuidToRef[refKey] = m.mawb_reference.trim();
                 if (dateVal) mawbCreatedMap[refKey] = dateVal;
-            }
-            if (m.id) {
-                const idKey = String(m.id).trim().toLowerCase();
-                if (m.mawb_reference) mawbUuidToRef[idKey] = m.mawb_reference.trim();
-                if (dateVal) mawbCreatedMap[idKey] = dateVal;
             }
         });
 
@@ -423,7 +418,13 @@ export async function GET(request: Request) {
         const userProductivity = Object.values(userProductivityMap).sort((a, b) => b.scanned - a.scanned);
 
         const mawbTableList = mawbData
-            .filter((m: any) => isValidMawbRef(m.mawb_reference))
+            .filter((m: any) => {
+                if (!isValidMawbRef(m.mawb_reference)) return false;
+                const isAllocated = m.has_service_providers_allocated === true || m.has_service_providers_allocated === 'true';
+                if (!isAllocated) return false;
+                if (m.mawb_type && String(m.mawb_type).trim().toLowerCase() === 'outbound') return false;
+                return true;
+            })
             .map((m: any) => ({
                 mawbReference: m.mawb_reference.trim(),
                 carrier: m.carrier || 'N/A',
@@ -431,7 +432,9 @@ export async function GET(request: Request) {
                 declaredWeight: m.declared_wt || 0,
                 createdAt: m.mawb_created || '',
                 shipperName: m.shipper_name || '',
-                notes: m.notes || ''
+                notes: m.notes || '',
+                hasServiceProvidersAllocated: true,
+                mawbType: m.mawb_type || 'INBOUND'
             }));
 
         const mawbWiseMap: Record<string, { mawbReference: string; totalReceived: number; totalSorted: number; pendingParcels: number; sortedParcels: any[]; receivedParcels: any[] }> = {};
