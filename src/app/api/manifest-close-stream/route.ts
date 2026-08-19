@@ -409,14 +409,14 @@ function buildUploadXml(manifestReference: string, shipmentBlocks: string[], hea
     const messageId = generateMessageId();
     const now = nowFormatted();
     const travelId = escapeXml(headerInfo.travelId || headerInfo.receiverCode || '');
-    const carrierCode = escapeXml(headerInfo.carrierCode || 'CX');
-    const carrierName = escapeXml(headerInfo.carrierName || 'Cathay Pacific');
-    const fromLoc = escapeXml(headerInfo.fromLoc || 'CMB');
-    const fromLocName = escapeXml(headerInfo.fromLocName || 'Colombo');
-    const toLoc = escapeXml(headerInfo.toLoc || 'CMB');
-    const toLocName = escapeXml(headerInfo.toLocName || 'Colombo');
-    const shipperCode = escapeXml(headerInfo.shipperCode || FFDX_UPDATE_ENTITY_ID);
-    const shipperName = escapeXml(headerInfo.shipperName || 'Logicentrix Pvt Ltd');
+    const carrierCode = 'UL';
+    const carrierName = 'Sri Lankan Airlines';
+    const fromLoc = 'CMB';
+    const fromLocName = 'Colombo';
+    const toLoc = 'CMB';
+    const toLocName = 'Colombo';
+    const shipperCode = 'LK7171';
+    const shipperName = 'Logicentrix Pvt Ltd';
     const receiverCode = escapeXml(headerInfo.receiverCode || '');
     const receiverName = escapeXml(headerInfo.receiverName || '');
     const notes = escapeXml(headerInfo.notes || '');
@@ -722,27 +722,20 @@ export async function GET(request: Request) {
 
                 // ── Step 7: Build header info & upload to FFDX — ONE SHIPMENT PER CALL ──
                 let mawbRecord: any = null;
-                if (firstShipmentDetail?.mawb_reference) {
-                    mawbRecord = await fetchMawbRecord(sb, firstShipmentDetail.mawb_reference);
-                }
-
-                const carrierCode = mawbRecord?.carrier_code || firstShipmentDetail?.carrier_code || 'CX';
-                const carrierName = mawbRecord?.carrier || (carrierCode === 'CX' ? 'Cathay Pacific' : 'Sri Lankan Airlines');
+                const carrierCode = 'UL';
+                const carrierName = 'Sri Lankan Airlines';
                 const travelId = mawbRecord?.travel_id || receiverCode;
-                let fromLoc = mawbRecord?.from_loc || firstShipmentDetail?.origin_location_code;
-                let fromLocName = mawbRecord?.from_loc_name || firstShipmentDetail?.origin_location_name;
-                if (!fromLoc) {
-                    const originCountry = (firstShipmentDetail?.origin_country_code || firstShipmentDetail?.consignor_country_code || '').toUpperCase();
-                    if (originCountry === 'CN' || originCountry === 'HK') { fromLoc = 'HKG'; fromLocName = 'Hong Kong'; }
-                    else { fromLoc = 'CMB'; fromLocName = 'Colombo'; }
-                }
-                const toLoc = mawbRecord?.to_loc || firstShipmentDetail?.dest_location_code || 'CMB';
-                const toLocName = mawbRecord?.to_loc_name || firstShipmentDetail?.dest_location_name || 'Colombo';
+                const fromLoc = 'CMB';
+                const fromLocName = 'Colombo';
+                const toLoc = 'CMB';
+                const toLocName = 'Colombo';
+                const shipperCode = 'LK7171';
+                const shipperName = 'Logicentrix Pvt Ltd';
 
                 const headerInfo = {
                     travelId, carrierCode, carrierName, fromLoc, fromLocName, toLoc, toLocName,
-                    shipperCode: FFDX_UPDATE_ENTITY_ID || 'LK7171',
-                    shipperName: 'Logicentrix Pvt Ltd',
+                    shipperCode,
+                    shipperName,
                     receiverCode, receiverName,
                     notes: mawbRecord?.notes || firstShipmentDetail?.notes || '',
                     manifestedBy: FFDX_UPDATE_ENTITY_ID || 'LK7171',

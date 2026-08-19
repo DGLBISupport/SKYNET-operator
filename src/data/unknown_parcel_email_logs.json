@@ -1,0 +1,50 @@
+[
+  {
+    "id": "LOG-1787039046974",
+    "sent_at": "2026-08-18T07:44:06.468Z",
+    "scan_date": "2026-08-18",
+    "recipient_email": "shashini.hq@dartglobal.com",
+    "parcel_count": 4,
+    "barcodes": [
+      "710283701223",
+      "710283702074",
+      "710283702074",
+      "710283701993"
+    ],
+    "sent_by": "Shashini Laksiri (shashinilaksiri@gmail.com)",
+    "status": "SUCCESS",
+    "filename": "Unknown_Parcels_Report_2026-08-18.xlsx"
+  },
+  {
+    "id": "LOG-1787027491348",
+    "sent_at": "2026-08-18T04:31:30.760Z",
+    "scan_date": "2026-08-18",
+    "recipient_email": "shashini.hq@dartglobal.com",
+    "parcel_count": 7,
+    "barcodes": [
+      "710283701956",
+      "710283701971",
+      "710283702052",
+      "710283701164",
+      "710283701890",
+      "710283701956",
+      "710283702030"
+    ],
+    "sent_by": "System Operator",
+    "status": "SUCCESS",
+    "filename": "Unknown_Parcels_Report_2026-08-18.xlsx"
+  },
+  {
+    "id": "LOG-1787026194504",
+    "sent_at": "2026-08-18T04:09:54.038Z",
+    "scan_date": "2026-08-18",
+    "recipient_email": "superadmin@skynet.com",
+    "parcel_count": 1,
+    "barcodes": [
+      "UNKNOWN-PARCEL-998877"
+    ],
+    "sent_by": "Operator Unit Test",
+    "status": "SUCCESS",
+    "filename": "Unknown_Parcels_Report_2026-08-18.xlsx"
+  }
+]

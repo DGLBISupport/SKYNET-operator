@@ -395,14 +395,14 @@ function buildUploadXml(
         : '';
 
     const travelId = escapeXml(headerInfo.travelId || headerInfo.receiverCode || '');
-    const carrierCode = escapeXml(headerInfo.carrierCode || 'CX');
-    const carrierName = escapeXml(headerInfo.carrierName || 'Cathay Pacific');
-    const fromLoc = escapeXml(headerInfo.fromLoc || 'CMB');
-    const fromLocName = escapeXml(headerInfo.fromLocName || 'Colombo');
-    const toLoc = escapeXml(headerInfo.toLoc || 'CMB');
-    const toLocName = escapeXml(headerInfo.toLocName || 'Colombo');
-    const shipperCode = escapeXml(headerInfo.shipperCode || FFDX_UPDATE_ENTITY_ID);
-    const shipperName = escapeXml(headerInfo.shipperName || 'Logicentrix Pvt Ltd');
+    const carrierCode = 'UL';
+    const carrierName = 'Sri Lankan Airlines';
+    const fromLoc = 'CMB';
+    const fromLocName = 'Colombo';
+    const toLoc = 'CMB';
+    const toLocName = 'Colombo';
+    const shipperCode = 'LK7171';
+    const shipperName = 'Logicentrix Pvt Ltd';
     const receiverCode = escapeXml(headerInfo.receiverCode || '');
     const receiverName = escapeXml(headerInfo.receiverName || '');
     const notes = escapeXml(headerInfo.notes || '');
@@ -685,35 +685,15 @@ export async function POST(request: Request) {
             mawbRecord = await fetchMawbRecord(sb, inboundMawbRef);
         }
 
-        // ─── 4. Build Header Info dynamically without hardcoded values ────────
-        // Carrier
-        const carrierCode = mawbRecord?.carrier_code || firstShipmentDetail?.carrier_code || 'CX';
-        const carrierName = mawbRecord?.carrier || firstShipmentDetail?.carrier || (carrierCode === 'CX' ? 'Cathay Pacific' : 'Sri Lankan Airlines');
-
-        // Travel ID (Flight)
+        // ─── 4. Build Header Info (Hardcoded Manifest Info) ────────
+        const carrierCode = 'UL';
+        const carrierName = 'Sri Lankan Airlines';
         const travelId = mawbRecord?.travel_id || receiverCode;
-
-        // Locations
-        let fromLoc = mawbRecord?.from_loc || firstShipmentDetail?.origin_location_code;
-        let fromLocName = mawbRecord?.from_loc_name || firstShipmentDetail?.origin_location_name;
-
-        // If fromLoc is empty, check origin country code from shipment detail
-        if (!fromLoc) {
-            const originCountry = (firstShipmentDetail?.origin_country_code || firstShipmentDetail?.consignor_country_code || '').toUpperCase();
-            if (originCountry === 'CN' || originCountry === 'HK') {
-                fromLoc = 'HKG';
-                fromLocName = 'Hong Kong';
-            } else {
-                fromLoc = 'CMB';
-                fromLocName = 'Colombo';
-            }
-        }
-
-        const toLoc = mawbRecord?.to_loc || firstShipmentDetail?.dest_location_code || 'CMB';
-        const toLocName = mawbRecord?.to_loc_name || firstShipmentDetail?.dest_location_name || 'Colombo';
-
-        // Shipper & ManifestedBy (Always LK7171 Logicentrix Pvt Ltd)
-        const shipperCode = FFDX_UPDATE_ENTITY_ID || 'LK7171';
+        const fromLoc = 'CMB';
+        const fromLocName = 'Colombo';
+        const toLoc = 'CMB';
+        const toLocName = 'Colombo';
+        const shipperCode = 'LK7171';
         const shipperName = 'Logicentrix Pvt Ltd';
         const manifestedBy = FFDX_UPDATE_ENTITY_ID || 'LK7171';
 

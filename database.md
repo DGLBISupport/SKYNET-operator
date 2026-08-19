@@ -282,10 +282,9 @@ CREATE TABLE public.outbound_lmd_bags (
   closed_by bigint,
   closed_at timestamp with time zone,
   CONSTRAINT outbound_lmd_bags_pkey PRIMARY KEY (id),
-  CONSTRAINT outbound_lmd_bags_bag_number_key UNIQUE (bag_number),
-  CONSTRAINT outbound_lmd_bags_closed_by_fkey FOREIGN KEY (closed_by) REFERENCES public.users(id) ON UPDATE CASCADE,
-  CONSTRAINT outbound_lmd_bags_new_manifest_reference_fkey FOREIGN KEY (new_manifest_reference) REFERENCES public.outbound_manifests(id) ON UPDATE CASCADE ON DELETE SET NULL,
-  CONSTRAINT outbound_lmd_bags_opened_by_fkey FOREIGN KEY (opened_by) REFERENCES public.users(id) ON UPDATE CASCADE
+  CONSTRAINT outbound_lmd_bags_opened_by_fkey FOREIGN KEY (opened_by) REFERENCES public.users(id),
+  CONSTRAINT outbound_lmd_bags_closed_by_fkey FOREIGN KEY (closed_by) REFERENCES public.users(id),
+  CONSTRAINT outbound_lmd_bags_new_manifest_reference_fkey FOREIGN KEY (new_manifest_reference) REFERENCES public.outbound_manifests(id)
 );
 CREATE TABLE public.outbound_lmd_bag_items (
   id bigint GENERATED ALWAYS AS IDENTITY NOT NULL,
@@ -398,3 +397,36 @@ CREATE TABLE public.outbound_manifests (
   CONSTRAINT outbound_manifests_pkey PRIMARY KEY (id),
   CONSTRAINT outbound_manifests_opened_by_fkey FOREIGN KEY (opened_by) REFERENCES public.users(id)
 );
+CREATE TABLE public.unknown_parcels (
+  id bigint GENERATED ALWAYS AS IDENTITY NOT NULL,
+  created_at timestamp with time zone NOT NULL DEFAULT now(),
+  scan_date date NOT NULL DEFAULT CURRENT_DATE,
+  barcode text NOT NULL,
+  scanned_by text DEFAULT 'System Operator'::text,
+  bag_number text,
+  mawb_reference text,
+  scan_source text DEFAULT 'UNKNOWN_SCAN_TAB'::text,
+  status text NOT NULL DEFAULT 'PENDING'::text,
+  is_email_sent boolean NOT NULL DEFAULT false,
+  email_sent_at timestamp with time zone,
+  email_sent_to text,
+  notes text,
+  CONSTRAINT unknown_parcels_pkey PRIMARY KEY (id)
+);
+CREATE INDEX idx_unknown_parcels_scan_date ON public.unknown_parcels (scan_date);
+CREATE INDEX idx_unknown_parcels_barcode ON public.unknown_parcels (barcode);
+CREATE INDEX idx_unknown_parcels_is_email_sent ON public.unknown_parcels (is_email_sent);
+
+CREATE TABLE public.unknown_parcel_email_logs (
+  id bigint GENERATED ALWAYS AS IDENTITY NOT NULL,
+  created_at timestamp with time zone NOT NULL DEFAULT now(),
+  scan_date date NOT NULL,
+  recipient_email text NOT NULL,
+  parcel_count integer NOT NULL DEFAULT 0,
+  barcodes jsonb NOT NULL DEFAULT '[]'::jsonb,
+  sent_by text DEFAULT 'System Operator'::text,
+  status text NOT NULL DEFAULT 'SUCCESS'::text,
+  notes text,
+  CONSTRAINT unknown_parcel_email_logs_pkey PRIMARY KEY (id)
+);
+CREATE INDEX idx_unknown_parcel_email_logs_scan_date ON public.unknown_parcel_email_logs (scan_date);

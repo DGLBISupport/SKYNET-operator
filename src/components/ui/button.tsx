@@ -1,11 +1,13 @@
-import React from "react";
+import * as React from "react"
 
-export interface ButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElement> {
-  width?: string | number;
+export interface ButtonProps
+  extends React.ButtonHTMLAttributes<HTMLButtonElement> {
+  variant?: "default" | "destructive" | "outline" | "secondary" | "ghost" | "link"
+  size?: "default" | "sm" | "lg" | "icon"
 }
 
 export const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
-  ({ className, style, width, ...props }, ref) => {
+  ({ className = "", variant = "default", size = "default", style, ...props }, ref) => {
     return (
       <button
         ref={ref}
@@ -13,29 +15,20 @@ export const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
           display: "inline-flex",
           alignItems: "center",
           justifyContent: "center",
-          borderRadius: "8px",
+          borderRadius: "6px",
           fontSize: "14px",
-          fontWeight: "600",
-          height: "44px",
-          padding: "0 24px",
-          backgroundColor: "#e21b22", // Skynet red
-          color: "#ffffff",
-          border: "none",
+          fontWeight: "500",
           cursor: "pointer",
-          transition: "all 0.15s ease",
-          width: width || "100%",
-          boxShadow: "0 2px 4px rgba(0, 0, 0, 0.08)",
+          border: variant === "outline" ? "1px solid #d1d5db" : "none",
+          backgroundColor: variant === "default" ? "#e21b22" : variant === "outline" ? "#ffffff" : variant === "secondary" ? "#f3f4f6" : "#e21b22",
+          color: variant === "outline" ? "#374151" : variant === "secondary" ? "#1f2937" : "#ffffff",
+          padding: size === "sm" ? "6px 12px" : size === "lg" ? "12px 24px" : "8px 16px",
+          transition: "all 0.2s",
           ...style,
-        }}
-        onMouseOver={(e) => {
-          e.currentTarget.style.filter = "brightness(0.9)";
-        }}
-        onMouseOut={(e) => {
-          e.currentTarget.style.filter = "none";
         }}
         {...props}
       />
-    );
+    )
   }
-);
-Button.displayName = "Button";
+)
+Button.displayName = "Button"

@@ -1,100 +1,53 @@
-import React from "react";
+import * as React from "react"
 
-export const Card = ({ children, style, ...props }: any) => (
-  <div
-    style={{
-      backgroundColor: "#ffffff",
-      border: "1px solid #e5e7eb",
-      borderRadius: "12px",
-      boxShadow: "0 10px 15px -3px rgba(0, 0, 0, 0.05), 0 4px 6px -2px rgba(0, 0, 0, 0.02)",
-      overflow: "hidden",
-      width: "100%",
-      boxSizing: "border-box",
-      ...style,
-    }}
-    {...props}
-  >
-    {children}
-  </div>
-);
+export const Card = React.forwardRef<HTMLDivElement, React.HTMLAttributes<HTMLDivElement>>(
+  ({ className = "", style, ...props }, ref) => (
+    <div
+      ref={ref}
+      style={{
+        borderRadius: "12px",
+        border: "1px solid #e5e7eb",
+        backgroundColor: "#ffffff",
+        boxShadow: "0 1px 3px rgba(0,0,0,0.08)",
+        ...style,
+      }}
+      {...props}
+    />
+  )
+)
+Card.displayName = "Card"
 
-export const CardHeader = ({ children, style, ...props }: any) => (
-  <div
-    style={{
-      padding: "24px 24px 16px 24px",
-      display: "flex",
-      flexDirection: "column",
-      gap: "6px",
-      boxSizing: "border-box",
-      ...style,
-    }}
-    {...props}
-  >
-    {children}
-  </div>
-);
+export const CardHeader = React.forwardRef<HTMLDivElement, React.HTMLAttributes<HTMLDivElement>>(
+  ({ className = "", style, ...props }, ref) => (
+    <div ref={ref} style={{ display: "flex", flexDirection: "column", padding: "24px", gap: "6px", ...style }} {...props} />
+  )
+)
+CardHeader.displayName = "CardHeader"
 
-export const CardTitle = ({ children, style, ...props }: any) => (
-  <h3
-    style={{
-      fontSize: "22px",
-      fontWeight: "700",
-      color: "#111827",
-      margin: 0,
-      padding: 0,
-      fontFamily: "inherit",
-      ...style,
-    }}
-    {...props}
-  >
-    {children}
-  </h3>
-);
+export const CardTitle = React.forwardRef<HTMLParagraphElement, React.HTMLAttributes<HTMLHeadingElement>>(
+  ({ className = "", style, ...props }, ref) => (
+    <h3 ref={ref} style={{ fontSize: "20px", fontWeight: "600", color: "#111827", margin: 0, ...style }} {...props} />
+  )
+)
+CardTitle.displayName = "CardTitle"
 
-export const CardDescription = ({ children, style, ...props }: any) => (
-  <p
-    style={{
-      fontSize: "14px",
-      color: "#6b7280",
-      margin: 0,
-      padding: 0,
-      lineHeight: "1.4",
-      ...style,
-    }}
-    {...props}
-  >
-    {children}
-  </p>
-);
+export const CardDescription = React.forwardRef<HTMLParagraphElement, React.HTMLAttributes<HTMLParagraphElement>>(
+  ({ className = "", style, ...props }, ref) => (
+    <p ref={ref} style={{ fontSize: "14px", color: "#6b7280", margin: 0, ...style }} {...props} />
+  )
+)
+CardDescription.displayName = "CardDescription"
 
-export const CardContent = ({ children, style, ...props }: any) => (
-  <div
-    style={{
-      padding: "0 24px 24px 24px",
-      display: "flex",
-      flexDirection: "column",
-      gap: "16px",
-      boxSizing: "border-box",
-      ...style,
-    }}
-    {...props}
-  >
-    {children}
-  </div>
-);
+export const CardContent = React.forwardRef<HTMLDivElement, React.HTMLAttributes<HTMLDivElement>>(
+  ({ className = "", style, ...props }, ref) => (
+    <div ref={ref} style={{ padding: "24px", paddingTop: 0, ...style }} {...props} />
+  )
+)
+CardContent.displayName = "CardContent"
 
-export const CardFooter = ({ children, style, ...props }: any) => (
-  <div
-    style={{
-      padding: "0 24px 24px 24px",
-      display: "flex",
-      flexDirection: "column",
-      gap: "12px",
-      boxSizing: "border-box",
-      ...style,
-    }}
-    {...props}
-  >
-    {children}
-  </div>
-);
+export const CardFooter = React.forwardRef<HTMLDivElement, React.HTMLAttributes<HTMLDivElement>>(
+  ({ className = "", style, ...props }, ref) => (
+    <div ref={ref} style={{ display: "flex", alignItems: "center", padding: "24px", paddingTop: 0, ...style }} {...props} />
+  )
+)
+CardFooter.displayName = "CardFooter"
