@@ -167,6 +167,7 @@ export default function ManifestTrackingTab({
                                                 <option value="ALL">All Partners</option>
                                                 <option value="PickMe">PickMe</option>
                                                 <option value="Domex">Domex</option>
+                                                <option value="SITREK">SITREK</option>
                                                 <option value="Pronto">Pronto</option>
                                             </select>
                                         </div>
@@ -296,14 +297,15 @@ export default function ManifestTrackingTab({
                                                                                 <div style={{ fontSize: '15px', fontWeight: '800', color: '#111827', display: 'flex', alignItems: 'center', gap: '8px' }}>
                                                                                     <span>{manifest.manifest_reference}</span>
                                                                                     {(() => {
-                                                                                        const rawName = manifest.service_provider_name || (manifest.manifest_reference?.includes('PICKME') ? 'PickMe' : manifest.manifest_reference?.includes('DOMEX') ? 'Domex' : manifest.manifest_reference?.includes('PRONTO') ? 'Pronto' : 'Partner');
+                                                                                        const rawName = manifest.service_provider_name || (manifest.manifest_reference?.includes('PICKME') ? 'PickMe' : manifest.manifest_reference?.includes('DOMEX') ? 'Domex' : manifest.manifest_reference?.includes('SITREK') ? 'SITREK' : manifest.manifest_reference?.includes('PRONTO') ? 'Pronto' : 'Partner');
                                                                                         const isPickMe = rawName.toLowerCase().includes('pickme');
                                                                                         const isDomex = rawName.toLowerCase().includes('domex');
+                                                                                        const isSitrek = rawName.toLowerCase().includes('sitrek');
                                                                                         const isPronto = rawName.toLowerCase().includes('pronto');
-                                                                                        const displayLabel = isPickMe ? 'PickMe' : isDomex ? 'Domex' : isPronto ? 'Pronto' : rawName;
+                                                                                        const displayLabel = isPickMe ? 'PickMe' : isDomex ? 'Domex' : isSitrek ? 'SITREK' : isPronto ? 'Pronto' : rawName;
                                                                                         return (
                                                                                             <span style={{
-                                                                                                backgroundColor: isPickMe ? '#facc15' : isDomex ? '#7b0f1a' : isPronto ? '#d97706' : '#4b5563',
+                                                                                                backgroundColor: isPickMe ? '#facc15' : isDomex ? '#7b0f1a' : isSitrek ? '#0f2b6e' : isPronto ? '#d97706' : '#4b5563',
                                                                                                 color: isPickMe ? '#111827' : '#ffffff',
                                                                                                 fontSize: '10px',
                                                                                                 fontWeight: '800',
@@ -545,7 +547,7 @@ export default function ManifestTrackingTab({
                                                                                                                             <td style={{ padding: '6px 8px' }}>
                                                                                                                                 {partner !== '—' ? (
                                                                                                                                     <span style={{
-                                                                                                                                        backgroundColor: partner === 'PickMe' ? '#ffcc00' : partner === 'Pronto' ? '#ea580c' : partner === 'Domex' ? '#7b0f1a' : '#4b5563',
+                                                                                                                                        backgroundColor: partner === 'PickMe' ? '#ffcc00' : partner === 'Pronto' ? '#ea580c' : partner === 'Domex' ? '#7b0f1a' : partner === 'SITREK' || partner === 'Sitrek' ? '#0f2b6e' : '#4b5563',
                                                                                                                                         color: partner === 'PickMe' ? '#000000' : '#ffffff',
                                                                                                                                         padding: '2px 7px',
                                                                                                                                         borderRadius: '4px',
@@ -724,7 +726,7 @@ export default function ManifestTrackingTab({
                                                                                             <td style={{ padding: '6px 8px' }}>
                                                                                                 {partner !== '—' ? (
                                                                                                     <span style={{
-                                                                                                        backgroundColor: partner === 'PickMe' ? '#ffcc00' : partner === 'Pronto' ? '#ea580c' : partner === 'Domex' ? '#7b0f1a' : '#4b5563',
+                                                                                                        backgroundColor: partner === 'PickMe' ? '#ffcc00' : partner === 'Pronto' ? '#ea580c' : partner === 'Domex' ? '#7b0f1a' : partner === 'SITREK' || partner === 'Sitrek' ? '#0f2b6e' : '#4b5563',
                                                                                                         color: partner === 'PickMe' ? '#000000' : '#ffffff',
                                                                                                         padding: '2px 7px',
                                                                                                         borderRadius: '4px',

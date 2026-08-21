@@ -698,9 +698,10 @@ export default function AllModals({
                     const rawProvider = manifestClosedModal.provider || getManifestProviderName(manifestClosedModal.mawbRef);
                     const providerDisplay = rawProvider === 'PickMe' ? 'PickMe Express'
                         : rawProvider === 'Domex' ? 'Domex Express'
-                            : rawProvider === 'Pronto' ? 'Pronto Lanka'
-                                : rawProvider === 'ALL' ? 'General (All Partners)'
-                                    : rawProvider;
+                            : rawProvider === 'SITREK' || rawProvider === 'Sitrek' ? 'SITREK Courier'
+                                : rawProvider === 'Pronto' ? 'Pronto Lanka'
+                                    : rawProvider === 'ALL' ? 'General (All Partners)'
+                                        : rawProvider;
 
                     return (
                         <div style={{
@@ -752,8 +753,8 @@ export default function AllModals({
                                 <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
                                     {/* Dedicated Service Provider Card */}
                                     <div style={{
-                                        backgroundColor: providerDisplay.includes('PickMe') ? '#fefce8' : providerDisplay.includes('Domex') ? '#fff1f2' : providerDisplay.includes('Pronto') ? '#fff7ed' : '#f3f4f6',
-                                        border: `1px solid ${providerDisplay.includes('PickMe') ? '#fef08a' : providerDisplay.includes('Domex') ? '#fecdd3' : providerDisplay.includes('Pronto') ? '#fed7aa' : '#e5e7eb'}`,
+                                        backgroundColor: providerDisplay.includes('PickMe') ? '#fefce8' : providerDisplay.includes('Domex') ? '#fff1f2' : providerDisplay.includes('SITREK') || providerDisplay.includes('Sitrek') ? '#eff6ff' : providerDisplay.includes('Pronto') ? '#fff7ed' : '#f3f4f6',
+                                        border: `1px solid ${providerDisplay.includes('PickMe') ? '#fef08a' : providerDisplay.includes('Domex') ? '#fecdd3' : providerDisplay.includes('SITREK') || providerDisplay.includes('Sitrek') ? '#bfdbfe' : providerDisplay.includes('Pronto') ? '#fed7aa' : '#e5e7eb'}`,
                                         borderRadius: '8px',
                                         padding: '12px 14px',
                                         display: 'flex',
@@ -767,14 +768,14 @@ export default function AllModals({
                                             <div style={{
                                                 fontSize: '16px',
                                                 fontWeight: '900',
-                                                color: providerDisplay.includes('PickMe') ? '#713f12' : providerDisplay.includes('Domex') ? '#881337' : providerDisplay.includes('Pronto') ? '#9a3412' : '#111827',
+                                                color: providerDisplay.includes('PickMe') ? '#713f12' : providerDisplay.includes('Domex') ? '#881337' : providerDisplay.includes('SITREK') || providerDisplay.includes('Sitrek') ? '#1e3a8a' : providerDisplay.includes('Pronto') ? '#9a3412' : '#111827',
                                                 marginTop: '2px'
                                             }}>
                                                 {providerDisplay}
                                             </div>
                                         </div>
                                         <div style={{ fontSize: '24px' }}>
-                                            {providerDisplay.includes('PickMe') ? '🚕' : providerDisplay.includes('Domex') ? '🚚' : providerDisplay.includes('Pronto') ? '📦' : '🏢'}
+                                            {providerDisplay.includes('PickMe') ? '🚕' : providerDisplay.includes('Domex') ? '🚚' : providerDisplay.includes('SITREK') || providerDisplay.includes('Sitrek') ? '🚛' : providerDisplay.includes('Pronto') ? '📦' : '🏢'}
                                         </div>
                                     </div>
 
@@ -1026,8 +1027,9 @@ export default function AllModals({
                                                                             const pLower = partner.toLowerCase();
                                                                             const isPickMe = pLower.includes('pickme');
                                                                             const isDomex = pLower.includes('domex');
+                                                                            const isSitrek = pLower.includes('sitrek');
                                                                             const isPronto = pLower.includes('pronto');
-                                                                            const bgColor = isPickMe ? '#facc15' : isDomex ? '#e21b22' : isPronto ? '#ea580c' : '#6b7280';
+                                                                            const bgColor = isPickMe ? '#facc15' : isDomex ? '#e21b22' : isSitrek ? '#0f2b6e' : isPronto ? '#ea580c' : '#6b7280';
                                                                             const textColor = isPickMe ? '#000000' : '#ffffff';
                                                                             return (
                                                                                 <span style={{
@@ -2606,6 +2608,7 @@ export default function AllModals({
                                     >
                                         <option value="PickMe">PickMe Express</option>
                                         <option value="Domex">Domex Express</option>
+                                        <option value="SITREK">SITREK Courier</option>
                                         <option value="Pronto">Pronto Lanka</option>
                                     </select>
                                 </div>
@@ -2704,7 +2707,7 @@ export default function AllModals({
                                     <select
                                         value={newBagPartner}
                                         onChange={(e: any) => {
-                                            const p = e.target.value as 'PickMe' | 'Domex' | 'Pronto';
+                                            const p = e.target.value as 'PickMe' | 'Domex' | 'SITREK' | 'Pronto';
                                             setNewBagPartner(p);
                                             const mawbPrefix = selectedSecondScanMawb ? selectedSecondScanMawb : 'LMD';
                                             const partnerCode = `-${p.toUpperCase()}`;
@@ -2714,6 +2717,7 @@ export default function AllModals({
                                     >
                                         <option value="PickMe">PickMe Courier</option>
                                         <option value="Domex">Domex Express</option>
+                                        <option value="SITREK">SITREK Courier</option>
                                         <option value="Pronto">Pronto Lanka</option>
                                     </select>
                                 </div>
@@ -3003,7 +3007,7 @@ export default function AllModals({
                                                 <td style={{ padding: '8px 10px' }}>
                                                     {p.assignedPartner ? (
                                                         <span style={{
-                                                            backgroundColor: p.assignedPartner === 'PickMe' ? '#ffcc00' : p.assignedPartner === 'Domex' ? '#7b0f1a' : '#ea580c',
+                                                            backgroundColor: p.assignedPartner === 'PickMe' ? '#ffcc00' : p.assignedPartner === 'Domex' ? '#7b0f1a' : p.assignedPartner === 'SITREK' || p.assignedPartner === 'Sitrek' ? '#0f2b6e' : '#ea580c',
                                                             color: p.assignedPartner === 'PickMe' ? '#000000' : '#ffffff',
                                                             padding: '2px 6px',
                                                             borderRadius: '4px',

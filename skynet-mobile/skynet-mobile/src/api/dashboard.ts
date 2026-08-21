@@ -35,6 +35,7 @@ const DAY_LABELS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 const PARTNER_COLORS: Record<string, string> = {
   PickMe: '#3b82f6',
   Domex: '#ef4444',
+  SITREK: '#0f2b6e',
   Pronto: '#10b981',
   Marre: '#f59e0b',
   Other: '#8b5cf6',

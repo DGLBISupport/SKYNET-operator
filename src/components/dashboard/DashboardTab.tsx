@@ -390,6 +390,7 @@ export default function DashboardTab({
                                         <option value="ALL">All Partners</option>
                                         <option value="PickMe">PickMe</option>
                                         <option value="Domex">Domex</option>
+                                        <option value="SITREK">SITREK</option>
                                         <option value="Pronto">Pronto</option>
                                         <option value="Other">Other / General</option>
                                     </select>
@@ -1064,16 +1065,18 @@ export default function DashboardTab({
                             const partnerColors: Record<string, string> = {
                                 PickMe: '#facc15',
                                 Domex: '#7b0f1a',
+                                SITREK: '#0f2b6e',
                                 Pronto: '#ea580c',
                                 Other: '#6b7280'
                             };
                             const partnerTextColors: Record<string, string> = {
                                 PickMe: '#000000',
                                 Domex: '#ffffff',
+                                SITREK: '#ffffff',
                                 Pronto: '#ffffff',
                                 Other: '#ffffff'
                             };
-                            const knownPartners = ['PickMe', 'Domex', 'Pronto', 'Other'];
+                            const knownPartners = ['PickMe', 'Domex', 'SITREK', 'Pronto', 'Other'];
                             const filteredPartnerMap: Record<string, { partnerName: string; totalParcels: number; allocatedParcels: number; pendingParcels: number; totalBags: number }> = {};
                             knownPartners.forEach(p => {
                                 filteredPartnerMap[p] = { partnerName: p, totalParcels: 0, allocatedParcels: 0, pendingParcels: 0, totalBags: 0 };
@@ -1085,6 +1088,7 @@ export default function DashboardTab({
                                 const agent = (p.deliveryAgentCode || '').toLowerCase();
                                 if (agent.includes('pickme')) pName = 'PickMe';
                                 else if (agent.includes('domex')) pName = 'Domex';
+                                else if (agent.includes('sitrek')) pName = 'SITREK';
                                 else if (agent.includes('pronto')) pName = 'Pronto';
                                 else if (knownPartners.includes(p.deliveryAgentCode)) pName = p.deliveryAgentCode;
 
@@ -1102,6 +1106,7 @@ export default function DashboardTab({
                                 const tp = (b.targetPartner || '').toLowerCase();
                                 if (tp.includes('pickme')) pName = 'PickMe';
                                 else if (tp.includes('domex')) pName = 'Domex';
+                                else if (tp.includes('sitrek')) pName = 'SITREK';
                                 else if (tp.includes('pronto')) pName = 'Pronto';
                                 else if (knownPartners.includes(b.targetPartner)) pName = b.targetPartner;
                                 filteredPartnerMap[pName].totalBags++;

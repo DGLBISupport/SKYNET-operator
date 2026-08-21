@@ -25,7 +25,7 @@ export async function GET(request: Request) {
         }
 
         // 1. Fetch Service Providers for mapping ID -> Name
-        let serviceProvidersMap: Record<number, string> = { 1: 'PickMe', 2: 'Domex', 3: 'Pronto' };
+        let serviceProvidersMap: Record<number, string> = { 1: 'PickMe', 2: 'Domex', 3: 'SITREK', 4: 'Pronto' };
         try {
             const spRes = await fetch(`${sb.url}/rest/v1/service_providers?select=id,name,code`, { headers: sb.headers, cache: 'no-store' });
             const spData = await spRes.json();

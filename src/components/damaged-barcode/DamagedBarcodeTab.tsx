@@ -152,14 +152,18 @@ export default function DamagedBarcodeTab({
                                                     ? '3px solid #ffcc00'
                                                     : damagedCurrentScan.assignedPartner === 'Domex'
                                                         ? '3px solid #7b0f1a'
-                                                        : '3px solid #ea580c'
+                                                        : damagedCurrentScan.assignedPartner === 'SITREK' || damagedCurrentScan.assignedPartner === 'Sitrek'
+                                                            ? '3px solid #0f2b6e'
+                                                            : '3px solid #ea580c'
                                                 : '1px solid #e5e7eb',
                                             backgroundColor: damagedCurrentScan?.assignedPartner
                                                 ? damagedCurrentScan.assignedPartner === 'PickMe'
                                                     ? '#ffcc00'
                                                     : damagedCurrentScan.assignedPartner === 'Domex'
                                                         ? '#7b0f1a'
-                                                        : '#ea580c'
+                                                        : damagedCurrentScan.assignedPartner === 'SITREK' || damagedCurrentScan.assignedPartner === 'Sitrek'
+                                                            ? '#0f2b6e'
+                                                            : '#ea580c'
                                                 : '#ffffff',
                                             color: damagedCurrentScan?.assignedPartner
                                                 ? damagedCurrentScan.assignedPartner === 'PickMe'
@@ -220,6 +224,11 @@ export default function DamagedBarcodeTab({
                                                             <picture style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: '100%', height: '100%' }}>
                                                                 <source srcSet="/domex_logo.webp" type="image/webp" />
                                                                 <img src="/domex_logo.png" alt="Domex" decoding="async" fetchPriority="high" style={{ maxHeight: '100%', maxWidth: '100%', objectFit: 'contain' }} />
+                                                            </picture>
+                                                        ) : damagedCurrentScan.assignedPartner === 'SITREK' || damagedCurrentScan.assignedPartner === 'Sitrek' ? (
+                                                            <picture style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: '100%', height: '100%' }}>
+                                                                <source srcSet="/sitrek_logo.webp" type="image/webp" />
+                                                                <img src="/sitrek_logo.png" alt="SITREK" decoding="async" fetchPriority="high" style={{ maxHeight: '100%', maxWidth: '100%', objectFit: 'contain' }} />
                                                             </picture>
                                                         ) : (
                                                             <span style={{ color: '#ea580c', fontWeight: '900', fontSize: '28px', letterSpacing: '1px' }}>PRONTO</span>
@@ -361,7 +370,9 @@ export default function DamagedBarcodeTab({
                                                                         ? '#ffcc00'
                                                                         : item.assignedPartner === 'Domex'
                                                                             ? '#7b0f1a'
-                                                                            : '#ea580c',
+                                                                            : item.assignedPartner === 'SITREK' || item.assignedPartner === 'Sitrek'
+                                                                                ? '#0f2b6e'
+                                                                                : '#ea580c',
                                                                     color: item.assignedPartner === 'PickMe' ? '#000000' : '#ffffff',
                                                                     padding: '3px 8px',
                                                                     borderRadius: '4px',

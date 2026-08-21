@@ -84,6 +84,8 @@ async function resolveZoneAndPartner(
             assignedPartner = 'PickMe';
         } else if (numId === 2) {
             assignedPartner = 'Domex';
+        } else if (numId === 3) {
+            assignedPartner = 'SITREK';
         } else if (cache.providers.has(numId)) {
             assignedPartner = cache.providers.get(numId)!;
         } else {
@@ -96,6 +98,7 @@ async function resolveZoneAndPartner(
         }
         if (assignedPartner.toLowerCase().includes('pickme')) assignedPartner = 'PickMe';
         else if (assignedPartner.toLowerCase().includes('domex')) assignedPartner = 'Domex';
+        else if (assignedPartner.toLowerCase().includes('sitrek')) assignedPartner = 'SITREK';
         else if (assignedPartner.toLowerCase().includes('pronto')) assignedPartner = 'Pronto';
     }
 
@@ -806,6 +809,8 @@ export async function POST(request: Request) {
                 assignedPartner = 'PickMe';
             } else if (numId === 2) {
                 assignedPartner = 'Domex';
+            } else if (numId === 3) {
+                assignedPartner = 'SITREK';
             } else if (cache.providers.has(numId)) {
                 assignedPartner = cache.providers.get(numId)!;
             } else {
@@ -818,6 +823,7 @@ export async function POST(request: Request) {
             }
             if (assignedPartner.toLowerCase().includes('pickme')) assignedPartner = 'PickMe';
             else if (assignedPartner.toLowerCase().includes('domex')) assignedPartner = 'Domex';
+            else if (assignedPartner.toLowerCase().includes('sitrek')) assignedPartner = 'SITREK';
             else if (assignedPartner.toLowerCase().includes('pronto')) assignedPartner = 'Pronto';
         }
 
@@ -1273,7 +1279,7 @@ export async function GET(request: Request) {
                             fetch(`${supabaseUrl}/rest/v1/service_providers?select=id,name`, { headers })
                         ]);
 
-                        const spMap: Record<number, string> = { 1: 'PickMe', 2: 'Domex' };
+                        const spMap: Record<number, string> = { 1: 'PickMe', 2: 'Domex', 3: 'SITREK' };
                         if (spRes.ok) {
                             const spData = await spRes.json();
                             (spData || []).forEach((sp: any) => {
@@ -1292,6 +1298,7 @@ export async function GET(request: Request) {
                                         let name = spMap[numId] || spMap[alloc.service_provider] || 'Unknown';
                                         if (name.toLowerCase().includes('pickme')) name = 'PickMe';
                                         else if (name.toLowerCase().includes('domex')) name = 'Domex';
+                                        else if (name.toLowerCase().includes('sitrek')) name = 'SITREK';
                                         else if (name.toLowerCase().includes('pronto')) name = 'Pronto';
                                         partnerMap[alloc.shipment_ref] = name;
                                         partnerMap[String(alloc.shipment_ref).trim().toLowerCase()] = name;

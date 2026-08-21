@@ -62,7 +62,7 @@ export async function GET(request: Request) {
                                 const spRes = await fetch(`${sb.url}/rest/v1/service_providers?select=id,name`, { headers: sb.headers });
                                 if (spRes.ok) {
                                     const spData = await spRes.json();
-                                    const spMap: Record<number, string> = { 1: 'PickMe', 2: 'Domex' };
+                                    const spMap: Record<number, string> = { 1: 'PickMe', 2: 'Domex', 3: 'SITREK' };
                                     (spData || []).forEach((sp: any) => {
                                         spMap[sp.id] = sp.name;
                                     });
@@ -72,6 +72,7 @@ export async function GET(request: Request) {
                                             let name = spMap[spNum] || spMap[alloc.service_provider] || 'Unknown';
                                             if (name.toLowerCase().includes('pickme')) name = 'PickMe';
                                             else if (name.toLowerCase().includes('domex')) name = 'Domex';
+                                            else if (name.toLowerCase().includes('sitrek')) name = 'SITREK';
                                             else if (name.toLowerCase().includes('pronto')) name = 'Pronto';
                                             partnerMap[alloc.shipment_ref] = name;
                                         }

@@ -1,7 +1,7 @@
 import React from 'react';
 import { View, Text, Pressable, StyleSheet } from 'react-native';
 
-const PARTNERS = ['ALL', 'PickMe', 'Domex', 'Pronto'];
+const PARTNERS = ['ALL', 'PickMe', 'Domex', 'SITREK', 'Pronto'];
 
 export default function PartnerSelector({
   value,

@@ -13,11 +13,12 @@ export default function ReportsTab({
     return (
                         <div>
                             {/* Summary Stats */}
-                            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '16px', marginBottom: '16px' }}>
+                            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '16px', marginBottom: '16px' }}>
                                 {[
                                     { count: history.length + verifyHistory.length, lbl: 'Total Operations', color: '#e21b22', bg: '#ffffff', border: '#e21b22' },
-                                    { count: history.filter(h => h.assignedPartner === 'PickMe').length, lbl: 'PickMe Allocated', color: '#000000', bg: '#ffcc00', border: '#ffcc00' },
-                                    { count: history.filter(h => h.assignedPartner === 'Domex').length, lbl: 'Domex Allocated', color: '#ffffff', bg: '#7b0f1a', border: '#7b0f1a' }
+                                    { count: history.filter((h: any) => h.assignedPartner === 'PickMe').length, lbl: 'PickMe Allocated', color: '#000000', bg: '#ffcc00', border: '#ffcc00' },
+                                    { count: history.filter((h: any) => h.assignedPartner === 'Domex').length, lbl: 'Domex Allocated', color: '#ffffff', bg: '#7b0f1a', border: '#7b0f1a' },
+                                    { count: history.filter((h: any) => h.assignedPartner === 'SITREK' || h.assignedPartner === 'Sitrek').length, lbl: 'SITREK Allocated', color: '#ffffff', bg: '#0f2b6e', border: '#0f2b6e' }
                                 ].map(({ count, lbl, color, bg, border }) => (
                                     <div key={lbl} style={{ backgroundColor: bg, border: `1px solid ${border}`, borderRadius: '10px', padding: '16px', textAlign: 'center', boxShadow: '0 1px 3px rgba(0,0,0,0.04)' }}>
                                         <div style={{ fontSize: '28px', fontWeight: '700', color, marginBottom: '4px' }}>{count}</div>

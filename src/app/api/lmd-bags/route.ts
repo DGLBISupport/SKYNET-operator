@@ -8,7 +8,7 @@ interface OutboundBag {
     bagNumber: string;
     mawbRef: string; // manifest_reference string (display only, resolved from outbound_manifests)
     manifestDbId?: number; // outbound_manifests.id (FK, used for DB queries)
-    targetPartner?: 'PickMe' | 'Domex' | 'Pronto' | 'ALL';
+    targetPartner?: 'PickMe' | 'Domex' | 'SITREK' | 'Pronto' | 'ALL';
     destinationHub?: string;
     status: 'OPEN' | 'SEALED';
     parcelCount: number;
@@ -246,7 +246,7 @@ export async function GET(request: Request) {
 
     if (getOutboundManifests === 'true') {
         let manifestsList: OutboundManifestRecord[] = [];
-        let serviceProvidersMap: Record<number, string> = { 1: 'PickMe', 2: 'Domex', 3: 'Pronto' };
+        let serviceProvidersMap: Record<number, string> = { 1: 'PickMe', 2: 'Domex', 3: 'SITREK', 4: 'Pronto' };
         let supabaseSuccess = false;
         if (sb) {
             try {
@@ -425,7 +425,8 @@ export async function POST(request: Request) {
                             if (found) spId = found.id;
                             else if (providerCode.includes('PICKME')) spId = 1;
                             else if (providerCode.includes('DOMEX')) spId = 2;
-                            else if (providerCode.includes('PRONTO')) spId = 3;
+                            else if (providerCode.includes('SITREK')) spId = 3;
+                            else if (providerCode.includes('PRONTO')) spId = 4;
                         }
                     }
                     const omRes = await fetch(`${sb.url}/rest/v1/outbound_manifests?manifest_reference=ilike.${encodeURIComponent(prefixPattern + '*')}&select=manifest_reference`, { headers: sb.headers, cache: 'no-store' });

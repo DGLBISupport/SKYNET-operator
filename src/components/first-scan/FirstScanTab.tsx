@@ -390,9 +390,11 @@ export default function FirstScanTab({
                                 <div style={{
                                     backgroundColor: firstScanCurrentScan.assignedPartner === 'Domex'
                                         ? '#7b0f1a'
-                                        : firstScanCurrentScan.assignedPartner === 'Pronto'
-                                            ? '#ea580c'
-                                            : '#ffcc00',
+                                        : firstScanCurrentScan.assignedPartner === 'SITREK' || firstScanCurrentScan.assignedPartner === 'Sitrek'
+                                            ? '#0f2b6e'
+                                            : firstScanCurrentScan.assignedPartner === 'Pronto'
+                                                ? '#ea580c'
+                                                : '#ffcc00',
                                     borderRadius: '16px',
                                     padding: '24px 20px',
                                     boxShadow: '0 4px 12px rgba(0,0,0,0.06)',
@@ -405,7 +407,7 @@ export default function FirstScanTab({
                                     <div style={{
                                         fontSize: '12px',
                                         fontWeight: '800',
-                                        color: firstScanCurrentScan.assignedPartner === 'Domex' || firstScanCurrentScan.assignedPartner === 'Pronto' ? '#ffffff' : '#000000',
+                                        color: firstScanCurrentScan.assignedPartner === 'Domex' || firstScanCurrentScan.assignedPartner === 'SITREK' || firstScanCurrentScan.assignedPartner === 'Sitrek' || firstScanCurrentScan.assignedPartner === 'Pronto' ? '#ffffff' : '#000000',
                                         textTransform: 'uppercase',
                                         letterSpacing: '0.8px',
                                         marginBottom: '16px',
@@ -434,6 +436,11 @@ export default function FirstScanTab({
                                                 <source srcSet="/domex_logo.webp" type="image/webp" />
                                                 <img src="/domex_logo.png" alt="Domex" decoding="async" fetchPriority="high" style={{ maxHeight: '95px', maxWidth: '90%', objectFit: 'contain' }} />
                                             </picture>
+                                        ) : firstScanCurrentScan.assignedPartner === 'SITREK' || firstScanCurrentScan.assignedPartner === 'Sitrek' ? (
+                                            <picture style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: '100%', height: '100%' }}>
+                                                <source srcSet="/sitrek_logo.webp" type="image/webp" />
+                                                <img src="/sitrek_logo.png" alt="SITREK" decoding="async" fetchPriority="high" style={{ maxHeight: '95px', maxWidth: '90%', objectFit: 'contain' }} />
+                                            </picture>
                                         ) : firstScanCurrentScan.assignedPartner === 'Pronto' ? (
                                             <span style={{ color: '#ea580c', fontWeight: '900', fontSize: '34px', letterSpacing: '1px' }}>PRONTO</span>
                                         ) : (
@@ -454,7 +461,7 @@ export default function FirstScanTab({
                                         borderRadius: '20px',
                                         padding: '6px 20px',
                                         fontSize: '13.5px',
-                                        color: firstScanCurrentScan.assignedPartner === 'Domex' || firstScanCurrentScan.assignedPartner === 'Pronto' ? '#ffffff' : '#000000'
+                                        color: firstScanCurrentScan.assignedPartner === 'Domex' || firstScanCurrentScan.assignedPartner === 'SITREK' || firstScanCurrentScan.assignedPartner === 'Sitrek' || firstScanCurrentScan.assignedPartner === 'Pronto' ? '#ffffff' : '#000000'
                                     }}>
                                         Zone: <span style={{ fontWeight: '800', marginLeft: '4px' }}>{firstScanCurrentScan.assignedZone || 'Default-Zone'}</span>
                                     </div>
@@ -498,7 +505,9 @@ export default function FirstScanTab({
                                                                         ? '#ffcc00'
                                                                         : item.assignedPartner === 'Domex'
                                                                             ? '#7b0f1a'
-                                                                            : '#ea580c',
+                                                                            : item.assignedPartner === 'SITREK' || item.assignedPartner === 'Sitrek'
+                                                                                ? '#0f2b6e'
+                                                                                : '#ea580c',
                                                                     color: item.assignedPartner === 'PickMe' ? '#000000' : '#ffffff',
                                                                     padding: '3px 8px',
                                                                     borderRadius: '4px',

@@ -121,14 +121,15 @@ export default function SecondScanTab({
                                                         <span>{selectedSecondScanMawb}</span>
                                                         {(() => {
                                                             const mObj = outboundManifestsList.find(m => m.manifest_reference === selectedSecondScanMawb);
-                                                            const rawName = mObj?.service_provider_name || (selectedSecondScanMawb.includes('PICKME') ? 'PickMe' : selectedSecondScanMawb.includes('DOMEX') ? 'Domex' : selectedSecondScanMawb.includes('PRONTO') ? 'Pronto' : 'Partner');
+                                                            const rawName = mObj?.service_provider_name || (selectedSecondScanMawb.includes('PICKME') ? 'PickMe' : selectedSecondScanMawb.includes('DOMEX') ? 'Domex' : selectedSecondScanMawb.includes('SITREK') ? 'SITREK' : selectedSecondScanMawb.includes('PRONTO') ? 'Pronto' : 'Partner');
                                                             const isPickMe = rawName.toLowerCase().includes('pickme');
                                                             const isDomex = rawName.toLowerCase().includes('domex');
+                                                            const isSitrek = rawName.toLowerCase().includes('sitrek');
                                                             const isPronto = rawName.toLowerCase().includes('pronto');
-                                                            const displayLabel = isPickMe ? 'PickMe' : isDomex ? 'Domex' : isPronto ? 'Pronto' : rawName;
+                                                            const displayLabel = isPickMe ? 'PickMe' : isDomex ? 'Domex' : isSitrek ? 'SITREK' : isPronto ? 'Pronto' : rawName;
                                                             return (
                                                                 <span style={{
-                                                                    backgroundColor: isPickMe ? '#facc15' : isDomex ? '#7b0f1a' : isPronto ? '#d97706' : '#4b5563',
+                                                                    backgroundColor: isPickMe ? '#facc15' : isDomex ? '#7b0f1a' : isSitrek ? '#0f2b6e' : isPronto ? '#d97706' : '#4b5563',
                                                                     color: isPickMe ? '#111827' : '#ffffff',
                                                                     fontSize: '10px',
                                                                     fontWeight: '800',
@@ -239,7 +240,7 @@ export default function SecondScanTab({
                                                         return;
                                                     }
                                                     const prov = getManifestProviderName(selectedSecondScanMawb);
-                                                    const initialPartner: 'PickMe' | 'Domex' | 'Pronto' = (prov === 'Domex' || prov === 'Pronto' || prov === 'PickMe') ? prov : 'PickMe';
+                                                    const initialPartner: 'PickMe' | 'Domex' | 'SITREK' | 'Pronto' = (prov === 'Domex' || prov === 'SITREK' || prov === 'Pronto' || prov === 'PickMe') ? prov : 'PickMe';
                                                     setNewBagPartner(initialPartner);
                                                     const partnerCode = `-${initialPartner.toUpperCase()}`;
                                                     setCustomBagNumber(`${selectedSecondScanMawb}${partnerCode}-BAG-${String((outboundBags?.length || 0) + 1).padStart(2, '0')}`);
@@ -274,7 +275,8 @@ export default function SecondScanTab({
                                                 const partnerBgColor =
                                                     pLower.includes('pickme') ? '#facc15' :
                                                         pLower.includes('domex') ? '#7b0f1a' :
-                                                            pLower.includes('pronto') ? '#d97706' : '#4b5563';
+                                                            pLower.includes('sitrek') ? '#0f2b6e' :
+                                                                pLower.includes('pronto') ? '#d97706' : '#4b5563';
 
                                                 const partnerTextColor =
                                                     pLower.includes('pickme') ? '#111827' : '#ffffff';
@@ -282,7 +284,8 @@ export default function SecondScanTab({
                                                 const partnerBorderColor =
                                                     pLower.includes('pickme') ? '#eab308' :
                                                         pLower.includes('domex') ? '#7b0f1a' :
-                                                            pLower.includes('pronto') ? '#d97706' : '#e21b22';
+                                                            pLower.includes('sitrek') ? '#0f2b6e' :
+                                                                pLower.includes('pronto') ? '#d97706' : '#e21b22';
 
                                                 return (
                                                     <button
@@ -362,7 +365,7 @@ export default function SecondScanTab({
                                                         <div style={{ fontSize: '15px', fontWeight: '800', color: '#111827', display: 'flex', alignItems: 'center', gap: '8px' }}>
                                                             <span>{activeOutboundBag.bagNumber}</span>
                                                             <span style={{
-                                                                backgroundColor: activeOutboundBag.targetPartner === 'PickMe' ? '#facc15' : activeOutboundBag.targetPartner === 'Domex' ? '#7b0f1a' : activeOutboundBag.targetPartner === 'Pronto' ? '#d97706' : '#4b5563',
+                                                                backgroundColor: activeOutboundBag.targetPartner === 'PickMe' ? '#facc15' : activeOutboundBag.targetPartner === 'Domex' ? '#7b0f1a' : (activeOutboundBag.targetPartner === 'SITREK' || activeOutboundBag.targetPartner === 'Sitrek') ? '#0f2b6e' : activeOutboundBag.targetPartner === 'Pronto' ? '#d97706' : '#4b5563',
                                                                 color: activeOutboundBag.targetPartner === 'PickMe' ? '#111827' : '#ffffff',
                                                                 fontSize: '10px',
                                                                 fontWeight: '800',
@@ -588,9 +591,11 @@ export default function SecondScanTab({
                                                 <div style={{
                                                     backgroundColor: validationCard.assignedPartner === 'Domex'
                                                         ? '#7b0f1a'
-                                                        : validationCard.assignedPartner === 'Pronto'
-                                                            ? '#ea580c'
-                                                            : '#ffcc00',
+                                                        : validationCard.assignedPartner === 'SITREK' || validationCard.assignedPartner === 'Sitrek'
+                                                            ? '#0f2b6e'
+                                                            : validationCard.assignedPartner === 'Pronto'
+                                                                ? '#ea580c'
+                                                                : '#ffcc00',
                                                     padding: '24px 20px',
                                                     display: 'flex',
                                                     flexDirection: 'column',
@@ -602,7 +607,7 @@ export default function SecondScanTab({
                                                     <div style={{
                                                         fontSize: '12px',
                                                         fontWeight: '800',
-                                                        color: validationCard.assignedPartner === 'Domex' || validationCard.assignedPartner === 'Pronto' ? '#ffffff' : '#000000',
+                                                        color: validationCard.assignedPartner === 'Domex' || validationCard.assignedPartner === 'SITREK' || validationCard.assignedPartner === 'Sitrek' || validationCard.assignedPartner === 'Pronto' ? '#ffffff' : '#000000',
                                                         textTransform: 'uppercase',
                                                         letterSpacing: '0.8px',
                                                         textAlign: 'center'
@@ -629,6 +634,11 @@ export default function SecondScanTab({
                                                                 <source srcSet="/domex_logo.webp" type="image/webp" />
                                                                 <img src="/domex_logo.png" alt="Domex" decoding="async" fetchPriority="high" style={{ maxHeight: '95px', maxWidth: '90%', objectFit: 'contain' }} />
                                                             </picture>
+                                                        ) : validationCard.assignedPartner === 'SITREK' || validationCard.assignedPartner === 'Sitrek' ? (
+                                                            <picture style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: '100%', height: '100%' }}>
+                                                                <source srcSet="/sitrek_logo.webp" type="image/webp" />
+                                                                <img src="/sitrek_logo.png" alt="SITREK" decoding="async" fetchPriority="high" style={{ maxHeight: '95px', maxWidth: '90%', objectFit: 'contain' }} />
+                                                            </picture>
                                                         ) : validationCard.assignedPartner === 'Pronto' ? (
                                                             <span style={{ color: '#ea580c', fontWeight: '900', fontSize: '34px', letterSpacing: '1px' }}>PRONTO</span>
                                                         ) : (
@@ -649,7 +659,7 @@ export default function SecondScanTab({
                                                         borderRadius: '20px',
                                                         padding: '6px 20px',
                                                         fontSize: '13.5px',
-                                                        color: validationCard.assignedPartner === 'Domex' || validationCard.assignedPartner === 'Pronto' ? '#ffffff' : '#000000'
+                                                        color: validationCard.assignedPartner === 'Domex' || validationCard.assignedPartner === 'SITREK' || validationCard.assignedPartner === 'Sitrek' || validationCard.assignedPartner === 'Pronto' ? '#ffffff' : '#000000'
                                                     }}>
                                                         Zone: <span style={{ fontWeight: '800', marginLeft: '4px' }}>{validationCard.assignedZone || 'Default-Zone'}</span>
                                                     </div> */}
@@ -660,21 +670,13 @@ export default function SecondScanTab({
                                                         alignItems: 'center',
                                                         justifyContent: 'center',
                                                         gap: '6px',
-                                                        // backgroundColor: validationCard.assignedPartner === 'Domex' || validationCard.assignedPartner === 'Pronto'
-                                                        //     ? 'rgba(255, 255, 255, 0.15)'
-                                                        //     : 'rgba(0, 0, 0, 0.06)',
-                                                        // border: validationCard.assignedPartner === 'Domex' || validationCard.assignedPartner === 'Pronto'
-                                                        //     ? '1px solid rgba(255, 255, 255, 0.3)'
-                                                        //     : '1px solid rgba(0, 0, 0, 0.2)',
-                                                        // borderRadius: '20px',
-                                                        // padding: '7px 20px',
                                                         fontSize: '10px',
                                                         fontWeight: '800',
-                                                        color: validationCard.assignedPartner === 'Domex' || validationCard.assignedPartner === 'Pronto' ? '#ffffff' : '#000000',
+                                                        color: validationCard.assignedPartner === 'Domex' || validationCard.assignedPartner === 'SITREK' || validationCard.assignedPartner === 'Sitrek' || validationCard.assignedPartner === 'Pronto' ? '#ffffff' : '#000000',
                                                         textAlign: 'center'
                                                     }}>
                                                         <span style={{
-                                                            color: validationCard.assignedPartner === 'Domex' || validationCard.assignedPartner === 'Pronto'
+                                                            color: validationCard.assignedPartner === 'Domex' || validationCard.assignedPartner === 'SITREK' || validationCard.assignedPartner === 'Sitrek' || validationCard.assignedPartner === 'Pronto'
                                                                 ? '#ffffff'
                                                                 : '#121414ff'
                                                         }}></span>
@@ -688,7 +690,7 @@ export default function SecondScanTab({
                                                                     padding: '3px 10px',
                                                                     borderRadius: '4px',
                                                                     marginTop: '4px',
-                                                                    color: validationCard.assignedPartner === 'Domex' || validationCard.assignedPartner === 'Pronto' ? '#ffffff' : '#111827'
+                                                                    color: validationCard.assignedPartner === 'Domex' || validationCard.assignedPartner === 'SITREK' || validationCard.assignedPartner === 'Sitrek' || validationCard.assignedPartner === 'Pronto' ? '#ffffff' : '#111827'
                                                                 }}>
                                                                     Initial Manifest: <strong>"{validationCard.parcel.initialManifest}"</strong> → {validationCard.bagNumber} ({selectedSecondScanMawb})
                                                                 </div>
@@ -759,7 +761,7 @@ export default function SecondScanTab({
                                                     <td style={{ padding: '8px' }}>
                                                         {partner !== '-' ? (
                                                             <span style={{
-                                                                backgroundColor: partner === 'PickMe' ? '#ffcc00' : partner === 'Pronto' ? '#ea580c' : partner === 'Domex' ? '#7b0f1a' : '#4b5563',
+                                                                backgroundColor: partner === 'PickMe' ? '#ffcc00' : partner === 'Domex' ? '#7b0f1a' : partner === 'SITREK' || partner === 'Sitrek' ? '#0f2b6e' : partner === 'Pronto' ? '#ea580c' : '#4b5563',
                                                                 color: partner === 'PickMe' ? '#000000' : '#ffffff',
                                                                 padding: '3px 8px',
                                                                 borderRadius: '4px',

@@ -83,6 +83,7 @@ function resolvePartnerName(bag: any): string {
         const bn = (bag.bagNumber || '').toUpperCase();
         if (bn.includes('PICKME')) p = 'PickMe';
         else if (bn.includes('DOMEX')) p = 'Domex';
+        else if (bn.includes('SITREK')) p = 'SITREK';
         else if (bn.includes('PRONTO')) p = 'Pronto';
         else if (bag.parcels && bag.parcels.length > 0) {
             const firstP = bag.parcels[0];
@@ -92,6 +93,7 @@ function resolvePartnerName(bag: any): string {
     if (!p || p === 'ALL') return 'ALL PARTNERS';
     if (p === 'PickMe') return 'PickMe Courier';
     if (p === 'Domex') return 'Domex Express';
+    if (p === 'SITREK' || p === 'Sitrek') return 'SITREK Courier';
     if (p === 'Pronto') return 'Pronto Lanka';
     return p;
 }
@@ -116,7 +118,7 @@ export default function WorkstationDashboard() {
     // Preload partner logos into browser cache for instant rendering upon barcode scan
     useEffect(() => {
         if (typeof window !== 'undefined') {
-            const logoAssets = ['/domex_logo.webp', '/pick_me_logo.webp', '/domex_logo.png', '/pick_me_logo.png', '/logo.webp', '/logo.png'];
+            const logoAssets = ['/domex_logo.webp', '/pick_me_logo.webp', '/sitrek_logo.webp', '/domex_logo.png', '/pick_me_logo.png', '/sitrek_logo.png', '/logo.webp', '/logo.png'];
             logoAssets.forEach(src => {
                 const img = new Image();
                 img.src = src;
@@ -318,11 +320,11 @@ export default function WorkstationDashboard() {
         created_at?: string;
     }>>([]);
     const [createManifestModalOpen, setCreateManifestModalOpen] = useState(false);
-    const [selectedProviderForManifest, setSelectedProviderForManifest] = useState<'PickMe' | 'Domex' | 'Pronto'>('PickMe');
+    const [selectedProviderForManifest, setSelectedProviderForManifest] = useState<'PickMe' | 'Domex' | 'SITREK' | 'Pronto'>('PickMe');
     const [outboundBags, setOutboundBags] = useState<Array<{
         bagNumber: string;
         mawbRef: string;
-        targetPartner?: 'PickMe' | 'Domex' | 'Pronto' | 'ALL';
+        targetPartner?: 'PickMe' | 'Domex' | 'SITREK' | 'Pronto' | 'ALL';
         destinationHub?: string;
         status: 'OPEN' | 'SEALED';
         parcelCount: number;
@@ -334,7 +336,7 @@ export default function WorkstationDashboard() {
     }>>([]);
     const [activeOutboundBag, setActiveOutboundBag] = useState<any | null>(null);
     const [createBagModalOpen, setCreateBagModalOpen] = useState(false);
-    const [newBagPartner, setNewBagPartner] = useState<'PickMe' | 'Domex' | 'Pronto'>('PickMe');
+    const [newBagPartner, setNewBagPartner] = useState<'PickMe' | 'Domex' | 'SITREK' | 'Pronto'>('PickMe');
     const [newBagHub, setNewBagHub] = useState('');
     const [customBagNumber, setCustomBagNumber] = useState('');
     const [validationCard, setValidationCard] = useState<{
@@ -352,13 +354,13 @@ export default function WorkstationDashboard() {
     const [printOutboundBagLabelModal, setPrintOutboundBagLabelModal] = useState<any | null>(null);
 
     // Tab 2: Dispatch Verify
-    const [selectedBin, setSelectedBin] = useState<'PickMe' | 'Domex' | 'Pronto' | null>(null);
+    const [selectedBin, setSelectedBin] = useState<'PickMe' | 'Domex' | 'SITREK' | 'Pronto' | null>(null);
     const [verifyBarcodeInput, setVerifyBarcodeInput] = useState('');
     const [lastVerifyScanned, setLastVerifyScanned] = useState('');
     const [verifyScan, setVerifyScan] = useState<AllocationResponse | null>(null);
     const [verifyStatus, setVerifyStatus] = useState<'READY' | 'FETCHING' | 'MATCH' | 'MISMATCH' | 'ERROR'>('READY');
     const [verifyErrorMessage, setVerifyErrorMessage] = useState('');
-    const [binCounts, setBinCounts] = useState({ PickMe: 0, Domex: 0, Pronto: 0 });
+    const [binCounts, setBinCounts] = useState({ PickMe: 0, Domex: 0, SITREK: 0, Pronto: 0 });
     const [duplicateModal, setDuplicateModal] = useState<{
         barcode: string;
         skynetTrackingNumber?: string;
@@ -490,6 +492,7 @@ export default function WorkstationDashboard() {
         verified2ndScanDone: 0,
         pickMeScanned: 0,
         domexScanned: 0,
+        sitrekScanned: 0,
         prontoScanned: 0,
         otherScanned: 0
     });
@@ -502,6 +505,7 @@ export default function WorkstationDashboard() {
         verifiedCount: number;
         pickMeScanned: number;
         domexScanned: number;
+        sitrekScanned: number;
         prontoScanned: number;
     }>>([]);
     const [verifyScannedParcels, setVerifyScannedParcels] = useState<Array<{
@@ -518,7 +522,7 @@ export default function WorkstationDashboard() {
         serviceProvider: string;
         scannedAt: string;
     }>>([]);
-    const [verifyFilterTab, setVerifyFilterTab] = useState<'ALL' | 'UNSEALED' | 'VERIFIED' | 'PICKME' | 'DOMEX'>('ALL');
+    const [verifyFilterTab, setVerifyFilterTab] = useState<'ALL' | 'UNSEALED' | 'VERIFIED' | 'PICKME' | 'DOMEX' | 'SITREK'>('ALL');
     const [verifyParcelSearchQuery, setVerifyParcelSearchQuery] = useState('');
     const [verifyParcelsPage, setVerifyParcelsPage] = useState<number>(1);
     const [verifyParcelsRowsPerPage, setVerifyParcelsRowsPerPage] = useState<number>(15);
@@ -2173,12 +2177,14 @@ export default function WorkstationDashboard() {
             const spName = found.service_provider_name;
             if (spName.toLowerCase().includes('pickme')) return 'PickMe';
             if (spName.toLowerCase().includes('domex')) return 'Domex';
+            if (spName.toLowerCase().includes('sitrek')) return 'SITREK';
             if (spName.toLowerCase().includes('pronto')) return 'Pronto';
             return spName;
         }
         const upper = manifestRef.toUpperCase();
         if (upper.includes('PICKME')) return 'PickMe';
         if (upper.includes('DOMEX')) return 'Domex';
+        if (upper.includes('SITREK')) return 'SITREK';
         if (upper.includes('PRONTO')) return 'Pronto';
         return 'ALL';
     };
@@ -2683,9 +2689,9 @@ export default function WorkstationDashboard() {
                     allocationLog: data.allocationLog || `Parcel "${data.parcel?.trackingNumber || barcode}" (Initial Manifest: "${initialManifest}") allocated to Bag "${activeOutboundBag.bagNumber}" under LMD Manifest "${selectedSecondScanMawb}"`
                 });
 
-                const partner = data.assignedPartner as 'PickMe' | 'Domex' | 'Pronto';
-                if (partner === 'PickMe' || partner === 'Domex' || partner === 'Pronto') {
-                    setBinCounts((prev) => ({ ...prev, [partner]: prev[partner] + 1 }));
+                const partner = data.assignedPartner as 'PickMe' | 'Domex' | 'SITREK' | 'Pronto';
+                if (partner === 'PickMe' || partner === 'Domex' || partner === 'SITREK' || partner === 'Pronto') {
+                    setBinCounts((prev) => ({ ...prev, [partner]: ((prev as any)[partner] || 0) + 1 }));
                     setPendingDispatch((prev) => prev + 1);
                 }
 
@@ -2848,7 +2854,7 @@ export default function WorkstationDashboard() {
     const handleChangeLMD = () => {
         if (!currentScan) return;
         const cur = currentScan.assignedPartner;
-        const next = cur === 'PickMe' ? 'Domex' : cur === 'Domex' ? 'Pronto' : 'PickMe';
+        const next = cur === 'PickMe' ? 'Domex' : cur === 'Domex' ? 'SITREK' : cur === 'SITREK' ? 'Pronto' : 'PickMe';
         setCurrentScan({ ...currentScan, assignedPartner: next });
     };
 
@@ -2912,7 +2918,7 @@ export default function WorkstationDashboard() {
     const handleChangeLMDDamaged = () => {
         if (!damagedCurrentScan) return;
         const cur = damagedCurrentScan.assignedPartner;
-        const next = cur === 'PickMe' ? 'Domex' : cur === 'Domex' ? 'Pronto' : 'PickMe';
+        const next = cur === 'PickMe' ? 'Domex' : cur === 'Domex' ? 'SITREK' : cur === 'SITREK' ? 'Pronto' : 'PickMe';
         setDamagedCurrentScan({ ...damagedCurrentScan, assignedPartner: next });
     };
 

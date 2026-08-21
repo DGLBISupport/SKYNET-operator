@@ -115,7 +115,7 @@ export default function DispatchVerifyTab({
                             </div>
 
                             {/* Daily Progress Stats Cards Grid — Styled matching Parcel Operations Dashboard */}
-                            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: '14px', marginBottom: '20px', fontFamily: 'var(--font-sans, "Inter", "Inter Fallback", sans-serif)' }}>
+                            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(6, 1fr)', gap: '14px', marginBottom: '20px', fontFamily: 'var(--font-sans, "Inter", "Inter Fallback", sans-serif)' }}>
                                 {/* 1. Daily Total Scanned All */}
                                 <div
                                     onMouseOver={(e) => { e.currentTarget.style.outline = '2px solid #e21b22'; e.currentTarget.style.outlineOffset = '-2px'; }}
@@ -245,6 +245,32 @@ export default function DispatchVerifyTab({
                                         Scanned Partner
                                     </div>
                                 </div>
+
+                                {/* 6. SITREK Allocated (Scanned) */}
+                                <div
+                                    onMouseOver={(e) => { e.currentTarget.style.outline = '2px solid #0f2b6e'; e.currentTarget.style.outlineOffset = '-2px'; }}
+                                    onMouseOut={(e) => { e.currentTarget.style.outline = 'none'; }}
+                                    style={{
+                                        backgroundColor: '#ffffff',
+                                        border: '1px solid #e5e7eb',
+                                        borderRadius: '10px',
+                                        padding: '14px 10px',
+                                        textAlign: 'center',
+                                        boxShadow: '0 1px 3px rgba(0,0,0,0.05)',
+                                        cursor: 'pointer',
+                                        transition: 'all 0.15s ease-in-out'
+                                    }}
+                                >
+                                    <div style={{ fontSize: '10.5px', fontWeight: '700', color: '#6b7280', letterSpacing: '0.5px', fontFamily: 'var(--font-sans, "Inter", "Inter Fallback", sans-serif)' }}>
+                                        SITREK Allocated
+                                    </div>
+                                    <div style={{ fontSize: '26px', fontWeight: '800', color: '#0f2b6e', marginTop: '4px', fontFamily: 'var(--font-sans, "Inter", "Inter Fallback", sans-serif)' }}>
+                                        {verifyLoadingStats ? '...' : (verifyDailyStats as any).sitrekScanned || 0}
+                                    </div>
+                                    <div style={{ fontSize: '11px', color: '#6b7280', marginTop: '4px', fontFamily: 'var(--font-sans, "Inter", "Inter Fallback", sans-serif)' }}>
+                                        Scanned Partner
+                                    </div>
+                                </div>
                             </div>
 
                             {/* Individual Scanned Parcels Verification Table */}
@@ -276,7 +302,7 @@ export default function DispatchVerifyTab({
                                             }}
                                         />
                                         <div style={{ display: 'flex', backgroundColor: '#f1f5f9', borderRadius: '6px', padding: '2px' }}>
-                                            {(['ALL', 'UNSEALED', 'VERIFIED', 'PICKME', 'DOMEX'] as const).map(tabKey => {
+                                            {(['ALL', 'UNSEALED', 'VERIFIED', 'PICKME', 'DOMEX', 'SITREK'] as const).map(tabKey => {
                                                 const active = verifyFilterTab === tabKey;
                                                 return (
                                                     <button
@@ -338,6 +364,7 @@ export default function DispatchVerifyTab({
                                                     if (verifyFilterTab === 'VERIFIED') return p.verified;
                                                     if (verifyFilterTab === 'PICKME') return (p.serviceProvider || '').toLowerCase() === 'pickme';
                                                     if (verifyFilterTab === 'DOMEX') return (p.serviceProvider || '').toLowerCase() === 'domex';
+                                                    if (verifyFilterTab === 'SITREK') return (p.serviceProvider || '').toLowerCase() === 'sitrek';
                                                     return true;
                                                 });
 

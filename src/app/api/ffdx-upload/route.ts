@@ -575,6 +575,9 @@ export async function POST(request: Request) {
         } else if (spUpper.includes('DOMEX') || refUpper.includes('DOMEX')) {
             receiverCode = 'DOMEX';
             receiverName = 'Domex';
+        } else if (spUpper.includes('SITREK') || refUpper.includes('SITREK')) {
+            receiverCode = 'SITREK';
+            receiverName = 'SITREK';
         } else if (spUpper.includes('PRONTO') || refUpper.includes('PRONTO')) {
             receiverCode = 'PRONTO';
             receiverName = 'Pronto';

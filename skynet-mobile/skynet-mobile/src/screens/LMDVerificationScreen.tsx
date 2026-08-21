@@ -57,6 +57,15 @@ function PartnerLogo({ partnerName }: { partnerName: string }) {
       />
     );
   }
+  if (lower.includes('sitrek')) {
+    return (
+      <Image
+        source={require('../../assets/sitrek_logo.png')}
+        style={styles.partnerLogoImage}
+        resizeMode="contain"
+      />
+    );
+  }
   if (lower.includes('skynet')) {
     return (
       <Image

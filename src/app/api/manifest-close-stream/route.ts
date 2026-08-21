@@ -645,6 +645,7 @@ export async function GET(request: Request) {
                 const spUpper = serviceProviderName.toUpperCase();
                 if (spUpper.includes('PICKME') || refUpper.includes('PICKME')) { receiverCode = 'PICKME'; receiverName = 'PickMe'; }
                 else if (spUpper.includes('DOMEX') || refUpper.includes('DOMEX')) { receiverCode = 'DOMEX'; receiverName = 'Domex'; }
+                else if (spUpper.includes('SITREK') || refUpper.includes('SITREK')) { receiverCode = 'SITREK'; receiverName = 'SITREK'; }
                 else if (spUpper.includes('PRONTO') || refUpper.includes('PRONTO')) { receiverCode = 'PRONTO'; receiverName = 'Pronto'; }
                 else {
                     try {

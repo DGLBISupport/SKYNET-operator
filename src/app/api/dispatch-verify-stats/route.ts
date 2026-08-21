@@ -128,12 +128,13 @@ export async function GET(request: Request) {
         };
 
         // Build robust provider ID / Code / Name -> normalized partner name map
-        const providerIdMap: Record<string | number, string> = { 1: 'PickMe', 2: 'Domex' };
+        const providerIdMap: Record<string | number, string> = { 1: 'PickMe', 2: 'Domex', 3: 'SITREK' };
         providerData.forEach((sp: any) => {
             const rawName = (sp.name || sp.code || '').trim();
             let norm = 'Other';
             if (rawName.toLowerCase().includes('pickme')) norm = 'PickMe';
             else if (rawName.toLowerCase().includes('domex')) norm = 'Domex';
+            else if (rawName.toLowerCase().includes('sitrek')) norm = 'SITREK';
             else if (rawName.toLowerCase().includes('pronto')) norm = 'Pronto';
             
             if (sp.id) {
@@ -154,6 +155,7 @@ export async function GET(request: Request) {
 
             if (lowerVal.includes('pickme') || lowerVal === '1') return 'PickMe';
             if (lowerVal.includes('domex') || lowerVal === '2') return 'Domex';
+            if (lowerVal.includes('sitrek') || lowerVal === '3') return 'SITREK';
             if (lowerVal.includes('pronto')) return 'Pronto';
 
             return 'Other';
@@ -248,6 +250,7 @@ export async function GET(request: Request) {
         let verified2ndScanDone = 0;
         let pickMeScanned = 0;
         let domexScanned = 0;
+        let sitrekScanned = 0;
         let prontoScanned = 0;
         let otherScanned = 0;
 
@@ -276,6 +279,7 @@ export async function GET(request: Request) {
             verifiedCount: number;
             pickMeScanned: number;
             domexScanned: number;
+            sitrekScanned: number;
             prontoScanned: number;
         }>();
 
@@ -305,6 +309,7 @@ export async function GET(request: Request) {
                     verifiedCount: 0,
                     pickMeScanned: 0,
                     domexScanned: 0,
+                    sitrekScanned: 0,
                     prontoScanned: 0
                 });
             }
@@ -354,6 +359,7 @@ export async function GET(request: Request) {
 
                         if (partnerName === 'PickMe') pickMeScanned++;
                         else if (partnerName === 'Domex') domexScanned++;
+                        else if (partnerName === 'SITREK') sitrekScanned++;
                         else if (partnerName === 'Pronto') prontoScanned++;
                         else otherScanned++;
 
@@ -365,6 +371,7 @@ export async function GET(request: Request) {
 
                         if (partnerName === 'PickMe') group.pickMeScanned++;
                         else if (partnerName === 'Domex') group.domexScanned++;
+                        else if (partnerName === 'SITREK') group.sitrekScanned++;
                         else if (partnerName === 'Pronto') group.prontoScanned++;
 
                         // Resolve Outbound Bag & Outbound Manifest
@@ -488,6 +495,7 @@ export async function GET(request: Request) {
                 verifiedCount: g.verifiedCount,
                 pickMeScanned: g.pickMeScanned,
                 domexScanned: g.domexScanned,
+                sitrekScanned: g.sitrekScanned,
                 prontoScanned: g.prontoScanned
             }))
             .filter(g => g.dailyScanned > 0 || g.unsealedCount > 0 || g.verifiedCount > 0 || g.outboundManifest !== 'Pending Outbound')
@@ -518,6 +526,7 @@ export async function GET(request: Request) {
                 verified2ndScanDone,
                 pickMeScanned,
                 domexScanned,
+                sitrekScanned,
                 prontoScanned,
                 otherScanned
             },

@@ -223,6 +223,7 @@ export default function BoxUnsealingScreen() {
     if (!partnerName) return '#ffcc00';
     const lower = partnerName.toLowerCase();
     if (lower.includes('domex')) return '#7b0f1a';
+    if (lower.includes('sitrek')) return '#0f2b6e';
     if (lower.includes('pronto')) return '#ea580c';
     return '#ffcc00';
   };
@@ -230,7 +231,7 @@ export default function BoxUnsealingScreen() {
   const getPartnerTextColor = (partnerName?: string) => {
     if (!partnerName) return '#000000';
     const lower = partnerName.toLowerCase();
-    if (lower.includes('domex') || lower.includes('pronto')) return '#ffffff';
+    if (lower.includes('domex') || lower.includes('sitrek') || lower.includes('pronto')) return '#ffffff';
     return '#000000';
   };
 
@@ -250,6 +251,15 @@ export default function BoxUnsealingScreen() {
       return (
         <Image
           source={require('../../assets/domex_logo.png')}
+          style={styles.partnerLogoImage}
+          resizeMode="contain"
+        />
+      );
+    }
+    if (lower.includes('sitrek')) {
+      return (
+        <Image
+          source={require('../../assets/sitrek_logo.png')}
           style={styles.partnerLogoImage}
           resizeMode="contain"
         />

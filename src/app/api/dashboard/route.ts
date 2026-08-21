@@ -99,12 +99,13 @@ export async function GET(request: Request) {
         });
 
         // Build Service Provider Map (id -> Normalized Name)
-        const providerMap: Record<number, string> = { 1: 'PickMe', 2: 'Domex' };
+        const providerMap: Record<number, string> = { 1: 'PickMe', 2: 'Domex', 3: 'SITREK' };
         spData.forEach((sp: any) => {
             const rawName = (sp.name || sp.code || '').trim();
             let normName = rawName || 'Other';
             if (rawName.toLowerCase().includes('pickme')) normName = 'PickMe';
             else if (rawName.toLowerCase().includes('domex')) normName = 'Domex';
+            else if (rawName.toLowerCase().includes('sitrek')) normName = 'SITREK';
             else if (rawName.toLowerCase().includes('pronto')) normName = 'Pronto';
             providerMap[sp.id] = normName;
         });
@@ -157,12 +158,13 @@ export async function GET(request: Request) {
         // 1. Shipments Metrics & Structured List
         let totalReceived = shipData.length;
         let totalSorted = 0;
-        let partnerDistribution: Record<string, number> = { PickMe: 0, Domex: 0, Pronto: 0, Other: 0 };
+        let partnerDistribution: Record<string, number> = { PickMe: 0, Domex: 0, SITREK: 0, Pronto: 0, Other: 0 };
 
         // Detailed per-partner metrics map
         const partnerDetailsMap: Record<string, { partnerName: string; totalParcels: number; allocatedParcels: number; pendingParcels: number; totalBags: number }> = {
             PickMe: { partnerName: 'PickMe', totalParcels: 0, allocatedParcels: 0, pendingParcels: 0, totalBags: 0 },
             Domex: { partnerName: 'Domex', totalParcels: 0, allocatedParcels: 0, pendingParcels: 0, totalBags: 0 },
+            SITREK: { partnerName: 'SITREK', totalParcels: 0, allocatedParcels: 0, pendingParcels: 0, totalBags: 0 },
             Pronto: { partnerName: 'Pronto', totalParcels: 0, allocatedParcels: 0, pendingParcels: 0, totalBags: 0 },
             Other: { partnerName: 'Other', totalParcels: 0, allocatedParcels: 0, pendingParcels: 0, totalBags: 0 }
         };
@@ -199,6 +201,7 @@ export async function GET(request: Request) {
             let pName = 'Other';
             if (rawPartner.toLowerCase().includes('pickme')) pName = 'PickMe';
             else if (rawPartner.toLowerCase().includes('domex')) pName = 'Domex';
+            else if (rawPartner.toLowerCase().includes('sitrek')) pName = 'SITREK';
             else if (rawPartner.toLowerCase().includes('pronto')) pName = 'Pronto';
             else if (partnerDetailsMap[rawPartner]) pName = rawPartner;
 
@@ -250,7 +253,7 @@ export async function GET(request: Request) {
         let totalBagsCreated = bagData.length;
         let openBags = 0;
         let sealedBags = 0;
-        let bagPartnerCounts: Record<string, number> = { PickMe: 0, Domex: 0, Pronto: 0, General: 0 };
+        let bagPartnerCounts: Record<string, number> = { PickMe: 0, Domex: 0, SITREK: 0, Pronto: 0, General: 0 };
 
         const bagsList = bagData.map(b => {
             const isSealed = b.status === 'SEALED' || b.status === 'CLOSED';
@@ -260,6 +263,7 @@ export async function GET(request: Request) {
             let p = b.target_partner || 'General';
             if (p.toLowerCase().includes('pickme')) p = 'PickMe';
             else if (p.toLowerCase().includes('domex')) p = 'Domex';
+            else if (p.toLowerCase().includes('sitrek')) p = 'SITREK';
             else if (p.toLowerCase().includes('pronto')) p = 'Pronto';
 
             if (bagPartnerCounts[p] !== undefined) bagPartnerCounts[p]++;
