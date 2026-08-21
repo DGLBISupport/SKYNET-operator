@@ -884,7 +884,6 @@ export default function DashboardTab({
                                                             reportTitle: 'Operational Exceptions & Discrepancies Log',
                                                             mawb: activeMawb,
                                                             partner: 'N/A (Exceptions)',
-                                                            search: dashSearchQuery,
                                                             totalRecords: exportList.length
                                                         }
                                                     )}
