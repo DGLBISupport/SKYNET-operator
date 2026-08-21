@@ -1,5 +1,39 @@
 'use client';
 import React from 'react';
+
+// ── Excel Export Helper ──────────────────────────────────────────────────────
+interface ExportMeta { reportTitle: string; mawb: string; partner: string; totalRecords: number; }
+function exportToExcel(headers: string[], rows: (string | number)[][], filename: string, meta: ExportMeta) {
+    const escape = (val: any) => {
+        const str = val === null || val === undefined ? '' : String(val);
+        return str.includes(',') || str.includes('"') || str.includes('\n')
+            ? `"${str.replace(/"/g, '""')}"`
+            : str;
+    };
+    // ── Filter summary block prepended to the top of the sheet ──
+    const metaRows = [
+        [`SKYNET PARCEL OPERATIONS — ${meta.reportTitle.toUpperCase()}`],
+        [`Generated At:,${new Date().toLocaleString('en-GB')}`],
+        [`MAWB / Manifest Filter:,${meta.mawb}`],
+        [`Courier Partner Filter:,${meta.partner}`],
+        [`Total Records Exported:,${meta.totalRecords}`],
+        [],   // blank spacer row
+    ];
+    const csvContent = [
+        ...metaRows.map(r => r.map(escape).join(',')),
+        headers.map(escape).join(','),
+        ...rows.map(row => row.map(escape).join(','))
+    ].join('\r\n');
+    const blob = new Blob(['\uFEFF' + csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.setAttribute('download', filename);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+}
 import PaginationControl from '@/app/components/PaginationControl';
 
 export default function DashboardTab({
@@ -376,10 +410,76 @@ export default function DashboardTab({
                                     ═══════════════════════════════════════════════════════ */}
                         {dashboardSubTab === 'total_received' && (
                             <div style={card}>
-                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', flexWrap: 'wrap', gap: '8px' }}>
                                     <div style={label}>Total Received Inbound Parcels</div>
-                                    <div style={{ fontSize: '12px', color: '#6b7280' }}>
-                                        Total Received: <strong>{totalRec} parcels</strong>
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
+                                        <div style={{ fontSize: '12px', color: '#6b7280' }}>
+                                            Total Received: <strong>{totalRec} parcels</strong>
+                                        </div>
+                                        {(() => {
+                                            const exportList = filteredParcels.filter((p: any) => {
+                                                const q = dashSearchQuery.toLowerCase();
+                                                const matchQ = !q || p.referenceNumber.toLowerCase().includes(q) || p.senderReference.toLowerCase().includes(q) || (p.mawbReference && p.mawbReference.toLowerCase().includes(q));
+                                                const matchP = dashPartnerFilter === 'ALL' || p.deliveryAgentCode === dashPartnerFilter;
+                                                return matchQ && matchP;
+                                            });
+                                            const partnerSuffix = dashPartnerFilter !== 'ALL' ? `_${dashPartnerFilter}` : '_AllPartners';
+                                            const searchSuffix = dashSearchQuery ? `_Search-${dashSearchQuery.replace(/[^a-zA-Z0-9]/g, '')}` : '';
+                                            return (
+                                                <button
+                                                     onClick={() => {
+                                                        // Force Excel to treat long numeric strings as text (prevents scientific notation)
+                                                        const txt = (v: any) => v != null && v !== '' ? `="${String(v)}"` : '-';
+                                                        // Only append 'g' if weight has no existing unit (e.g. keep '10270 kg' as-is, convert bare '499' to '499g')
+                                                        const fmtW = (v: any) => {
+                                                            if (v == null || v === '') return '-';
+                                                            const s = String(v).trim();
+                                                            if (/[a-zA-Z]/.test(s)) return s; // already has a unit — keep as-is
+                                                            const n = s.replace(/[^0-9.]/g, '').trim();
+                                                            return n ? `${n}g` : '-';
+                                                        };
+                                                        exportToExcel(
+                                                        ['#', 'Parcel Reference', 'Temu Barcode', 'Courier Partner', 'Weight (g)', 'Allocation Status', 'Received Date'],
+                                                        exportList.map((p: any, i: number) => [
+                                                            i + 1,
+                                                            txt(p.referenceNumber),
+                                                            txt(p.senderReference),
+                                                            p.deliveryAgentCode,
+                                                            fmtW(p.weight),
+                                                            p.allocationStage === '2ND_SCAN_DONE' ? '2nd Scan Done' : p.allocationStage === '1ST_SCAN_DONE' ? '1st Scan Done' : 'Pending 1st Scan',
+                                                            p.createdAt && !isNaN(new Date(p.createdAt).getTime()) ? new Date(p.createdAt).toLocaleDateString('en-GB') : '-'
+                                                        ]),
+                                                        `Total_Received${partnerSuffix}${searchSuffix}_${activeMawb}_${new Date().toISOString().slice(0, 10)}.csv`,
+                                                        {
+                                                            reportTitle: 'Total Received Inbound Parcels',
+                                                            mawb: activeMawb,
+                                                            partner: dashPartnerFilter === 'ALL' ? 'All Partners' : dashPartnerFilter,
+                                                            totalRecords: exportList.length
+                                                        }
+                                                        );
+                                                    }}
+                                                    style={{
+                                                        display: 'inline-flex', alignItems: 'center', gap: '6px',
+                                                        backgroundColor: '#16a34a', color: '#ffffff',
+                                                        border: 'none', borderRadius: '6px',
+                                                        padding: '7px 14px', fontSize: '12px', fontWeight: '700',
+                                                        cursor: 'pointer', whiteSpace: 'nowrap',
+                                                        boxShadow: '0 1px 4px rgba(22,163,74,0.25)',
+                                                        transition: 'background 0.15s'
+                                                    }}
+                                                    onMouseOver={e => (e.currentTarget.style.backgroundColor = '#15803d')}
+                                                    onMouseOut={e => (e.currentTarget.style.backgroundColor = '#16a34a')}
+                                                    title={`Export ${exportList.length} records — Partner: ${dashPartnerFilter}, MAWB: ${activeMawb}`}
+                                                >
+                                                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                                                        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                                                        <polyline points="7 10 12 15 17 10"/>
+                                                        <line x1="12" y1="15" x2="12" y2="3"/>
+                                                    </svg>
+                                                    Export Excel ({exportList.length})
+                                                </button>
+                                            );
+                                        })()}
                                     </div>
                                 </div>
 
@@ -462,10 +562,75 @@ export default function DashboardTab({
                                     ═══════════════════════════════════════════════════════ */}
                         {dashboardSubTab === 'parcels_sorted' && (
                             <div style={card}>
-                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', flexWrap: 'wrap', gap: '8px' }}>
                                     <div style={label}>Parcels Sorted & Allocated in Outbound Bags</div>
-                                    <div style={{ fontSize: '12px', color: '#6b7280' }}>
-                                        Total Allocated: <strong>{totalSort} parcels</strong>
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
+                                        <div style={{ fontSize: '12px', color: '#6b7280' }}>
+                                            Total Allocated: <strong>{totalSort} parcels</strong>
+                                        </div>
+                                        {(() => {
+                                            const exportList = filteredParcels.filter((p: any) => p.isSorted).filter((p: any) => {
+                                                const q = dashSearchQuery.toLowerCase();
+                                                const matchQ = !q || p.referenceNumber.toLowerCase().includes(q) || p.senderReference.toLowerCase().includes(q) || (p.bagNumber && p.bagNumber.toLowerCase().includes(q));
+                                                const matchP = dashPartnerFilter === 'ALL' || p.deliveryAgentCode === dashPartnerFilter;
+                                                return matchQ && matchP;
+                                            });
+                                            const partnerSuffix = dashPartnerFilter !== 'ALL' ? `_${dashPartnerFilter}` : '_AllPartners';
+                                            const searchSuffix = dashSearchQuery ? `_Search-${dashSearchQuery.replace(/[^a-zA-Z0-9]/g, '')}` : '';
+                                            return (
+                                                <button
+                                                    onClick={() => {
+                                                        const txt = (v: any) => v != null && v !== '' ? `="${String(v)}"` : '-';
+                                                        const fmtW = (v: any) => {
+                                                            if (v == null || v === '') return '-';
+                                                            const s = String(v).trim();
+                                                            if (/[a-zA-Z]/.test(s)) return s;
+                                                            const n = s.replace(/[^0-9.]/g, '').trim();
+                                                            return n ? `${n}g` : '-';
+                                                        };
+                                                        exportToExcel(
+                                                        ['#', 'Parcel Reference', 'Temu Barcode', 'Assigned Bag #', 'Courier Partner', 'Weight (g)', 'Allocation Status', 'Received Date'],
+                                                        exportList.map((p: any, i: number) => [
+                                                            i + 1,
+                                                            txt(p.referenceNumber),
+                                                            txt(p.senderReference),
+                                                            txt(p.bagNumber || 'Allocated'),
+                                                            p.deliveryAgentCode,
+                                                            fmtW(p.weight),
+                                                            p.allocationStage === '2ND_SCAN_DONE' ? '2nd Scan Done' : '1st Scan Done',
+                                                            p.createdAt && !isNaN(new Date(p.createdAt).getTime()) ? new Date(p.createdAt).toLocaleDateString('en-GB') : '-'
+                                                        ]),
+                                                        `Parcels_Sorted${partnerSuffix}${searchSuffix}_${activeMawb}_${new Date().toISOString().slice(0, 10)}.csv`,
+                                                        {
+                                                            reportTitle: 'Parcels Sorted & Allocated in Outbound Bags',
+                                                            mawb: activeMawb,
+                                                            partner: dashPartnerFilter === 'ALL' ? 'All Partners' : dashPartnerFilter,
+                                                            totalRecords: exportList.length
+                                                        }
+                                                        );
+                                                    }}
+                                                    style={{
+                                                        display: 'inline-flex', alignItems: 'center', gap: '6px',
+                                                        backgroundColor: '#16a34a', color: '#ffffff',
+                                                        border: 'none', borderRadius: '6px',
+                                                        padding: '7px 14px', fontSize: '12px', fontWeight: '700',
+                                                        cursor: 'pointer', whiteSpace: 'nowrap',
+                                                        boxShadow: '0 1px 4px rgba(22,163,74,0.25)',
+                                                        transition: 'background 0.15s'
+                                                    }}
+                                                    onMouseOver={e => (e.currentTarget.style.backgroundColor = '#15803d')}
+                                                    onMouseOut={e => (e.currentTarget.style.backgroundColor = '#16a34a')}
+                                                    title={`Export ${exportList.length} records — Partner: ${dashPartnerFilter}, MAWB: ${activeMawb}`}
+                                                >
+                                                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                                                        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                                                        <polyline points="7 10 12 15 17 10"/>
+                                                        <line x1="12" y1="15" x2="12" y2="3"/>
+                                                    </svg>
+                                                    Export Excel ({exportList.length})
+                                                </button>
+                                            );
+                                        })()}
                                     </div>
                                 </div>
 
@@ -547,10 +712,74 @@ export default function DashboardTab({
                                     ═══════════════════════════════════════════════════════ */}
                         {dashboardSubTab === 'pending_parcels' && (
                             <div style={card}>
-                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', flexWrap: 'wrap', gap: '8px' }}>
                                     <div style={label}>Pending Parcels Awaiting Sorting</div>
-                                    <div style={{ fontSize: '12px', color: '#6b7280' }}>
-                                        Total Pending: <strong>{pendingParc} parcels</strong>
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
+                                        <div style={{ fontSize: '12px', color: '#6b7280' }}>
+                                            Total Pending: <strong>{pendingParc} parcels</strong>
+                                        </div>
+                                        {(() => {
+                                            const exportList = filteredParcels.filter((p: any) => !p.isSorted).filter((p: any) => {
+                                                const q = dashSearchQuery.toLowerCase();
+                                                const matchQ = !q || p.referenceNumber.toLowerCase().includes(q) || p.senderReference.toLowerCase().includes(q);
+                                                const matchP = dashPartnerFilter === 'ALL' || p.deliveryAgentCode === dashPartnerFilter;
+                                                return matchQ && matchP;
+                                            });
+                                            const partnerSuffix = dashPartnerFilter !== 'ALL' ? `_${dashPartnerFilter}` : '_AllPartners';
+                                            const searchSuffix = dashSearchQuery ? `_Search-${dashSearchQuery.replace(/[^a-zA-Z0-9]/g, '')}` : '';
+                                            return (
+                                                <button
+                                                    onClick={() => {
+                                                        const txt = (v: any) => v != null && v !== '' ? `="${String(v)}"` : '-';
+                                                        const fmtW = (v: any) => {
+                                                            if (v == null || v === '') return '-';
+                                                            const s = String(v).trim();
+                                                            if (/[a-zA-Z]/.test(s)) return s; // already has a unit — keep as-is
+                                                            const n = s.replace(/[^0-9.]/g, '').trim();
+                                                            return n ? `${n}g` : '-';
+                                                        };
+                                                        exportToExcel(
+                                                        ['#', 'Parcel Reference', 'Temu Barcode', 'Target Partner', 'Weight (g)', 'Allocation Status', 'Received Date'],
+                                                        exportList.map((p: any, i: number) => [
+                                                            i + 1,
+                                                            txt(p.referenceNumber),
+                                                            txt(p.senderReference),
+                                                            p.deliveryAgentCode,
+                                                            fmtW(p.weight),
+                                                            'Pending 1st Scan',
+                                                            p.createdAt && !isNaN(new Date(p.createdAt).getTime()) ? new Date(p.createdAt).toLocaleDateString('en-GB') : '-'
+                                                        ]),
+                                                        `Pending_Parcels${partnerSuffix}${searchSuffix}_${activeMawb}_${new Date().toISOString().slice(0, 10)}.csv`,
+                                                        {
+                                                            reportTitle: 'Pending Parcels Awaiting Sorting',
+                                                            mawb: activeMawb,
+                                                            partner: dashPartnerFilter === 'ALL' ? 'All Partners' : dashPartnerFilter,
+                                                            totalRecords: exportList.length
+                                                        }
+                                                        );
+                                                    }}
+                                                    style={{
+                                                        display: 'inline-flex', alignItems: 'center', gap: '6px',
+                                                        backgroundColor: '#16a34a', color: '#ffffff',
+                                                        border: 'none', borderRadius: '6px',
+                                                        padding: '7px 14px', fontSize: '12px', fontWeight: '700',
+                                                        cursor: 'pointer', whiteSpace: 'nowrap',
+                                                        boxShadow: '0 1px 4px rgba(22,163,74,0.25)',
+                                                        transition: 'background 0.15s'
+                                                    }}
+                                                    onMouseOver={e => (e.currentTarget.style.backgroundColor = '#15803d')}
+                                                    onMouseOut={e => (e.currentTarget.style.backgroundColor = '#16a34a')}
+                                                    title={`Export ${exportList.length} records — Partner: ${dashPartnerFilter}, MAWB: ${activeMawb}`}
+                                                >
+                                                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                                                        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                                                        <polyline points="7 10 12 15 17 10"/>
+                                                        <line x1="12" y1="15" x2="12" y2="3"/>
+                                                    </svg>
+                                                    Export Excel ({exportList.length})
+                                                </button>
+                                            );
+                                        })()}
                                     </div>
                                 </div>
 
@@ -625,10 +854,62 @@ export default function DashboardTab({
                                     ═══════════════════════════════════════════════════════ */}
                         {dashboardSubTab === 'exceptions' && (
                             <div style={card}>
-                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', flexWrap: 'wrap', gap: '8px' }}>
                                     <div style={label}>Operational Exceptions & Discrepancies Log</div>
-                                    <div style={{ fontSize: '12px', color: '#6b7280' }}>
-                                        Total Exceptions: <strong>{totalExc}</strong>
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
+                                        <div style={{ fontSize: '12px', color: '#6b7280' }}>
+                                            Total Exceptions: <strong>{totalExc}</strong>
+                                        </div>
+                                        {(() => {
+                                            const exportList = filteredExceptions.filter((ex: any) => {
+                                                const q = dashSearchQuery.toLowerCase();
+                                                return !q || ex.type.toLowerCase().includes(q) || ex.refNumber.toLowerCase().includes(q) || ex.details.toLowerCase().includes(q);
+                                            });
+                                            const searchSuffix = dashSearchQuery ? `_Search-${dashSearchQuery.replace(/[^a-zA-Z0-9]/g, '')}` : '';
+                                            return (
+                                                <button
+                                                    onClick={() => exportToExcel(
+                                                        ['#', 'Exception Type', 'Ref / Barcode / Bag #', 'Details', 'Scanned / Expected', 'Reported By', 'Timestamp'],
+                                                        exportList.map((ex: any, i: number) => [
+                                                            i + 1,
+                                                            ex.type,
+                                                            ex.refNumber,
+                                                            ex.details,
+                                                            ex.scannedVsExpected,
+                                                            ex.reportedBy,
+                                                            ex.createdAt ? new Date(ex.createdAt).toLocaleString() : '-'
+                                                        ]),
+                                                        `Exceptions${searchSuffix}_${activeMawb}_${new Date().toISOString().slice(0, 10)}.csv`,
+                                                        {
+                                                            reportTitle: 'Operational Exceptions & Discrepancies Log',
+                                                            mawb: activeMawb,
+                                                            partner: 'N/A (Exceptions)',
+                                                            search: dashSearchQuery,
+                                                            totalRecords: exportList.length
+                                                        }
+                                                    )}
+                                                    style={{
+                                                        display: 'inline-flex', alignItems: 'center', gap: '6px',
+                                                        backgroundColor: '#16a34a', color: '#ffffff',
+                                                        border: 'none', borderRadius: '6px',
+                                                        padding: '7px 14px', fontSize: '12px', fontWeight: '700',
+                                                        cursor: 'pointer', whiteSpace: 'nowrap',
+                                                        boxShadow: '0 1px 4px rgba(22,163,74,0.25)',
+                                                        transition: 'background 0.15s'
+                                                    }}
+                                                    onMouseOver={e => (e.currentTarget.style.backgroundColor = '#15803d')}
+                                                    onMouseOut={e => (e.currentTarget.style.backgroundColor = '#16a34a')}
+                                                    title={`Export ${exportList.length} exceptions — MAWB: ${activeMawb}${dashSearchQuery ? ', Search: ' + dashSearchQuery : ''}`}
+                                                >
+                                                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                                                        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                                                        <polyline points="7 10 12 15 17 10"/>
+                                                        <line x1="12" y1="15" x2="12" y2="3"/>
+                                                    </svg>
+                                                    Export Excel ({exportList.length})
+                                                </button>
+                                            );
+                                        })()}
                                     </div>
                                 </div>
 
