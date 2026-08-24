@@ -1,5 +1,7 @@
 'use client';
 import React from 'react';
+import * as XLSX from 'xlsx';
+import { toast } from 'sonner';
 import PaginationControl from '@/app/components/PaginationControl';
 
 export default function ManifestTrackingTab({
@@ -19,9 +21,361 @@ export default function ManifestTrackingTab({
     setManifestTrackingStatusFilter,
     status
 }: any) {
+    // Helper to sanitize and avoid duplicate sheet names in XLSX (max 31 chars)
+    const getUniqueSheetName = (name: string, fallback: string, existingNames: Set<string>): string => {
+        let clean = (name || '').replace(/[/\\?%*:|"[\]]/g, '_').trim().slice(0, 31);
+        if (!clean) clean = fallback.slice(0, 31);
+        let uniqueName = clean;
+        let counter = 1;
+        while (existingNames.has(uniqueName.toLowerCase())) {
+            const suffix = `_${counter}`;
+            uniqueName = `${clean.slice(0, 31 - suffix.length)}${suffix}`;
+            counter++;
+        }
+        existingNames.add(uniqueName.toLowerCase());
+        return uniqueName;
+    };
+
+    // Export a single Outbound Manifest to Excel (includes Manifest Summary, Bags Breakdown, Whole Manifest All Parcels, and individual sheets for each bag)
+    const exportManifestToExcel = (manifest: any) => {
+        try {
+            const wb = XLSX.utils.book_new();
+            const existingSheetNames = new Set<string>();
+
+            const manifestBags = manifest.bags || [];
+            
+            // Collect all parcels in this manifest
+            const allParcels: any[] = [];
+            manifestBags.forEach((bag: any) => {
+                (bag.parcels || []).forEach((p: any) => {
+                    allParcels.push({
+                        ...p,
+                        outbound_manifest: manifest.manifest_reference,
+                        outbound_bag: bag.bag_number,
+                        bag_status: bag.status,
+                        bag_partner: bag.target_partner,
+                        bag_hub: bag.destination_hub
+                    });
+                });
+            });
+
+            const totalParcelsCount = manifest.total_parcels || allParcels.length;
+            const totalWeight = manifestBags.reduce((sum: number, b: any) => {
+                const bWeight = Number(b.total_weight) || (b.parcels || []).reduce((pSum: number, p: any) => pSum + (Number(p.weight) || 0), 0);
+                return sum + bWeight;
+            }, 0);
+
+            // --- SHEET 1: Manifest Overview & Summary ---
+            const manifestSummaryRows: any[] = [
+                { 'Field': 'Manifest Reference', 'Value': manifest.manifest_reference || 'N/A' },
+                { 'Field': 'Service Provider / Partner', 'Value': manifest.service_provider_name || 'N/A' },
+                { 'Field': 'Manifest Status', 'Value': manifest.status || 'OPEN' },
+                { 'Field': 'Total Bags', 'Value': manifestBags.length || manifest.total_bags || 0 },
+                { 'Field': 'Total Parcels', 'Value': totalParcelsCount },
+                { 'Field': 'Total Weight (kg)', 'Value': Math.round(totalWeight * 100) / 100 },
+                { 'Field': 'Created / Opened By', 'Value': manifest.opened_by || manifest.created_by || 'Staff' },
+                { 'Field': 'Created / Opened At', 'Value': manifest.created_at ? new Date(manifest.created_at).toLocaleString('en-GB') : '—' },
+                { 'Field': 'Closed By', 'Value': manifest.closed_by || (manifest.status === 'CLOSED' ? 'Staff' : '—') },
+                { 'Field': 'Closed At', 'Value': manifest.closed_at ? new Date(manifest.closed_at).toLocaleString('en-GB') : '—' },
+                { 'Field': 'Export Generated At', 'Value': new Date().toLocaleString('en-GB') }
+            ];
+            const summaryWs = XLSX.utils.json_to_sheet(manifestSummaryRows);
+            summaryWs['!cols'] = [{ wch: 28 }, { wch: 36 }];
+            XLSX.utils.book_append_sheet(wb, summaryWs, getUniqueSheetName('Manifest Overview', 'Manifest Overview', existingSheetNames));
+
+            // --- SHEET 2: Outbound Bags Breakdown ---
+            const bagSummaryRows = manifestBags.map((bag: any, idx: number) => ({
+                '#': idx + 1,
+                'Bag Number': bag.bag_number || 'N/A',
+                'Status': bag.status || 'OPEN',
+                'Target Partner': bag.target_partner || 'ALL',
+                'Destination Hub': bag.destination_hub || '—',
+                'Parcel Count': bag.parcel_count || (bag.parcels || []).length || 0,
+                'Total Weight (kg)': Math.round((Number(bag.total_weight) || (bag.parcels || []).reduce((s: number, p: any) => s + (Number(p.weight) || 0), 0)) * 100) / 100,
+                'Opened By': bag.opened_by || bag.created_by || 'Staff',
+                'Opened At': bag.opened_at || bag.created_at ? new Date(bag.opened_at || bag.created_at).toLocaleString('en-GB') : '—',
+                'Closed By': bag.closed_by || bag.sealed_by || (bag.status === 'SEALED' ? 'Staff' : '—'),
+                'Closed At': bag.closed_at || bag.sealed_at ? new Date(bag.closed_at || bag.sealed_at).toLocaleString('en-GB') : '—'
+            }));
+            const bagSheetWs = XLSX.utils.json_to_sheet(bagSummaryRows.length > 0 ? bagSummaryRows : [{ 'Notice': 'No outbound bags recorded for this manifest' }]);
+            bagSheetWs['!cols'] = [
+                { wch: 6 },
+                { wch: 22 },
+                { wch: 12 },
+                { wch: 18 },
+                { wch: 20 },
+                { wch: 14 },
+                { wch: 16 },
+                { wch: 18 },
+                { wch: 22 },
+                { wch: 18 },
+                { wch: 22 }
+            ];
+            XLSX.utils.book_append_sheet(wb, bagSheetWs, getUniqueSheetName('Bags Summary', 'Bags Summary', existingSheetNames));
+
+            // --- SHEET 3: Whole Manifest Parcels (All Parcels Consolidated) ---
+            const allParcelRows = allParcels.map((p: any, idx: number) => {
+                const partner = (p.assignedPartner && p.assignedPartner !== '—' && p.assignedPartner !== 'Unknown')
+                    ? p.assignedPartner
+                    : (p.partner && p.partner !== '—' && p.partner !== 'Unknown')
+                        ? p.partner
+                        : (p.bag_partner && p.bag_partner !== 'ALL') ? p.bag_partner : '—';
+
+                return {
+                    '#': idx + 1,
+                    'Manifest Ref': manifest.manifest_reference,
+                    'Bag Number': p.outbound_bag || '—',
+                    'Bag Status': p.bag_status || 'OPEN',
+                    'Tracking Number': p.trackingNumber || p.shipment_ref || p.reference_number || '—',
+                    'Inbound Manifest (MAWB)': p.inboundManifest || p.initialManifest || p.mawbRef || '—',
+                    'Inbound Bag': p.inboundBag || p.initialBag || p.bagNumber || p.bag_number || '—',
+                    'LMD Partner': partner,
+                    'Weight (kg)': p.weight ? Number(p.weight) : 0,
+                    'Recipient Name': p.recipientName || '—',
+                    'Destination City': p.city || '—',
+                    'Scanned By': p.scannedBy || 'Staff',
+                    'Scanned At': p.timestamp ? new Date(p.timestamp).toLocaleString('en-GB') : '—'
+                };
+            });
+            const allParcelsWs = XLSX.utils.json_to_sheet(allParcelRows.length > 0 ? allParcelRows : [{ 'Notice': 'No parcels scanned into this manifest yet' }]);
+            allParcelsWs['!cols'] = [
+                { wch: 6 },
+                { wch: 24 },
+                { wch: 22 },
+                { wch: 12 },
+                { wch: 26 },
+                { wch: 24 },
+                { wch: 20 },
+                { wch: 16 },
+                { wch: 14 },
+                { wch: 24 },
+                { wch: 20 },
+                { wch: 18 },
+                { wch: 22 }
+            ];
+            XLSX.utils.book_append_sheet(wb, allParcelsWs, getUniqueSheetName('All Manifest Parcels', 'All Parcels', existingSheetNames));
+
+            // --- SHEETS 4+: Individual Sheet for Each Bag ---
+            manifestBags.forEach((bag: any) => {
+                const bagParcels = (bag.parcels || []).map((p: any, idx: number) => {
+                    const partner = (p.assignedPartner && p.assignedPartner !== '—' && p.assignedPartner !== 'Unknown')
+                        ? p.assignedPartner
+                        : (p.partner && p.partner !== '—' && p.partner !== 'Unknown')
+                            ? p.partner
+                            : (bag.target_partner && bag.target_partner !== 'ALL') ? bag.target_partner : '—';
+                    return {
+                        '#': idx + 1,
+                        'Tracking Number': p.trackingNumber || p.shipment_ref || p.reference_number || '—',
+                        'Inbound Manifest (MAWB)': p.inboundManifest || p.initialManifest || p.mawbRef || '—',
+                        'Inbound Bag': p.inboundBag || p.initialBag || p.bagNumber || p.bag_number || '—',
+                        'LMD Partner': partner,
+                        'Weight (kg)': p.weight ? Number(p.weight) : 0,
+                        'Recipient Name': p.recipientName || '—',
+                        'Destination City': p.city || '—',
+                        'Scanned By': p.scannedBy || 'Staff',
+                        'Scanned At': p.timestamp ? new Date(p.timestamp).toLocaleString('en-GB') : '—'
+                    };
+                });
+
+                const bagWs = XLSX.utils.json_to_sheet(bagParcels.length > 0 ? bagParcels : [{ 'Notice': `No parcels scanned into Bag ${bag.bag_number} yet` }]);
+                bagWs['!cols'] = [
+                    { wch: 6 },
+                    { wch: 26 },
+                    { wch: 24 },
+                    { wch: 20 },
+                    { wch: 16 },
+                    { wch: 14 },
+                    { wch: 24 },
+                    { wch: 20 },
+                    { wch: 18 },
+                    { wch: 22 }
+                ];
+                const sheetTitle = `Bag_${bag.bag_number}`;
+                XLSX.utils.book_append_sheet(wb, bagWs, getUniqueSheetName(sheetTitle, `Bag_${bag.id || 'Item'}`, existingSheetNames));
+            });
+
+            // Write File
+            const cleanRef = (manifest.manifest_reference || 'Manifest').replace(/[/\\?%*:|"<>[\]]/g, '_').trim();
+            const dateTag = new Date().toISOString().slice(0, 10);
+            const filename = `Manifest_${cleanRef}_${dateTag}.xlsx`;
+            XLSX.writeFile(wb, filename);
+            toast.success(`Exported Manifest "${manifest.manifest_reference}" Excel successfully!`);
+        } catch (err: any) {
+            console.error('Error exporting manifest to excel:', err);
+            toast.error('Failed to export manifest to Excel');
+        }
+    };
+
+    // Export a single bag
+    const exportSingleBagToExcel = (bag: any, manifestRef?: string) => {
+        try {
+            const wb = XLSX.utils.book_new();
+
+            // Sheet 1: Bag Overview
+            const overviewRows = [
+                { 'Field': 'Bag Number', 'Value': bag.bag_number || 'N/A' },
+                { 'Field': 'Linked Outbound Manifest', 'Value': manifestRef || 'Standalone / Unassigned' },
+                { 'Field': 'Status', 'Value': bag.status || 'OPEN' },
+                { 'Field': 'Target Partner', 'Value': bag.target_partner || 'ALL' },
+                { 'Field': 'Destination Hub', 'Value': bag.destination_hub || '—' },
+                { 'Field': 'Parcel Count', 'Value': bag.parcel_count || (bag.parcels || []).length || 0 },
+                { 'Field': 'Total Weight (kg)', 'Value': Math.round((Number(bag.total_weight) || 0) * 100) / 100 },
+                { 'Field': 'Opened By', 'Value': bag.opened_by || bag.created_by || 'Staff' },
+                { 'Field': 'Opened At', 'Value': bag.opened_at || bag.created_at ? new Date(bag.opened_at || bag.created_at).toLocaleString('en-GB') : '—' },
+                { 'Field': 'Closed By', 'Value': bag.closed_by || bag.sealed_by || (bag.status === 'SEALED' ? 'Staff' : '—') },
+                { 'Field': 'Closed At', 'Value': bag.closed_at || bag.sealed_at ? new Date(bag.closed_at || bag.sealed_at).toLocaleString('en-GB') : '—' },
+                { 'Field': 'Export Generated At', 'Value': new Date().toLocaleString('en-GB') }
+            ];
+            const overviewWs = XLSX.utils.json_to_sheet(overviewRows);
+            overviewWs['!cols'] = [{ wch: 28 }, { wch: 36 }];
+            XLSX.utils.book_append_sheet(wb, overviewWs, 'Bag Overview');
+
+            // Sheet 2: Parcels List
+            const parcelRows = (bag.parcels || []).map((p: any, idx: number) => {
+                const partner = (p.assignedPartner && p.assignedPartner !== '—' && p.assignedPartner !== 'Unknown')
+                    ? p.assignedPartner
+                    : (p.partner && p.partner !== '—' && p.partner !== 'Unknown')
+                        ? p.partner
+                        : (bag.target_partner && bag.target_partner !== 'ALL') ? bag.target_partner : '—';
+                return {
+                    '#': idx + 1,
+                    'Tracking Number': p.trackingNumber || p.shipment_ref || p.reference_number || '—',
+                    'Inbound Manifest (MAWB)': p.inboundManifest || p.initialManifest || p.mawbRef || '—',
+                    'Inbound Bag': p.inboundBag || p.initialBag || p.bagNumber || p.bag_number || '—',
+                    'LMD Partner': partner,
+                    'Weight (kg)': p.weight ? Number(p.weight) : 0,
+                    'Recipient Name': p.recipientName || '—',
+                    'Destination City': p.city || '—',
+                    'Scanned By': p.scannedBy || 'Staff',
+                    'Scanned At': p.timestamp ? new Date(p.timestamp).toLocaleString('en-GB') : '—'
+                };
+            });
+
+            const parcelsWs = XLSX.utils.json_to_sheet(parcelRows.length > 0 ? parcelRows : [{ 'Notice': `No parcels scanned into Bag ${bag.bag_number} yet` }]);
+            parcelsWs['!cols'] = [
+                { wch: 6 },
+                { wch: 26 },
+                { wch: 24 },
+                { wch: 20 },
+                { wch: 16 },
+                { wch: 14 },
+                { wch: 24 },
+                { wch: 20 },
+                { wch: 18 },
+                { wch: 22 }
+            ];
+            XLSX.utils.book_append_sheet(wb, parcelsWs, 'Parcels List');
+
+            const cleanBagNum = (bag.bag_number || 'Bag').replace(/[/\\?%*:|"<>[\]]/g, '_').trim();
+            const dateTag = new Date().toISOString().slice(0, 10);
+            const filename = `Bag_${cleanBagNum}_${dateTag}.xlsx`;
+            XLSX.writeFile(wb, filename);
+            toast.success(`Exported Bag "${bag.bag_number}" Excel successfully!`);
+        } catch (err: any) {
+            console.error('Error exporting bag to excel:', err);
+            toast.error('Failed to export bag to Excel');
+        }
+    };
+
+    // Export all filtered manifests
+    const exportAllFilteredManifestsToExcel = (manifestsList: any[]) => {
+        if (!manifestsList || manifestsList.length === 0) {
+            toast.error('No manifests to export');
+            return;
+        }
+        try {
+            const wb = XLSX.utils.book_new();
+
+            // 1. Manifests Overview
+            const manifestsOverview = manifestsList.map((m: any, idx: number) => ({
+                '#': idx + 1,
+                'Manifest Reference': m.manifest_reference,
+                'Service Provider / Partner': m.service_provider_name || '—',
+                'Status': m.status || 'OPEN',
+                'Total Bags': m.bags?.length || m.total_bags || 0,
+                'Total Parcels': m.total_parcels || 0,
+                'Created / Opened By': m.opened_by || m.created_by || 'Staff',
+                'Created At': m.created_at ? new Date(m.created_at).toLocaleString('en-GB') : '—',
+                'Closed By': m.closed_by || (m.status === 'CLOSED' ? 'Staff' : '—'),
+                'Closed At': m.closed_at ? new Date(m.closed_at).toLocaleString('en-GB') : '—'
+            }));
+            const mWs = XLSX.utils.json_to_sheet(manifestsOverview);
+            mWs['!cols'] = [
+                { wch: 6 }, { wch: 24 }, { wch: 24 }, { wch: 12 }, { wch: 12 }, { wch: 14 }, { wch: 18 }, { wch: 22 }, { wch: 18 }, { wch: 22 }
+            ];
+            XLSX.utils.book_append_sheet(wb, mWs, 'Manifests Summary');
+
+            // 2. All Bags
+            const allBagsRows: any[] = [];
+            manifestsList.forEach((m: any) => {
+                (m.bags || []).forEach((b: any) => {
+                    allBagsRows.push({
+                        '#': allBagsRows.length + 1,
+                        'Manifest Reference': m.manifest_reference,
+                        'Bag Number': b.bag_number,
+                        'Status': b.status || 'OPEN',
+                        'Target Partner': b.target_partner || 'ALL',
+                        'Destination Hub': b.destination_hub || '—',
+                        'Parcel Count': b.parcel_count || (b.parcels || []).length || 0,
+                        'Total Weight (kg)': Math.round((Number(b.total_weight) || 0) * 100) / 100,
+                        'Opened By': b.opened_by || b.created_by || 'Staff',
+                        'Opened At': b.opened_at || b.created_at ? new Date(b.opened_at || b.created_at).toLocaleString('en-GB') : '—',
+                        'Closed By': b.closed_by || b.sealed_by || (b.status === 'SEALED' ? 'Staff' : '—'),
+                        'Closed At': b.closed_at || b.sealed_at ? new Date(b.closed_at || b.sealed_at).toLocaleString('en-GB') : '—'
+                    });
+                });
+            });
+            const bWs = XLSX.utils.json_to_sheet(allBagsRows.length > 0 ? allBagsRows : [{ 'Notice': 'No bags found' }]);
+            bWs['!cols'] = [
+                { wch: 6 }, { wch: 24 }, { wch: 22 }, { wch: 12 }, { wch: 16 }, { wch: 20 }, { wch: 14 }, { wch: 16 }, { wch: 18 }, { wch: 22 }, { wch: 18 }, { wch: 22 }
+            ];
+            XLSX.utils.book_append_sheet(wb, bWs, 'All Manifest Bags');
+
+            // 3. All Parcels
+            const allParcelsRows: any[] = [];
+            manifestsList.forEach((m: any) => {
+                (m.bags || []).forEach((b: any) => {
+                    (b.parcels || []).forEach((p: any) => {
+                        const partner = (p.assignedPartner && p.assignedPartner !== '—' && p.assignedPartner !== 'Unknown')
+                            ? p.assignedPartner
+                            : (p.partner && p.partner !== '—' && p.partner !== 'Unknown')
+                                ? p.partner
+                                : (b.target_partner && b.target_partner !== 'ALL') ? b.target_partner : '—';
+                        allParcelsRows.push({
+                            '#': allParcelsRows.length + 1,
+                            'Manifest Reference': m.manifest_reference,
+                            'Bag Number': b.bag_number,
+                            'Tracking Number': p.trackingNumber || p.shipment_ref || p.reference_number || '—',
+                            'Inbound Manifest (MAWB)': p.inboundManifest || p.initialManifest || p.mawbRef || '—',
+                            'Inbound Bag': p.inboundBag || p.initialBag || p.bagNumber || p.bag_number || '—',
+                            'LMD Partner': partner,
+                            'Weight (kg)': p.weight ? Number(p.weight) : 0,
+                            'Recipient Name': p.recipientName || '—',
+                            'Destination City': p.city || '—',
+                            'Scanned By': p.scannedBy || 'Staff',
+                            'Scanned At': p.timestamp ? new Date(p.timestamp).toLocaleString('en-GB') : '—'
+                        });
+                    });
+                });
+            });
+            const pWs = XLSX.utils.json_to_sheet(allParcelsRows.length > 0 ? allParcelsRows : [{ 'Notice': 'No parcels found' }]);
+            pWs['!cols'] = [
+                { wch: 6 }, { wch: 24 }, { wch: 22 }, { wch: 26 }, { wch: 24 }, { wch: 20 }, { wch: 16 }, { wch: 14 }, { wch: 24 }, { wch: 20 }, { wch: 18 }, { wch: 22 }
+            ];
+            XLSX.utils.book_append_sheet(wb, pWs, 'All Manifest Parcels');
+
+            const dateTag = new Date().toISOString().slice(0, 10);
+            XLSX.writeFile(wb, `Outbound_Manifests_Directory_${dateTag}.xlsx`);
+            toast.success(`Exported ${manifestsList.length} Manifests report to Excel!`);
+        } catch (err: any) {
+            console.error('Error exporting all manifests:', err);
+            toast.error('Failed to export manifests report to Excel');
+        }
+    };
+
     return (
-                        <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
-                            {isLoadingManifestTracking && !manifestTrackingData ? (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+            {isLoadingManifestTracking && !manifestTrackingData ? (
                                 <div style={{ textAlign: 'center', padding: '60px 20px', color: '#6b7280', fontSize: '14px', fontWeight: '500' }}>
                                     <div style={{ display: 'inline-block', width: '24px', height: '24px', border: '3px solid #e5e7eb', borderTopColor: '#111827', borderRadius: '50%', animation: 'spin 0.8s linear infinite', marginBottom: '12px' }} />
                                     <div>Loading Real-Time Outbound Manifest & Bag Metrics...</div>
@@ -200,6 +554,52 @@ export default function ManifestTrackingTab({
                                                     <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10" />
                                                 </svg>
                                                 Refresh Data
+                                            </button>
+
+                                            <button
+                                                onClick={() => {
+                                                    const q = (manifestTrackingSearchQuery || '').trim().toLowerCase();
+                                                    const filtered = (manifestTrackingData?.manifests || []).filter((m: any) => {
+                                                        if (manifestTrackingStatusFilter !== 'ALL' && m.status !== manifestTrackingStatusFilter) return false;
+                                                        if (manifestTrackingPartnerFilter !== 'ALL' && m.service_provider_name?.toLowerCase() !== manifestTrackingPartnerFilter.toLowerCase()) {
+                                                            const hasMatchingBag = m.bags?.some((b: any) => b.target_partner?.toLowerCase() === manifestTrackingPartnerFilter.toLowerCase());
+                                                            if (!hasMatchingBag) return false;
+                                                        }
+                                                        if (!q) return true;
+                                                        const matchManifestRef = m.manifest_reference?.toLowerCase().includes(q);
+                                                        const matchProvider = m.service_provider_name?.toLowerCase().includes(q);
+                                                        const matchBag = m.bags?.some((b: any) =>
+                                                            b.bag_number?.toLowerCase().includes(q) ||
+                                                            b.destination_hub?.toLowerCase().includes(q) ||
+                                                            b.target_partner?.toLowerCase().includes(q) ||
+                                                            b.parcels?.some((p: any) => p.trackingNumber?.toLowerCase().includes(q) || p.recipientName?.toLowerCase().includes(q))
+                                                        );
+                                                        return matchManifestRef || matchProvider || matchBag;
+                                                    });
+                                                    exportAllFilteredManifestsToExcel(filtered);
+                                                }}
+                                                disabled={isLoadingManifestTracking || !manifestTrackingData?.manifests?.length}
+                                                style={{
+                                                    display: 'inline-flex',
+                                                    alignItems: 'center',
+                                                    gap: '6px',
+                                                    padding: '8px 14px',
+                                                    backgroundColor: '#15803d',
+                                                    color: '#ffffff',
+                                                    border: 'none',
+                                                    borderRadius: '8px',
+                                                    fontSize: '12px',
+                                                    fontWeight: '600',
+                                                    cursor: (!manifestTrackingData?.manifests?.length || isLoadingManifestTracking) ? 'not-allowed' : 'pointer',
+                                                    opacity: (!manifestTrackingData?.manifests?.length || isLoadingManifestTracking) ? 0.6 : 1
+                                                }}
+                                            >
+                                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                                                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                                                    <polyline points="7 10 12 15 17 10" />
+                                                    <line x1="12" y1="15" x2="12" y2="3" />
+                                                </svg>
+                                                Export All (.xlsx)
                                             </button>
                                         </div>
                                     </div>
@@ -388,7 +788,36 @@ export default function ManifestTrackingTab({
                                                                             </span>
                                                                         </div>
 
-                                                                        <div style={{ display: 'flex', gap: '6px' }}>
+                                                                        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                                                                            <button
+                                                                                type="button"
+                                                                                onClick={(e) => {
+                                                                                    e.stopPropagation();
+                                                                                    exportManifestToExcel(manifest);
+                                                                                }}
+                                                                                title="Download Manifest & Outbound Bag Tracking Excel (.xlsx)"
+                                                                                style={{
+                                                                                    display: 'inline-flex',
+                                                                                    alignItems: 'center',
+                                                                                    gap: '5px',
+                                                                                    padding: '6px 11px',
+                                                                                    borderRadius: '6px',
+                                                                                    backgroundColor: '#ecfdf5',
+                                                                                    color: '#047857',
+                                                                                    fontSize: '11px',
+                                                                                    fontWeight: '700',
+                                                                                    border: '1px solid #a7f3d0',
+                                                                                    cursor: 'pointer',
+                                                                                    transition: 'all 0.15s'
+                                                                                }}
+                                                                            >
+                                                                                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                                                                                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                                                                                    <polyline points="7 10 12 15 17 10" />
+                                                                                    <line x1="12" y1="15" x2="12" y2="3" />
+                                                                                </svg>
+                                                                                Excel
+                                                                            </button>
                                                                             {manifest.json_path && (
                                                                                 <a href={`${process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://vugmbsngwepskmsdixch.supabase.co'}/storage/v1/object/public/${manifest.json_path}`} target="_blank" rel="noreferrer" style={{ padding: '6px 10px', borderRadius: '6px', backgroundColor: '#eff6ff', color: '#2563eb', fontSize: '11px', fontWeight: '700', textDecoration: 'none', border: '1px solid #bfdbfe' }}>
                                                                                     JSON
@@ -497,6 +926,34 @@ export default function ManifestTrackingTab({
                                                                                                     <span style={{ color: '#6b7280', fontWeight: '600' }}>
                                                                                                         ({bag.total_weight || 0} kg)
                                                                                                     </span>
+                                                                                                    <button
+                                                                                                        type="button"
+                                                                                                        onClick={(e) => {
+                                                                                                            e.stopPropagation();
+                                                                                                            exportSingleBagToExcel(bag, manifest.manifest_reference);
+                                                                                                        }}
+                                                                                                        title={`Download Bag ${bag.bag_number} Excel (.xlsx)`}
+                                                                                                        style={{
+                                                                                                            display: 'inline-flex',
+                                                                                                            alignItems: 'center',
+                                                                                                            gap: '4px',
+                                                                                                            padding: '4px 8px',
+                                                                                                            borderRadius: '4px',
+                                                                                                            backgroundColor: '#f0fdf4',
+                                                                                                            color: '#15803d',
+                                                                                                            fontSize: '10.5px',
+                                                                                                            fontWeight: '700',
+                                                                                                            border: '1px solid #bbf7d0',
+                                                                                                            cursor: 'pointer'
+                                                                                                        }}
+                                                                                                    >
+                                                                                                        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                                                                                                            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                                                                                                            <polyline points="7 10 12 15 17 10" />
+                                                                                                            <line x1="12" y1="15" x2="12" y2="3" />
+                                                                                                        </svg>
+                                                                                                        Excel
+                                                                                                    </button>
                                                                                                 </div>
                                                                                             </div>
 
@@ -678,6 +1135,34 @@ export default function ManifestTrackingTab({
                                                                     <span style={{ color: '#6b7280', fontWeight: '600' }}>
                                                                         ({bag.total_weight || 0} kg)
                                                                     </span>
+                                                                    <button
+                                                                        type="button"
+                                                                        onClick={(e) => {
+                                                                            e.stopPropagation();
+                                                                            exportSingleBagToExcel(bag);
+                                                                        }}
+                                                                        title={`Download Bag ${bag.bag_number} Excel (.xlsx)`}
+                                                                        style={{
+                                                                            display: 'inline-flex',
+                                                                            alignItems: 'center',
+                                                                            gap: '4px',
+                                                                            padding: '4px 8px',
+                                                                            borderRadius: '4px',
+                                                                            backgroundColor: '#f0fdf4',
+                                                                            color: '#15803d',
+                                                                            fontSize: '10.5px',
+                                                                            fontWeight: '700',
+                                                                            border: '1px solid #bbf7d0',
+                                                                            cursor: 'pointer'
+                                                                        }}
+                                                                    >
+                                                                        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                                                                            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                                                                            <polyline points="7 10 12 15 17 10" />
+                                                                            <line x1="12" y1="15" x2="12" y2="3" />
+                                                                        </svg>
+                                                                        Excel
+                                                                    </button>
                                                                 </div>
                                                             </div>
 
