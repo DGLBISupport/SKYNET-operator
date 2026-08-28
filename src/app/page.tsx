@@ -2656,8 +2656,9 @@ export default function WorkstationDashboard() {
                 const initialManifest = data.initialManifest || data.parcel?.initialManifest || data.parcel?.mawbRef || 'Initial Manifest';
                 const initialBag = data.parcel?.inboundBag || data.parcel?.initialBag || data.parcel?.bagNumber || data.parcel?.bag_number || '';
                 const cleanTracking = (data.parcel?.trackingNumber || barcode || '').toString().replace(/SKYT-?/gi, '').trim();
-                const parcelToStore = {
+                const parcelToStore: any = {
                     ...data.parcel,
+                    weight: normalizeWeightToGrams(data.parcel?.weight),
                     initialManifest,
                     inboundManifest: initialManifest,
                     inboundBag: initialBag,
@@ -2675,11 +2676,13 @@ export default function WorkstationDashboard() {
 
                 if (!data.missedFirstScan) {
                     // Add to active outbound bag only when first scan was already completed.
+                    const updatedParcels = [parcelToStore, ...(activeOutboundBag.parcels || [])];
+                    const cumulativeBagGrams = updatedParcels.reduce((acc: number, p: any) => acc + normalizeWeightToGrams(p.weight), 0);
                     const updatedBag = {
                         ...activeOutboundBag,
-                        parcelCount: (activeOutboundBag.parcelCount || 0) + 1,
-                        totalWeight: Math.round((activeOutboundBag.totalWeight || 0) + normalizeWeightToGrams(data.parcel?.weight)),
-                        parcels: [parcelToStore, ...(activeOutboundBag.parcels || [])]
+                        parcelCount: updatedParcels.length,
+                        totalWeight: cumulativeBagGrams,
+                        parcels: updatedParcels
                     };
                     setActiveOutboundBag(updatedBag);
                     setOutboundBags(prev => prev.map(b => b.bagNumber === updatedBag.bagNumber ? updatedBag : b));

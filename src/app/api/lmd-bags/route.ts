@@ -376,11 +376,13 @@ export async function GET(request: Request) {
                         let parcels: any[] = [];
                         if (Array.isArray(row.parcels)) parcels = row.parcels;
                         else if (typeof row.parcels === 'string') { try { parcels = JSON.parse(row.parcels); } catch (e) { parcels = []; } }
+                        const cumWeightGrams = (parcels || []).reduce((acc: number, p: any) => acc + normalizeWeightToGrams(p.weight), 0);
+                        const resolvedTotalWeight = cumWeightGrams > 0 ? cumWeightGrams : normalizeWeightToGrams(row.total_weight);
                         return {
                             bagNumber: row.bag_number, mawbRef: mawbRef,
                             manifestDbId: row.new_manifest_reference ? Number(row.new_manifest_reference) : (manifestDbId || undefined),
                             targetPartner: row.target_partner || 'ALL', destinationHub: row.destination_hub, status: row.status as 'OPEN' | 'SEALED',
-                            parcelCount: row.parcel_count || parcels.length, totalWeight: row.total_weight || 0, createdAt: row.created_at,
+                            parcelCount: row.parcel_count || parcels.length, totalWeight: resolvedTotalWeight, createdAt: row.created_at,
                             sealedAt: row.sealed_at, sealedBy: row.sealed_by, operator: row.created_by || 'Staff', parcels
                         } as OutboundBag;
                     });

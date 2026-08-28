@@ -340,7 +340,13 @@ export default function SecondScanTab({
                                                                 fontSize: '10px',
                                                                 fontWeight: '700'
                                                             }}>
-                                                                {isSealed ? 'SEALED' : `${bag.parcelCount} Pcs`}
+                                                                {(() => {
+                                                                    const bagGrams = (bag.parcels && bag.parcels.length > 0)
+                                                                        ? bag.parcels.reduce((acc: number, p: any) => acc + normalizeWeightToGrams(p.weight), 0)
+                                                                        : normalizeWeightToGrams(bag.totalWeight);
+                                                                    const pcs = bag.parcelCount || (bag.parcels || []).length || 0;
+                                                                    return isSealed ? `SEALED (${formatGramsToKg(bagGrams)} kg)` : `${pcs} Pcs (${formatGramsToKg(bagGrams)} kg)`;
+                                                                })()}
                                                             </span>
                                                         </button>
                                                     );
@@ -393,12 +399,17 @@ export default function SecondScanTab({
                                                     <div style={{ borderLeft: '1px solid #e5e7eb', paddingLeft: '16px', display: 'flex', gap: '16px' }}>
                                                         <div>
                                                             <div style={{ fontSize: '10px', color: '#6b7280', textTransform: 'uppercase' }}>Parcels Inside</div>
-                                                            <div style={{ fontSize: '14px', fontWeight: '800', color: '#0b0c0cff' }}>{activeOutboundBag.parcelCount || 0} Pcs</div>
+                                                            <div style={{ fontSize: '14px', fontWeight: '800', color: '#0b0c0cff' }}>{activeOutboundBag.parcelCount || (activeOutboundBag.parcels || []).length || 0} Pcs</div>
                                                         </div>
                                                         <div>
                                                             <div style={{ fontSize: '10px', color: '#6b7280', textTransform: 'uppercase' }}>Total Weight</div>
                                                             <div style={{ fontSize: '14px', fontWeight: '800', color: '#111827' }}>
-                                                                {formatGramsToKg(activeOutboundBag.totalWeight || (activeOutboundBag.parcels || []).reduce((acc: number, p: any) => acc + normalizeWeightToGrams(p.weight), 0))} kg
+                                                                {(() => {
+                                                                    const totalGrams = (activeOutboundBag.parcels && activeOutboundBag.parcels.length > 0)
+                                                                        ? activeOutboundBag.parcels.reduce((acc: number, p: any) => acc + normalizeWeightToGrams(p.weight), 0)
+                                                                        : normalizeWeightToGrams(activeOutboundBag.totalWeight);
+                                                                    return `${formatGramsToKg(totalGrams)} kg`;
+                                                                })()}
                                                             </div>
                                                         </div>
                                                     </div>
