@@ -414,6 +414,7 @@ export async function POST(request: Request) {
             const prefixPattern = `LK-${providerCode}-${todayStr}-`;
             let spId: number | null = serviceProviderId ? Number(serviceProviderId) : null;
             const seqs: number[] = [];
+            const customRef = (body.customManifestReference || body.manifestReference || body.manifestName || '').trim();
 
             if (sb) {
                 try {
@@ -429,6 +430,15 @@ export async function POST(request: Request) {
                             else if (providerCode.includes('PRONTO')) spId = 4;
                         }
                     }
+
+                    if (customRef) {
+                        const checkRes = await fetch(`${sb.url}/rest/v1/outbound_manifests?manifest_reference=eq.${encodeURIComponent(customRef)}&select=id,manifest_reference`, { headers: sb.headers, cache: 'no-store' });
+                        const checkData = await checkRes.json();
+                        if (Array.isArray(checkData) && checkData.length > 0) {
+                            return NextResponse.json({ success: false, error: `Manifest reference "${customRef}" already exists in database. Please choose a different name.` }, { status: 400 });
+                        }
+                    }
+
                     const omRes = await fetch(`${sb.url}/rest/v1/outbound_manifests?manifest_reference=ilike.${encodeURIComponent(prefixPattern + '*')}&select=manifest_reference`, { headers: sb.headers, cache: 'no-store' });
                     const omData = await omRes.json();
                     if (Array.isArray(omData)) {
@@ -451,14 +461,22 @@ export async function POST(request: Request) {
                 }
             });
 
-            let nextSeq = seqs.length > 0 ? Math.max(...seqs, 0) + 1 : 1;
-            let manifestReference = `${prefixPattern}${String(nextSeq).padStart(2, '0')}`;
-
-            // Safety loop: ensure manifestReference is completely unique
-            while (manifestsMap.has(manifestReference)) {
-                nextSeq++;
+            let manifestReference = customRef;
+            if (!manifestReference) {
+                let nextSeq = seqs.length > 0 ? Math.max(...seqs, 0) + 1 : 1;
                 manifestReference = `${prefixPattern}${String(nextSeq).padStart(2, '0')}`;
+
+                // Safety loop: ensure manifestReference is completely unique
+                while (manifestsMap.has(manifestReference)) {
+                    nextSeq++;
+                    manifestReference = `${prefixPattern}${String(nextSeq).padStart(2, '0')}`;
+                }
+            } else {
+                if (manifestsMap.has(manifestReference)) {
+                    return NextResponse.json({ success: false, error: `Manifest reference "${manifestReference}" already exists. Please choose a different name.` }, { status: 400 });
+                }
             }
+
             manifestsMap.set(manifestReference, { mawbRef: manifestReference, status: 'OPEN', serviceProviderId: spId || undefined, serviceProviderName: providerName || partner || 'PickMe' });
             let newManifestDbId: number | null = null;
             if (sb) {
@@ -506,10 +524,43 @@ export async function POST(request: Request) {
             const defaultBagNumber = `${mawbRef ? mawbRef : 'LMD'}${partnerCode}-BAG-${String(nextIndex).padStart(2, '0')}`;
             const newBagNumber = (body.customBagNumber || body.bagNumber || defaultBagNumber).trim();
 
+            // Prevent duplicate creation if bag already exists in memory
+            if (outboundBagsMap.has(newBagNumber)) {
+                const existing = outboundBagsMap.get(newBagNumber)!;
+                return NextResponse.json({ success: true, message: `Outbound LMD Bag "${newBagNumber}" is already active.`, bag: existing });
+            }
+
             let manifestDbId: number | null = mawbRef ? await getManifestDbId(sb, mawbRef) : null;
             if (mawbRef && !manifestDbId && sb) {
                 await updateOutboundManifestInDB(sb, mawbRef, serviceProviderId ? Number(serviceProviderId) : null);
                 manifestDbId = await getManifestDbId(sb, mawbRef);
+            }
+
+            // Check if already in Supabase database to avoid duplicate key errors or ghost duplicates
+            if (sb) {
+                try {
+                    const checkRes = await fetch(`${sb.url}/rest/v1/outbound_lmd_bags?bag_number=eq.${encodeURIComponent(newBagNumber)}&select=bag_number,status,parcel_count,total_weight,destination_hub,target_partner,created_at`, { headers: sb.headers });
+                    const checkData = await checkRes.json();
+                    if (Array.isArray(checkData) && checkData.length > 0) {
+                        const existingDbBag: OutboundBag = {
+                            bagNumber: checkData[0].bag_number,
+                            mawbRef: effectiveMawbRef,
+                            manifestDbId: manifestDbId || undefined,
+                            targetPartner: checkData[0].target_partner || partner || 'ALL',
+                            destinationHub: checkData[0].destination_hub || destinationHub || 'Main Sort Hub',
+                            status: checkData[0].status || 'OPEN',
+                            parcelCount: checkData[0].parcel_count || 0,
+                            totalWeight: checkData[0].total_weight || 0,
+                            createdAt: checkData[0].created_at || new Date().toISOString(),
+                            operator: typeof operator === 'string' ? operator : 'Staff',
+                            parcels: []
+                        };
+                        outboundBagsMap.set(newBagNumber, existingDbBag);
+                        return NextResponse.json({ success: true, message: `Outbound LMD Bag "${newBagNumber}" already exists.`, bag: existingDbBag });
+                    }
+                } catch (err) {
+                    console.error("Error checking existing bag in DB:", err);
+                }
             }
 
             const newBag: OutboundBag = {

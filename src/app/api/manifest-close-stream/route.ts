@@ -365,6 +365,7 @@ function buildShipmentXml(parcel: any, detail: any | null, bagNumber: string): s
                         <ItemWeightMeasure>${weightMeasure}</ItemWeightMeasure>
                         <ItemNotes>${notes}</ItemNotes>
                         <ItemBagNumber>${escapeXml(bagNumber)}</ItemBagNumber>
+                        <ItemCubicWeight>0</ItemCubicWeight>
                         <Pieces>
                             <Piece>
                                 <PieceRef>${escapeXml(senderRef || ref)}</PieceRef>
@@ -721,7 +722,7 @@ export async function GET(request: Request) {
                     await fetch(`${sb.url}/rest/v1/outbound_manifests?manifest_reference=eq.${encodeURIComponent(mawbRef)}`, { method: 'PATCH', headers: sb.headers, body: JSON.stringify(finalManifestPayload) }).catch(() => { });
                 }
 
-                // ── Step 7: Build header info & upload to FFDX — ONE SHIPMENT PER CALL ──
+                // ── Step 7: Build header info & upload to FFDX in ONE COMBINED XML CALL ──
                 let mawbRecord: any = null;
                 const carrierCode = 'UL';
                 const carrierName = 'Sri Lankan Airlines';
@@ -747,38 +748,28 @@ export async function GET(request: Request) {
 
                 emit({ type: 'ffdx_start', parcelCount: shipmentEntries.length });
 
-                let uploadedCount = 0;
-                let failedCount = 0;
-                let lastFfdxError: string | undefined;
-                const INTER_CALL_DELAY_MS = 250;
+                const allShipmentBlocks = shipmentEntries.map(e => buildShipmentXml(e.parcel, e.detail, e.bagNumber));
+                const fullXmlPayload = buildUploadXml(mawbRef, allShipmentBlocks, headerInfo);
 
-                for (const entry of shipmentEntries) {
-                    const singleShipmentBlock = buildShipmentXml(entry.parcel, entry.detail, entry.bagNumber);
-                    const xmlPayload = buildUploadXml(mawbRef, [singleShipmentBlock], headerInfo);
-                    const result = await postToFfdx(xmlPayload, `${mawbRef}:${entry.trackingNum}`);
-
-                    if (result.success) {
-                        uploadedCount++;
-                        emit({ type: 'parcel', bagNumber: entry.bagNumber, trackingNumber: entry.trackingNum, status: 'ok', message: 'Uploaded to GETonline' });
-                    } else {
-                        failedCount++;
-                        lastFfdxError = result.error;
-                        emit({ type: 'parcel', bagNumber: entry.bagNumber, trackingNumber: entry.trackingNum, status: 'error', message: result.error });
-                    }
-
-                    if (INTER_CALL_DELAY_MS > 0) await new Promise(r => setTimeout(r, INTER_CALL_DELAY_MS));
+                let ffdxResult: { success: boolean; response?: string; error?: string } = { success: true };
+                if (allShipmentBlocks.length > 0) {
+                    ffdxResult = await postToFfdx(fullXmlPayload, mawbRef);
                 }
 
-                const ffdxResult: { success: boolean; response?: string; error?: string } =
-                    shipmentEntries.length === 0
-                        ? { success: true } // nothing to upload — still fine
-                        : { success: failedCount === 0, error: failedCount > 0 ? `${failedCount} of ${shipmentEntries.length} shipment(s) rejected by FFDX. Last error: ${lastFfdxError}` : undefined };
+                const uploadedCount = ffdxResult.success ? shipmentEntries.length : 0;
+                const failedCount = ffdxResult.success ? 0 : shipmentEntries.length;
+
+                for (const entry of shipmentEntries) {
+                    if (ffdxResult.success) {
+                        emit({ type: 'parcel', bagNumber: entry.bagNumber, trackingNumber: entry.trackingNum, status: 'ok', message: 'Uploaded to GETonline' });
+                    } else {
+                        emit({ type: 'parcel', bagNumber: entry.bagNumber, trackingNumber: entry.trackingNum, status: 'error', message: ffdxResult.error || 'GETonline upload failed' });
+                    }
+                }
 
                 let storageResult: any = null;
                 // Save complete manifest log (XML and JSON) to Supabase storage buckets and update DB
                 try {
-                    const allShipmentBlocks = shipmentEntries.map(e => buildShipmentXml(e.parcel, e.detail, e.bagNumber));
-                    const fullXmlPayload = buildUploadXml(mawbRef, allShipmentBlocks, headerInfo);
                     const parcelLogs = shipmentEntries.map(e => ({
                         trackingNumber: e.trackingNum,
                         bagNumber: e.bagNumber,
@@ -789,7 +780,7 @@ export async function GET(request: Request) {
                         consignorName: e.detail?.consignor_name || '',
                         consignorCountry: e.detail?.consignor_country_code || '',
                         senderReference: e.detail?.sender_reference || e.parcel?.senderReference || '',
-                        status: 'UPLOADED',
+                        status: ffdxResult.success ? 'UPLOADED' : 'FAILED',
                     }));
 
                     storageResult = await saveManifestToSupabaseStorage({
@@ -810,8 +801,8 @@ export async function GET(request: Request) {
                     console.error('[manifest-close-stream] Error building storage payload:', e);
                 }
 
-                // Mark uploaded in DB if at least one shipment made it through
-                if (uploadedCount > 0 || shipmentEntries.length === 0) {
+                // Mark uploaded in DB if successful
+                if (ffdxResult.success || shipmentEntries.length === 0) {
                     const patchData: Record<string, any> = { is_uploaded: true };
                     if (storageResult?.jsonPath) patchData.json_path = storageResult.jsonPath;
                     if (storageResult?.xmlPath) patchData.xml_path = storageResult.xmlPath;

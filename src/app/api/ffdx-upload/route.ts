@@ -325,6 +325,7 @@ function buildShipmentXml(parcel: any, shipmentDetail: any | null, bagNumber: st
                         <ItemWeightMeasure>${weightMeasure}</ItemWeightMeasure>
                         <ItemNotes>${notes}</ItemNotes>
                         <ItemBagNumber>${escapeXml(bagNumber)}</ItemBagNumber>
+                        <ItemCubicWeight>0</ItemCubicWeight>
                         <Pieces>
                             <Piece>
                                 <PieceRef>${escapeXml(senderRef || ref)}</PieceRef>

@@ -9,11 +9,15 @@ export default function SecondScanTab({
     errorMessage,
     extractLatestBarcode,
     getManifestProviderName,
+    getNextManifestPreviewCode,
     handleCloseManifest,
     handleDeleteOutboundBag,
     handleScanSubmit,
     handleSealOutboundBag,
     inputStyle,
+    isCreatingBag,
+    isCreatingManifest,
+    isSealingBag,
     label,
     lastScanned,
     outboundBags,
@@ -22,12 +26,14 @@ export default function SecondScanTab({
     scanInputRef,
     scannedToday,
     secondScanManifestStatus,
+    selectedProviderForManifest,
     selectedSecondScanMawb,
     setActiveOutboundBag,
     setBarcodeInput,
     setCreateBagModalOpen,
     setCreateManifestModalOpen,
     setCustomBagNumber,
+    setCustomManifestName,
     setCustomConfirmModal,
     setErrorMessage,
     setLastScanned,
@@ -73,6 +79,9 @@ export default function SecondScanTab({
                                         <div style={{ display: 'flex', gap: '10px', alignItems: 'flex-end', paddingTop: '18px', flexWrap: 'wrap' }}>
                                             <button
                                                 onClick={() => {
+                                                    if (setCustomManifestName && getNextManifestPreviewCode) {
+                                                        setCustomManifestName(getNextManifestPreviewCode(selectedProviderForManifest || 'PickMe'));
+                                                    }
                                                     setCreateManifestModalOpen(true);
                                                 }}
                                                 style={{
@@ -246,16 +255,16 @@ export default function SecondScanTab({
                                                     setCustomBagNumber(`${selectedSecondScanMawb}${partnerCode}-BAG-${String((outboundBags?.length || 0) + 1).padStart(2, '0')}`);
                                                     setCreateBagModalOpen(true);
                                                 }}
-                                                disabled={Boolean(!selectedSecondScanMawb || secondScanManifestStatus === 'CLOSED')}
+                                                disabled={Boolean(!selectedSecondScanMawb || secondScanManifestStatus === 'CLOSED' || isCreatingBag)}
                                                 style={{
-                                                    backgroundColor: (!selectedSecondScanMawb || secondScanManifestStatus === 'CLOSED') ? '#9ca3af' : '#ffffff',
+                                                    backgroundColor: (!selectedSecondScanMawb || secondScanManifestStatus === 'CLOSED' || isCreatingBag) ? '#9ca3af' : '#ffffff',
                                                     color: '#374151',
-                                                    border: (!selectedSecondScanMawb || secondScanManifestStatus === 'CLOSED') ? '1px solid #9ca3af' : '1px solid #d1d5db',
+                                                    border: (!selectedSecondScanMawb || secondScanManifestStatus === 'CLOSED' || isCreatingBag) ? '1px solid #9ca3af' : '1px solid #d1d5db',
                                                     borderRadius: '8px',
                                                     padding: '10px 18px',
                                                     fontSize: '12px',
                                                     fontWeight: '600',
-                                                    cursor: (!selectedSecondScanMawb || secondScanManifestStatus === 'CLOSED') ? 'not-allowed' : 'pointer',
+                                                    cursor: (!selectedSecondScanMawb || secondScanManifestStatus === 'CLOSED' || isCreatingBag) ? 'not-allowed' : 'pointer',
                                                     display: 'flex',
                                                     alignItems: 'center',
                                                     gap: '4px',
@@ -266,75 +275,78 @@ export default function SecondScanTab({
                                             </button>
                                         </div>
                                         <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'center' }}>
-                                            {outboundBags.map((bag) => {
-                                                const isActive = activeOutboundBag?.bagNumber === bag.bagNumber;
-                                                const isSealed = bag.status === 'SEALED';
-                                                const partner = bag.targetPartner || 'ALL';
-                                                const pLower = partner.toLowerCase();
+                                            {(() => {
+                                                const uniqueOutboundBags: any[] = Array.from(new Map((outboundBags || []).map((b: any) => [b.bagNumber, b])).values());
+                                                return uniqueOutboundBags.map((bag) => {
+                                                    const isActive = activeOutboundBag?.bagNumber === bag.bagNumber;
+                                                    const isSealed = bag.status === 'SEALED';
+                                                    const partner = bag.targetPartner || 'ALL';
+                                                    const pLower = partner.toLowerCase();
 
-                                                const partnerBgColor =
-                                                    pLower.includes('pickme') ? '#facc15' :
-                                                        pLower.includes('domex') ? '#7b0f1a' :
-                                                            pLower.includes('sitrek') ? '#0f2b6e' :
-                                                                pLower.includes('pronto') ? '#d97706' : '#4b5563';
+                                                    const partnerBgColor =
+                                                        pLower.includes('pickme') ? '#facc15' :
+                                                            pLower.includes('domex') ? '#7b0f1a' :
+                                                                pLower.includes('sitrek') ? '#0f2b6e' :
+                                                                    pLower.includes('pronto') ? '#d97706' : '#4b5563';
 
-                                                const partnerTextColor =
-                                                    pLower.includes('pickme') ? '#111827' : '#ffffff';
+                                                    const partnerTextColor =
+                                                        pLower.includes('pickme') ? '#111827' : '#ffffff';
 
-                                                const partnerBorderColor =
-                                                    pLower.includes('pickme') ? '#eab308' :
-                                                        pLower.includes('domex') ? '#7b0f1a' :
-                                                            pLower.includes('sitrek') ? '#0f2b6e' :
-                                                                pLower.includes('pronto') ? '#d97706' : '#e21b22';
+                                                    const partnerBorderColor =
+                                                        pLower.includes('pickme') ? '#eab308' :
+                                                            pLower.includes('domex') ? '#7b0f1a' :
+                                                                pLower.includes('sitrek') ? '#0f2b6e' :
+                                                                    pLower.includes('pronto') ? '#d97706' : '#e21b22';
 
-                                                return (
-                                                    <button
-                                                        key={bag.bagNumber}
-                                                        onClick={() => setActiveOutboundBag(bag)}
-                                                        style={{
-                                                            backgroundColor: '#ffffff',
-                                                            color: '#374151',
-                                                            border: isActive
-                                                                ? `2px solid ${partnerBorderColor}`
-                                                                : '1px solid #d1d5db',
-                                                            borderRadius: '8px',
-                                                            padding: '10px 14px',
-                                                            fontSize: '12px',
-                                                            fontWeight: '600',
-                                                            cursor: 'pointer',
-                                                            display: 'inline-flex',
-                                                            alignItems: 'center',
-                                                            gap: '8px'
-                                                        }}
-                                                    >
-                                                        <span>{bag.bagNumber}</span>
-                                                        <span style={{
-                                                            backgroundColor: partnerBgColor,
-                                                            color: partnerTextColor,
-                                                            padding: '2px 7px',
-                                                            borderRadius: '4px',
-                                                            fontSize: '10px',
-                                                            fontWeight: '800',
-                                                            letterSpacing: '0.3px'
-                                                        }}>
-                                                            {partner}
-                                                        </span>
-                                                        <span style={{
-                                                            backgroundColor: isSealed ? '#dc2626' : '#f3f4f6',
-                                                            color: isSealed ? '#ffffff' : '#374151',
-                                                            border: isSealed ? 'none' : '1px solid #e5e7eb',
-                                                            padding: '2px 6px',
-                                                            borderRadius: '4px',
-                                                            fontSize: '10px',
-                                                            fontWeight: '700'
-                                                        }}>
-                                                            {isSealed ? 'SEALED' : `${bag.parcelCount} Pcs`}
-                                                        </span>
-                                                    </button>
-                                                );
-                                            })}
+                                                    return (
+                                                        <button
+                                                            key={bag.bagNumber}
+                                                            onClick={() => setActiveOutboundBag(bag)}
+                                                            style={{
+                                                                backgroundColor: '#ffffff',
+                                                                color: '#374151',
+                                                                border: isActive
+                                                                    ? `2px solid ${partnerBorderColor}`
+                                                                    : '1px solid #d1d5db',
+                                                                borderRadius: '8px',
+                                                                padding: '10px 14px',
+                                                                fontSize: '12px',
+                                                                fontWeight: '600',
+                                                                cursor: 'pointer',
+                                                                display: 'inline-flex',
+                                                                alignItems: 'center',
+                                                                gap: '8px'
+                                                            }}
+                                                        >
+                                                            <span>{bag.bagNumber}</span>
+                                                            <span style={{
+                                                                backgroundColor: partnerBgColor,
+                                                                color: partnerTextColor,
+                                                                padding: '2px 7px',
+                                                                borderRadius: '4px',
+                                                                fontSize: '10px',
+                                                                fontWeight: '800',
+                                                                letterSpacing: '0.3px'
+                                                            }}>
+                                                                {partner}
+                                                            </span>
+                                                            <span style={{
+                                                                backgroundColor: isSealed ? '#dc2626' : '#f3f4f6',
+                                                                color: isSealed ? '#ffffff' : '#374151',
+                                                                border: isSealed ? 'none' : '1px solid #e5e7eb',
+                                                                padding: '2px 6px',
+                                                                borderRadius: '4px',
+                                                                fontSize: '10px',
+                                                                fontWeight: '700'
+                                                            }}>
+                                                                {isSealed ? 'SEALED' : `${bag.parcelCount} Pcs`}
+                                                            </span>
+                                                        </button>
+                                                    );
+                                                });
+                                            })()}
 
-                                            {outboundBags.length === 0 && (
+                                            {(outboundBags || []).length === 0 && (
                                                 <span style={{ fontSize: '12px', color: '#6b7280', fontStyle: 'italic' }}>
                                                     No outbound bags created yet for this manifest. Click <strong>"+ Create New Outbound Bag"</strong> to start bagging.
                                                 </span>

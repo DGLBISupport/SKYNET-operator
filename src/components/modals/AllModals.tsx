@@ -13,6 +13,7 @@ export default function AllModals({
     createManifestModalOpen,
     currentUser,
     customBagNumber,
+    customManifestName,
     customConfirmModal,
     customDiscrepancyNote,
     damagedSelectedPhotosModal,
@@ -43,6 +44,9 @@ export default function AllModals({
     inputStyle,
     invalidBagParcelModal,
     invalidBarcodeModal,
+    isCreatingBag,
+    isCreatingManifest,
+    isSealingBag,
     isDeviceManagerOpen,
     label,
     manifestClosedModal,
@@ -68,6 +72,7 @@ export default function AllModals({
     setCreateBagModalOpen,
     setCreateManifestModalOpen,
     setCustomBagNumber,
+    setCustomManifestName,
     setCustomConfirmModal,
     setCustomDiscrepancyNote,
     setDamagedSelectedPhotosModal,
@@ -2603,7 +2608,13 @@ export default function AllModals({
                                     </label>
                                     <select
                                         value={selectedProviderForManifest}
-                                        onChange={(e: any) => setSelectedProviderForManifest(e.target.value)}
+                                        onChange={(e: any) => {
+                                            const p = e.target.value;
+                                            setSelectedProviderForManifest(p);
+                                            if (setCustomManifestName && getNextManifestPreviewCode) {
+                                                setCustomManifestName(getNextManifestPreviewCode(p));
+                                            }
+                                        }}
                                         style={{ ...inputStyle, width: '100%', fontWeight: '700', padding: '10px' }}
                                     >
                                         <option value="PickMe">PickMe Express</option>
@@ -2613,48 +2624,82 @@ export default function AllModals({
                                     </select>
                                 </div>
 
-                                <div style={{ backgroundColor: '#f9fafb', border: '1px border #e5e7eb', borderRadius: '8px', padding: '12px 14px' }}>
-                                    <div style={{ fontSize: '11px', fontWeight: '700', color: '#6b7280', textTransform: 'uppercase', marginBottom: '4px' }}>
-                                        Manifest Code Format Preview:
-                                    </div>
-                                    <div style={{ fontSize: '15px', fontWeight: '800', color: '#e21b22', fontFamily: 'monospace' }}>
-                                        {getNextManifestPreviewCode(selectedProviderForManifest)}
-                                    </div>
-                                    <div style={{ fontSize: '11px', color: '#6b7280', marginTop: '4px' }}>
-                                        Sequence suffix (-01, -02) will automatically calculate based on existing manifests for today.
-                                    </div>
+                                <div>
+                                    <label style={{ fontSize: '12px', fontWeight: '800', color: '#374151', display: 'block', marginBottom: '6px' }}>
+                                        Manifest Name / Reference:
+                                    </label>
+                                    <input
+                                        disabled={Boolean(isCreatingManifest)}
+                                        type="text"
+                                        value={customManifestName !== undefined && customManifestName !== '' ? customManifestName : getNextManifestPreviewCode(selectedProviderForManifest)}
+                                        onChange={(e) => setCustomManifestName && setCustomManifestName(e.target.value)}
+                                        style={{
+                                            ...inputStyle,
+                                            width: '100%',
+                                            fontWeight: '800',
+                                            fontFamily: 'monospace',
+                                            fontSize: '14px',
+                                            color: '#e21b22',
+                                            padding: '10px 12px',
+                                            backgroundColor: isCreatingManifest ? '#f3f4f6' : '#ffffff',
+                                            border: '1px solid #d1d5db',
+                                            borderRadius: '8px',
+                                            opacity: isCreatingManifest ? 0.7 : 1
+                                        }}
+                                        placeholder="Enter or edit Manifest Name / Reference"
+                                    />
+                                    <span style={{ fontSize: '11px', color: '#6b7280', marginTop: '4px', display: 'block' }}>
+                                        Auto-generated format. You can edit or customize the manifest name if needed.
+                                    </span>
                                 </div>
                             </div>
 
                             <div style={{ display: 'flex', gap: '10px', marginTop: '10px' }}>
                                 <button
                                     onClick={handleCreateOutboundManifest}
+                                    disabled={Boolean(isCreatingManifest)}
                                     style={{
                                         flex: 1,
-                                        backgroundColor: '#111827',
+                                        backgroundColor: isCreatingManifest ? '#4b5563' : '#111827',
                                         color: '#ffffff',
                                         border: 'none',
                                         borderRadius: '8px',
                                         padding: '12px',
                                         fontSize: '13px',
                                         fontWeight: '800',
-                                        cursor: 'pointer'
+                                        cursor: isCreatingManifest ? 'not-allowed' : 'pointer',
+                                        display: 'flex',
+                                        alignItems: 'center',
+                                        justifyContent: 'center',
+                                        gap: '8px',
+                                        transition: 'all 0.2s ease',
+                                        boxShadow: isCreatingManifest ? 'none' : '0 2px 4px rgba(0, 0, 0, 0.2)'
                                     }}
                                 >
-                                    Generate & Open Manifest
+                                    {isCreatingManifest ? (
+                                        <>
+                                            <svg style={{ animation: 'spin 1s linear infinite', width: '16px', height: '16px' }} viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                                                <circle cx="12" cy="12" r="9" stroke="currentColor" strokeWidth="3" strokeDasharray="30 60" />
+                                            </svg>
+                                            <span>Generating Manifest...</span>
+                                        </>
+                                    ) : (
+                                        <span>Generate &amp; Open Manifest</span>
+                                    )}
                                 </button>
                                 <button
                                     onClick={() => setCreateManifestModalOpen(false)}
+                                    disabled={Boolean(isCreatingManifest)}
                                     style={{
                                         flex: 1,
                                         backgroundColor: '#ffffff',
                                         border: '1px solid #d1d5db',
-                                        color: '#374151',
+                                        color: isCreatingManifest ? '#9ca3af' : '#374151',
                                         borderRadius: '8px',
                                         padding: '12px',
                                         fontSize: '13px',
                                         fontWeight: '600',
-                                        cursor: 'pointer'
+                                        cursor: isCreatingManifest ? 'not-allowed' : 'pointer'
                                     }}
                                 >
                                     Cancel
@@ -2692,7 +2737,13 @@ export default function AllModals({
                                 <h3 style={{ fontSize: '16px', fontWeight: '800', color: '#111827', margin: 0, display: 'flex', alignItems: 'center', gap: '6px' }}>
                                     <span>Create Outbound LMD Bag</span>
                                 </h3>
-                                <button onClick={() => setCreateBagModalOpen(false)} style={{ background: 'none', border: 'none', fontSize: '18px', cursor: 'pointer', color: '#6b7280', fontWeight: 'bold' }}>✕</button>
+                                <button 
+                                    disabled={Boolean(isCreatingBag)}
+                                    onClick={() => !isCreatingBag && setCreateBagModalOpen(false)} 
+                                    style={{ background: 'none', border: 'none', fontSize: '18px', cursor: isCreatingBag ? 'not-allowed' : 'pointer', color: '#6b7280', fontWeight: 'bold' }}
+                                >
+                                    ✕
+                                </button>
                             </div>
 
                             <div style={{ fontSize: '13px', color: '#111827', marginBottom: '-4px' }}>
@@ -2705,6 +2756,7 @@ export default function AllModals({
                                         Destination Hub Name:
                                     </label>
                                     <select
+                                        disabled={Boolean(isCreatingBag)}
                                         value={newBagPartner}
                                         onChange={(e: any) => {
                                             const p = e.target.value as 'PickMe' | 'Domex' | 'SITREK' | 'Pronto';
@@ -2713,7 +2765,7 @@ export default function AllModals({
                                             const partnerCode = `-${p.toUpperCase()}`;
                                             setCustomBagNumber(`${mawbPrefix}${partnerCode}-BAG-${String((outboundBags?.length || 0) + 1).padStart(2, '0')}`);
                                         }}
-                                        style={{ ...inputStyle, width: '100%', fontWeight: '700', padding: '10px' }}
+                                        style={{ ...inputStyle, width: '100%', fontWeight: '700', padding: '10px', opacity: isCreatingBag ? 0.7 : 1 }}
                                     >
                                         <option value="PickMe">PickMe Courier</option>
                                         <option value="Domex">Domex Express</option>
@@ -2727,10 +2779,11 @@ export default function AllModals({
                                         Assigning Bag Number:
                                     </label>
                                     <input
+                                        disabled={Boolean(isCreatingBag)}
                                         type="text"
                                         value={customBagNumber !== '' ? customBagNumber : `${selectedSecondScanMawb ? selectedSecondScanMawb : 'LMD'}-${newBagPartner.toUpperCase()}-BAG-${String((outboundBags?.length || 0) + 1).padStart(2, '0')}`}
                                         onChange={(e) => setCustomBagNumber(e.target.value)}
-                                        style={{ ...inputStyle, width: '100%', fontWeight: '700', fontFamily: "'Inter', sans-serif", padding: '10px', backgroundColor: '#ffffff', border: '1px solid #d1d5db' }}
+                                        style={{ ...inputStyle, width: '100%', fontWeight: '700', fontFamily: "'Inter', sans-serif", padding: '10px', backgroundColor: isCreatingBag ? '#f3f4f6' : '#ffffff', border: '1px solid #d1d5db', opacity: isCreatingBag ? 0.7 : 1 }}
                                         placeholder="Enter or edit Bag Number"
                                     />
                                     <span style={{ fontSize: '10px', color: '#6b7280', marginTop: '2px', display: 'block' }}>
@@ -2742,32 +2795,49 @@ export default function AllModals({
                             <div style={{ display: 'flex', gap: '10px', marginTop: '10px' }}>
                                 <button
                                     onClick={handleCreateOutboundBag}
+                                    disabled={Boolean(isCreatingBag)}
                                     style={{
                                         flex: 1,
-                                        backgroundColor: '#e21b22',
+                                        backgroundColor: isCreatingBag ? '#9ca3af' : '#e21b22',
                                         color: '#ffffff',
                                         border: 'none',
                                         borderRadius: '8px',
                                         padding: '12px',
                                         fontSize: '13px',
                                         fontWeight: '800',
-                                        cursor: 'pointer'
+                                        cursor: isCreatingBag ? 'not-allowed' : 'pointer',
+                                        display: 'flex',
+                                        alignItems: 'center',
+                                        justifyContent: 'center',
+                                        gap: '8px',
+                                        transition: 'all 0.2s ease',
+                                        boxShadow: isCreatingBag ? 'none' : '0 2px 6px rgba(226, 27, 34, 0.35)'
                                     }}
                                 >
-                                    Create Outbound LMD Bag
+                                    {isCreatingBag ? (
+                                        <>
+                                            <svg style={{ animation: 'spin 1s linear infinite', width: '16px', height: '16px' }} viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                                                <circle cx="12" cy="12" r="9" stroke="currentColor" strokeWidth="3" strokeDasharray="30 60" />
+                                            </svg>
+                                            <span>Creating Outbound Bag...</span>
+                                        </>
+                                    ) : (
+                                        <span>Create Outbound LMD Bag</span>
+                                    )}
                                 </button>
                                 <button
                                     onClick={() => setCreateBagModalOpen(false)}
+                                    disabled={Boolean(isCreatingBag)}
                                     style={{
                                         flex: 1,
                                         backgroundColor: '#ffffff',
                                         border: '1px solid #d1d5db',
-                                        color: '#374151',
+                                        color: isCreatingBag ? '#9ca3af' : '#374151',
                                         borderRadius: '8px',
                                         padding: '12px',
                                         fontSize: '13px',
                                         fontWeight: '600',
-                                        cursor: 'pointer'
+                                        cursor: isCreatingBag ? 'not-allowed' : 'pointer'
                                     }}
                                 >
                                     Cancel

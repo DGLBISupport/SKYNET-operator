@@ -225,6 +225,7 @@ def create_upload_request() -> str:
                         <ItemWeightMeasure>G</ItemWeightMeasure>
                         <ItemNotes></ItemNotes>
                         <ItemBagNumber></ItemBagNumber>
+                        <ItemCubicWeight>0</ItemCubicWeight>
                         <Pieces>
                             <Piece>
                                 <PieceRef>SKU015</PieceRef>

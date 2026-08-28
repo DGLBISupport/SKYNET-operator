@@ -346,6 +346,7 @@ def build_shipment_xml(detail: dict, bag_number: str, fix_weight: bool = True) -
                         <ItemWeightMeasure>G</ItemWeightMeasure>
                         <ItemNotes>{esc(detail.get("notes", ""))}</ItemNotes>
                         <ItemBagNumber>{esc(bag_number)}</ItemBagNumber>
+                        <ItemCubicWeight>0</ItemCubicWeight>
                         <Pieces>
                             <Piece>
                                 <PieceRef>{esc(sender_ref or ref)}</PieceRef>

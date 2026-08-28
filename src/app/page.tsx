@@ -321,6 +321,7 @@ export default function WorkstationDashboard() {
     }>>([]);
     const [createManifestModalOpen, setCreateManifestModalOpen] = useState(false);
     const [selectedProviderForManifest, setSelectedProviderForManifest] = useState<'PickMe' | 'Domex' | 'SITREK' | 'Pronto'>('PickMe');
+    const [customManifestName, setCustomManifestName] = useState('');
     const [outboundBags, setOutboundBags] = useState<Array<{
         bagNumber: string;
         mawbRef: string;
@@ -336,6 +337,9 @@ export default function WorkstationDashboard() {
     }>>([]);
     const [activeOutboundBag, setActiveOutboundBag] = useState<any | null>(null);
     const [createBagModalOpen, setCreateBagModalOpen] = useState(false);
+    const [isCreatingBag, setIsCreatingBag] = useState(false);
+    const [isCreatingManifest, setIsCreatingManifest] = useState(false);
+    const [isSealingBag, setIsSealingBag] = useState(false);
     const [newBagPartner, setNewBagPartner] = useState<'PickMe' | 'Domex' | 'SITREK' | 'Pronto'>('PickMe');
     const [newBagHub, setNewBagHub] = useState('');
     const [customBagNumber, setCustomBagNumber] = useState('');
@@ -2134,10 +2138,15 @@ export default function WorkstationDashboard() {
     };
 
     const handleCreateOutboundManifest = async () => {
+        if (isCreatingManifest) return;
+        setIsCreatingManifest(true);
         try {
             const activeOperator = currentUser
                 ? `${currentUser.firstName || ''} ${currentUser.lastName || ''}`.trim() || currentUser.username || currentUser.email
                 : 'Staff';
+
+            const defaultCode = getNextManifestPreviewCode(selectedProviderForManifest);
+            const finalManifestRef = customManifestName.trim() || defaultCode;
 
             const res = await fetch('/api/lmd-bags', {
                 method: 'POST',
@@ -2145,6 +2154,8 @@ export default function WorkstationDashboard() {
                 body: JSON.stringify({
                     action: 'create-manifest',
                     providerName: selectedProviderForManifest,
+                    manifestReference: finalManifestRef,
+                    customManifestReference: finalManifestRef,
                     operator: activeOperator,
                     openedBy: currentUser?.id
                 })
@@ -2153,6 +2164,7 @@ export default function WorkstationDashboard() {
             if (data.success && data.manifest) {
                 const newRef = data.manifest.manifest_reference;
                 setCreateManifestModalOpen(false);
+                setCustomManifestName('');
                 setSelectedSecondScanMawb(newRef);
                 await fetchOutboundManifests();
                 await fetchOutboundBags(newRef);
@@ -2167,6 +2179,8 @@ export default function WorkstationDashboard() {
         } catch (err: any) {
             setErrorMessage(err.message || 'Server error creating outbound manifest.');
             setStatus('ERROR');
+        } finally {
+            setIsCreatingManifest(false);
         }
     };
 
@@ -2190,6 +2204,8 @@ export default function WorkstationDashboard() {
     };
 
     const handleCreateOutboundBag = async () => {
+        if (isCreatingBag) return;
+
         if (secondScanManifestStatus === 'CLOSED') {
             setErrorMessage(`Manifest "${selectedSecondScanMawb}" is CLOSED. No additional bags can be created.`);
             setStatus('ERROR');
@@ -2212,6 +2228,7 @@ export default function WorkstationDashboard() {
         const defaultCalculatedBagNumber = `${selectedSecondScanMawb}-${newBagPartner.toUpperCase()}-BAG-${String((outboundBags?.length || 0) + 1).padStart(2, '0')}`;
         const finalBagNumber = customBagNumber.trim() || defaultCalculatedBagNumber;
 
+        setIsCreatingBag(true);
         try {
             const res = await fetch('/api/lmd-bags', {
                 method: 'POST',
@@ -2228,7 +2245,8 @@ export default function WorkstationDashboard() {
             });
             const data = await res.json();
             if (data.success && data.bag) {
-                setOutboundBags(prev => [data.bag, ...prev]);
+                // Deduplicate state by bagNumber to guarantee no duplicate bags exist on UI
+                setOutboundBags(prev => [data.bag, ...prev.filter(b => b.bagNumber !== data.bag.bagNumber)]);
                 setActiveOutboundBag(data.bag);
                 setCreateBagModalOpen(false);
                 setCustomBagNumber('');
@@ -2243,6 +2261,8 @@ export default function WorkstationDashboard() {
         } catch (err: any) {
             setErrorMessage(err.message || 'Server error creating bag.');
             setStatus('ERROR');
+        } finally {
+            setIsCreatingBag(false);
         }
     };
 
@@ -2402,7 +2422,8 @@ export default function WorkstationDashboard() {
     };
 
     const handleSealOutboundBag = async (bagNumber: string) => {
-        if (!activeOutboundBag) return;
+        if (!bagNumber || isSealingBag) return;
+        setIsSealingBag(true);
         const activeOperator = currentUser
             ? `${currentUser.firstName || ''} ${currentUser.lastName || ''}`.trim() || currentUser.username || currentUser.email
             : 'Staff';
@@ -2414,13 +2435,13 @@ export default function WorkstationDashboard() {
                     action: 'seal',
                     mawbRef: selectedSecondScanMawb,
                     bagNumber: bagNumber,
-                    targetPartner: activeOutboundBag.targetPartner || 'ALL',
-                    destinationHub: activeOutboundBag.destinationHub || (activeOutboundBag.targetPartner && activeOutboundBag.targetPartner !== 'ALL' ? `${activeOutboundBag.targetPartner}` : 'Main Sort Hub'),
+                    targetPartner: activeOutboundBag?.targetPartner || 'ALL',
+                    destinationHub: activeOutboundBag?.destinationHub || (activeOutboundBag?.targetPartner && activeOutboundBag?.targetPartner !== 'ALL' ? `${activeOutboundBag?.targetPartner}` : 'Main Sort Hub'),
                     operator: activeOperator,
                     closedBy: currentUser?.id,
-                    parcelCount: activeOutboundBag.parcelCount,
-                    totalWeight: activeOutboundBag.totalWeight,
-                    parcels: activeOutboundBag.parcels
+                    parcelCount: activeOutboundBag?.parcelCount,
+                    totalWeight: activeOutboundBag?.totalWeight,
+                    parcels: activeOutboundBag?.parcels
                 })
             });
             const data = await res.json();
@@ -2438,6 +2459,8 @@ export default function WorkstationDashboard() {
             }
         } catch (err: any) {
             setErrorMessage(err.message || 'Server error sealing bag.');
+        } finally {
+            setIsSealingBag(false);
         }
     };
 
@@ -3272,6 +3295,7 @@ export default function WorkstationDashboard() {
         currentScan,
         currentUser,
         customBagNumber,
+        customManifestName,
         customConfirmModal,
         customDiscrepancyNote,
         damagedBarcodeInput,
@@ -3372,6 +3396,9 @@ export default function WorkstationDashboard() {
         invalidBagParcelModal,
         invalidBarcodeModal,
         isBagsLoading,
+        isCreatingBag,
+        isCreatingManifest,
+        isSealingBag,
         isDeviceManagerOpen,
         isLoadingDashboard,
         isLoadingManifestTracking,
@@ -3439,6 +3466,7 @@ export default function WorkstationDashboard() {
         setCurrentScan,
         setCurrentUser,
         setCustomBagNumber,
+        setCustomManifestName,
         setCustomConfirmModal,
         setCustomDiscrepancyNote,
         setDamagedBarcodeInput,
