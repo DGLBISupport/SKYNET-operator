@@ -1,6 +1,7 @@
 'use client';
 import React from 'react';
 import PaginationControl from '@/app/components/PaginationControl';
+import { normalizeWeightToGrams, formatGramsToKg } from '@/lib/weightUtils';
 
 export default function SecondScanTab({
     activeOutboundBag,
@@ -396,7 +397,9 @@ export default function SecondScanTab({
                                                         </div>
                                                         <div>
                                                             <div style={{ fontSize: '10px', color: '#6b7280', textTransform: 'uppercase' }}>Total Weight</div>
-                                                            <div style={{ fontSize: '14px', fontWeight: '800', color: '#111827' }}>{activeOutboundBag.totalWeight || '0.00'} kg</div>
+                                                            <div style={{ fontSize: '14px', fontWeight: '800', color: '#111827' }}>
+                                                                {formatGramsToKg(activeOutboundBag.totalWeight || (activeOutboundBag.parcels || []).reduce((acc: number, p: any) => acc + normalizeWeightToGrams(p.weight), 0))} kg
+                                                            </div>
                                                         </div>
                                                     </div>
                                                 </div>
@@ -741,7 +744,7 @@ export default function SecondScanTab({
                                 <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px', textAlign: 'left' }}>
                                     <thead>
                                         <tr style={{ borderBottom: '2px solid #e5e7eb' }}>
-                                            {['Tracking no.', 'Initial Manifest', 'LMD Partner', 'Zone', 'Weight (kg)', 'Validation Status'].map(h => (
+                                            {['Tracking no.', 'Initial Manifest', 'LMD Partner', 'Zone', 'Weight (g)', 'Validation Status'].map(h => (
                                                 <th key={h} style={{ padding: '8px', color: '#6b7280', fontWeight: '600', fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.4px' }}>{h}</th>
                                             ))}
                                         </tr>
@@ -788,7 +791,7 @@ export default function SecondScanTab({
                                                         )}
                                                     </td>
                                                     <td style={{ padding: '8px', color: '#4b5563' }}>{parcel.province || parcel.assignedZone || 'Zone'}</td>
-                                                    <td style={{ padding: '8px', fontWeight: '600' }}>{parcel.weight || '0.1'} kg</td>
+                                                    <td style={{ padding: '8px', fontWeight: '600' }}>{normalizeWeightToGrams(parcel.weight)} g</td>
                                                     <td style={{ padding: '8px', color: '#6b7280' }}>
                                                         <span style={{
                                                             backgroundColor: '#ffffff',

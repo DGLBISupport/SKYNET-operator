@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { normalizeWeightToGrams } from '@/lib/weightUtils';
 
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
@@ -319,16 +320,17 @@ export async function GET(request: Request) {
                         try {
                             const itemsRes = await fetch(`${sb.url}/rest/v1/outbound_lmd_bag_items?bag_number=eq.${encodeURIComponent(bagNumber)}`, { headers: sb.headers });
                             const itemsData = await itemsRes.json();
-                            parcels = Array.isArray(itemsData) ? itemsData.map((it: any) => ({ trackingNumber: it.shipment_ref, weight: it.weight || 0.1, scannedBy: it.scanned_by })) : [];
+                            parcels = Array.isArray(itemsData) ? itemsData.map((it: any) => ({ trackingNumber: it.shipment_ref, weight: normalizeWeightToGrams(it.weight), scannedBy: it.scanned_by })) : [];
                         } catch (e) { parcels = []; }
                     }
                     const joinedManifest = row.outbound_manifests;
                     const resolvedMawbRef = joinedManifest?.manifest_reference || row.mawb_ref || '';
                     const resolvedManifestDbId = joinedManifest?.id || row.new_manifest_reference || null;
+                    const cumulativeWeight = parcels.reduce((acc, p) => acc + (Number(p.weight) || 0), 0);
                     const bag: OutboundBag = {
                         bagNumber: row.bag_number, mawbRef: resolvedMawbRef, manifestDbId: resolvedManifestDbId ? Number(resolvedManifestDbId) : undefined,
                         targetPartner: row.target_partner || 'ALL', destinationHub: row.destination_hub, status: row.status as 'OPEN' | 'SEALED',
-                        parcelCount: row.parcel_count || parcels.length, totalWeight: row.total_weight || 0, createdAt: row.created_at,
+                        parcelCount: row.parcel_count || parcels.length, totalWeight: cumulativeWeight > 0 ? cumulativeWeight : normalizeWeightToGrams(row.total_weight), createdAt: row.created_at,
                         sealedAt: row.sealed_at, sealedBy: row.sealed_by, operator: row.created_by || 'Staff', parcels
                     };
                     outboundBagsMap.set(bagNumber, bag);
@@ -614,7 +616,7 @@ export async function POST(request: Request) {
                     bag.parcels.unshift(newParcel);
                 }
                 bag.parcelCount = bag.parcels.length;
-                bag.totalWeight = Number((bag.parcels.reduce((acc, p) => acc + (Number(p.weight) || 0.1), 0)).toFixed(2));
+                bag.totalWeight = Math.round(bag.parcels.reduce((acc, p) => acc + (normalizeWeightToGrams(p.weight)), 0));
             }
             outboundBagsMap.set(bagNumber, bag);
             if (sb) {
@@ -632,7 +634,7 @@ export async function POST(request: Request) {
                                 body: JSON.stringify({
                                     bag_number: bagNumber,
                                     shipment_ref: tracking,
-                                    weight: Number(newParcel.weight) || 0.1,
+                                    weight: normalizeWeightToGrams(newParcel.weight),
                                     scanned_by: typeof operator === 'string' ? operator : 'Staff'
                                 })
                             }).catch(e => console.error("Optional bag items table update ignored:", e));

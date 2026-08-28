@@ -3,6 +3,7 @@ import fs from 'fs';
 import path from 'path';
 import os from 'os';
 import { SkyNetParcelData } from '@/types';
+import { normalizeWeightToGrams } from '@/lib/weightUtils';
 
 export const dynamic = 'force-dynamic';
 
@@ -460,7 +461,7 @@ export async function POST(request: Request) {
                 province: shipment.consignee_state || "Unknown Province",
                 district: shipment.consignee_address_3 || "Unknown District",
                 city: shipment.consignee_location_name || "Unknown City",
-                weight: shipment.weight_measure?.toUpperCase() === 'G' ? (shipment.weight || 0) / 1000 : (shipment.weight || 0),
+                weight: normalizeWeightToGrams(shipment.weight, shipment.weight_measure),
                 value: shipment.customs_value ? `${shipment.customs_currency_code || 'LKR'} ${shipment.customs_value.toFixed(2)}` : undefined,
                 account: shipment.shipper_code || undefined,
                 apiSync: allocation?.validated ? "Validated" : "Pending",
@@ -851,7 +852,7 @@ export async function POST(request: Request) {
             province: shipment.consignee_state || "Unknown Province",
             district: districtName || "Unknown District",
             city: cityName || "Unknown City",
-            weight: shipment.weight_measure?.toUpperCase() === 'G' ? (shipment.weight || 0) / 1000 : (shipment.weight || 0),
+            weight: normalizeWeightToGrams(shipment.weight, shipment.weight_measure),
             value: shipment.customs_value ? `${shipment.customs_currency_code || 'LKR'} ${shipment.customs_value.toFixed(2)}` : undefined,
             account: shipment.shipper_code || undefined,
             apiSync: allocation?.validated ? "Validated" : "Pending",
@@ -1367,7 +1368,7 @@ export async function GET(request: Request) {
                     city: s.consignee_location_name || s.consignee_address_3 || 'Unknown City',
                     assignedPartner: partnerMap[s.reference_number] || partnerMap[refLower] || 'Unknown',
                     assignedZone: s.delivery_route_code || 'Default-Zone',
-                    weight: s.weight || s.dead_weight || 0.1,
+                    weight: normalizeWeightToGrams(s.weight || s.dead_weight, s.weight_measure),
                     isUnsealed: isUnsealed
                 };
 

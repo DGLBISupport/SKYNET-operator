@@ -235,7 +235,7 @@ export async function GET(request: Request) {
                 deliveryAgentCode: pName,
                 bagNumber: s.bag_number || '',
                 consigneeLocation: s.consignee_location_name || 'N/A',
-                weight: s.weight ? `${s.weight} kg` : '-',
+                weight: s.weight ? `${s.weight} g` : '-',
                 createdAt: resolvedCreatedAt,
                 isSorted,
                 firstScanDone: isSorted,

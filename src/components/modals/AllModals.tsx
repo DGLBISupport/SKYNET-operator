@@ -1,6 +1,7 @@
 'use client';
 import React from 'react';
 import PaginationControl from '@/app/components/PaginationControl';
+import { formatGramsToKg, normalizeWeightToGrams } from '@/lib/weightUtils';
 
 export default function AllModals({
     activeTab,
@@ -822,7 +823,7 @@ export default function AllModals({
                                         <div>
                                             <div style={{ fontSize: '10px', fontWeight: '700', color: '#6b7280', textTransform: 'uppercase' }}>Total Weight</div>
                                             <div style={{ fontSize: '17px', fontWeight: '900', color: '#e21b22', marginTop: '2px' }}>
-                                                {manifestClosedModal.totalWeight} <span style={{ fontSize: '11px', fontWeight: '700' }}>kg</span>
+                                                {formatGramsToKg(manifestClosedModal.totalWeight)} <span style={{ fontSize: '11px', fontWeight: '700' }}>kg</span>
                                             </div>
                                         </div>
                                     </div>
@@ -2915,7 +2916,7 @@ export default function AllModals({
                                     </div>
                                     <div>
                                         <span style={{ color: '#6b7280', fontSize: '9px', textTransform: 'uppercase', display: 'block' }}>TOTAL WEIGHT</span>
-                                        <strong style={{ fontSize: '12px' }}>{printOutboundBagLabelModal.totalWeight || '0.00'} kg</strong>
+                                        <strong style={{ fontSize: '12px' }}>{formatGramsToKg(printOutboundBagLabelModal.totalWeight)} kg</strong>
                                     </div>
                                     <div>
                                         <span style={{ color: '#6b7280', fontSize: '9px', textTransform: 'uppercase', display: 'block' }}>DESTINATION HUB</span>

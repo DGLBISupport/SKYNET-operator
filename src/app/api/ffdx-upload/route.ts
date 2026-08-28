@@ -11,6 +11,7 @@
 
 import { NextResponse } from 'next/server';
 import { saveManifestToSupabaseStorage, ParcelLogData } from '@/lib/supabaseStorage';
+import { normalizeWeightToGrams } from '@/lib/weightUtils';
 
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
@@ -130,11 +131,10 @@ function buildShipmentXml(parcel: any, shipmentDetail: any | null, bagNumber: st
     const ref = shipmentDetail?.reference_number || parcel?.trackingNumber || parcel?.shipment_ref || '';
     const senderRef = shipmentDetail?.sender_reference || parcel?.senderReference || '';
 
-    // Calculate weight in grams
-    const rawWeight = Number(shipmentDetail?.weight) || Number(parcel?.weight) || 0.1;
-    const weightGrams = Math.round(rawWeight * 1000);
-    const deadWeightGrams = Math.round((Number(shipmentDetail?.dead_weight) || rawWeight) * 1000);
-    const declaredWeightGrams = Math.round((Number(shipmentDetail?.customer_declared_weight) || 0) * 1000);
+    // Weight in grams
+    const weightGrams = normalizeWeightToGrams(shipmentDetail?.weight || parcel?.weight, shipmentDetail?.weight_measure);
+    const deadWeightGrams = normalizeWeightToGrams(shipmentDetail?.dead_weight || shipmentDetail?.weight || parcel?.weight, shipmentDetail?.weight_measure);
+    const declaredWeightGrams = normalizeWeightToGrams(shipmentDetail?.customer_declared_weight, shipmentDetail?.weight_measure);
 
     // Consignor (Sender) properties from DB (real data only)
     const consignorName = escapeXml(shipmentDetail?.consignor_name || '');
@@ -410,7 +410,7 @@ function buildUploadXml(
     const scheduledArrival = escapeXml(headerInfo.scheduledArrival || '');
     const declaredWt = headerInfo.declaredWt !== undefined ? String(headerInfo.declaredWt) : '';
     const manifestedBy = escapeXml(headerInfo.manifestedBy || FFDX_UPDATE_ENTITY_ID);
-    const weightMeasure = escapeXml(headerInfo.weightMeasure || 'K');
+    const weightMeasure = escapeXml(headerInfo.weightMeasure || 'G');
 
     return `<?xml version='1.0' encoding='iso-8859-1' ?>
 <WSGET>

@@ -3,6 +3,7 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import { AllocationResponse, SkyNetParcelData } from '@/types';
+import { normalizeWeightToGrams } from '@/lib/weightUtils';
 import { toast } from 'sonner';
 import TrackingTab from '@/app/components/TrackingTab';
 import PaginationControl from '@/app/components/PaginationControl';
@@ -2677,7 +2678,7 @@ export default function WorkstationDashboard() {
                     const updatedBag = {
                         ...activeOutboundBag,
                         parcelCount: (activeOutboundBag.parcelCount || 0) + 1,
-                        totalWeight: Number(((activeOutboundBag.totalWeight || 0) + (data.parcel?.weight || 0.1)).toFixed(2)),
+                        totalWeight: Math.round((activeOutboundBag.totalWeight || 0) + normalizeWeightToGrams(data.parcel?.weight)),
                         parcels: [parcelToStore, ...(activeOutboundBag.parcels || [])]
                     };
                     setActiveOutboundBag(updatedBag);
@@ -3140,7 +3141,7 @@ export default function WorkstationDashboard() {
                     { lbl: 'Recipient', val: parcel.recipientName },
                     { lbl: 'City', val: parcel.city },
                     { lbl: 'District', val: parcel.district },
-                    { lbl: 'Weight', val: `${parcel.weight.toFixed(3)} kg` },
+                    { lbl: 'Weight', val: parcel.weight !== undefined && parcel.weight !== null ? `${normalizeWeightToGrams(parcel.weight)} g` : '—' },
                     { lbl: 'Value', val: parcel.value || 'LKR 0.00' },
                     { lbl: 'Account', val: parcel.account || '—' },
                     //{ lbl: 'API sync', val: <span style={{ color: '#16a34a', fontWeight: '600' }}>✓ {parcel.apiSync || 'Synced'}</span> },

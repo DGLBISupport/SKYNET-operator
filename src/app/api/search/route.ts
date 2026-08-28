@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { normalizeWeightToGrams } from '@/lib/weightUtils';
 
 export const dynamic = 'force-dynamic';
 
@@ -103,7 +104,7 @@ export async function GET(request: Request) {
                             city: s.consignee_location_name || s.consignee_address_3 || 'Unknown City',
                             assignedPartner: partnerMap[s.reference_number] || 'Unknown',
                             assignedZone: s.delivery_route_code || 'Default-Zone',
-                            weight: s.weight || s.dead_weight || 0.1,
+                            weight: normalizeWeightToGrams(s.weight || s.dead_weight),
                             goodsDescription: s.goods_description || '',
                             firstScanDone: scanInfo?.firstScanDone ?? false,
                             status: scanInfo?.scanStatus || 'PENDING',
@@ -142,7 +143,9 @@ export async function GET(request: Request) {
                             destinationHub: b.destination_hub,
                             status: b.status,
                             parcelCount: b.parcel_count || parsedParcels.length,
-                            totalWeight: b.total_weight || 0,
+                            totalWeight: (parsedParcels && parsedParcels.length > 0)
+                                ? parsedParcels.reduce((sum: number, p: any) => sum + normalizeWeightToGrams(p.weight), 0)
+                                : normalizeWeightToGrams(b.total_weight),
                             createdBy: b.created_by || 'Staff',
                             createdAt: b.created_at,
                             sealedAt: b.sealed_at,

@@ -3,6 +3,7 @@ import React from 'react';
 import * as XLSX from 'xlsx';
 import { toast } from 'sonner';
 import PaginationControl from '@/app/components/PaginationControl';
+import { normalizeWeightToGrams, formatGramsToKg, getGramsAsKgNumber } from '@/lib/weightUtils';
 
 export default function ManifestTrackingTab({
     expandedBags,
@@ -21,6 +22,9 @@ export default function ManifestTrackingTab({
     setManifestTrackingStatusFilter,
     status
 }: any) {
+    const formatKg = (grams: number | string | undefined | null): string => formatGramsToKg(grams, 2);
+    const getWeightInKgNumber = (grams: number | string | undefined | null): number => getGramsAsKgNumber(grams);
+
     // Helper to sanitize and avoid duplicate sheet names in XLSX (max 31 chars)
     const getUniqueSheetName = (name: string, fallback: string, existingNames: Set<string>): string => {
         let clean = (name || '').replace(/[/\\?%*:|"[\]]/g, '_').trim().slice(0, 31);
@@ -61,7 +65,9 @@ export default function ManifestTrackingTab({
 
             const totalParcelsCount = manifest.total_parcels || allParcels.length;
             const totalWeight = manifestBags.reduce((sum: number, b: any) => {
-                const bWeight = Number(b.total_weight) || (b.parcels || []).reduce((pSum: number, p: any) => pSum + (Number(p.weight) || 0), 0);
+                const bWeight = (b.parcels && b.parcels.length > 0)
+                    ? b.parcels.reduce((pSum: number, p: any) => pSum + normalizeWeightToGrams(p.weight), 0)
+                    : normalizeWeightToGrams(b.total_weight);
                 return sum + bWeight;
             }, 0);
 
@@ -72,7 +78,7 @@ export default function ManifestTrackingTab({
                 { 'Field': 'Manifest Status', 'Value': manifest.status || 'OPEN' },
                 { 'Field': 'Total Bags', 'Value': manifestBags.length || manifest.total_bags || 0 },
                 { 'Field': 'Total Parcels', 'Value': totalParcelsCount },
-                { 'Field': 'Total Weight (kg)', 'Value': Math.round(totalWeight * 100) / 100 },
+                { 'Field': 'Total Weight (kg)', 'Value': getWeightInKgNumber(totalWeight) },
                 { 'Field': 'Created / Opened By', 'Value': manifest.opened_by || manifest.created_by || 'Staff' },
                 { 'Field': 'Created / Opened At', 'Value': manifest.created_at ? new Date(manifest.created_at).toLocaleString('en-GB') : '—' },
                 { 'Field': 'Closed By', 'Value': manifest.closed_by || (manifest.status === 'CLOSED' ? 'Staff' : '—') },
@@ -91,7 +97,7 @@ export default function ManifestTrackingTab({
                 'Target Partner': bag.target_partner || 'ALL',
                 'Destination Hub': bag.destination_hub || '—',
                 'Parcel Count': bag.parcel_count || (bag.parcels || []).length || 0,
-                'Total Weight (kg)': Math.round((Number(bag.total_weight) || (bag.parcels || []).reduce((s: number, p: any) => s + (Number(p.weight) || 0), 0)) * 100) / 100,
+                'Total Weight (kg)': getWeightInKgNumber(Number(bag.total_weight) || (bag.parcels || []).reduce((s: number, p: any) => s + (Number(p.weight) || 0), 0)),
                 'Opened By': bag.opened_by || bag.created_by || 'Staff',
                 'Opened At': bag.opened_at || bag.created_at ? new Date(bag.opened_at || bag.created_at).toLocaleString('en-GB') : '—',
                 'Closed By': bag.closed_by || bag.sealed_by || (bag.status === 'SEALED' ? 'Staff' : '—'),
@@ -130,7 +136,7 @@ export default function ManifestTrackingTab({
                     'Inbound Manifest (MAWB)': p.inboundManifest || p.initialManifest || p.mawbRef || '—',
                     'Inbound Bag': p.inboundBag || p.initialBag || p.bagNumber || p.bag_number || '—',
                     'LMD Partner': partner,
-                    'Weight (kg)': p.weight ? Number(p.weight) : 0,
+                    'Weight (g)': normalizeWeightToGrams(p.weight),
                     'Recipient Name': p.recipientName || '—',
                     'Destination City': p.city || '—',
                     'Scanned By': p.scannedBy || 'Staff',
@@ -169,7 +175,7 @@ export default function ManifestTrackingTab({
                         'Inbound Manifest (MAWB)': p.inboundManifest || p.initialManifest || p.mawbRef || '—',
                         'Inbound Bag': p.inboundBag || p.initialBag || p.bagNumber || p.bag_number || '—',
                         'LMD Partner': partner,
-                        'Weight (kg)': p.weight ? Number(p.weight) : 0,
+                        'Weight (g)': normalizeWeightToGrams(p.weight),
                         'Recipient Name': p.recipientName || '—',
                         'Destination City': p.city || '—',
                         'Scanned By': p.scannedBy || 'Staff',
@@ -219,7 +225,7 @@ export default function ManifestTrackingTab({
                 { 'Field': 'Target Partner', 'Value': bag.target_partner || 'ALL' },
                 { 'Field': 'Destination Hub', 'Value': bag.destination_hub || '—' },
                 { 'Field': 'Parcel Count', 'Value': bag.parcel_count || (bag.parcels || []).length || 0 },
-                { 'Field': 'Total Weight (kg)', 'Value': Math.round((Number(bag.total_weight) || 0) * 100) / 100 },
+                { 'Field': 'Total Weight (kg)', 'Value': getWeightInKgNumber(Number(bag.total_weight) || (bag.parcels || []).reduce((s: number, p: any) => s + (Number(p.weight) || 0), 0)) },
                 { 'Field': 'Opened By', 'Value': bag.opened_by || bag.created_by || 'Staff' },
                 { 'Field': 'Opened At', 'Value': bag.opened_at || bag.created_at ? new Date(bag.opened_at || bag.created_at).toLocaleString('en-GB') : '—' },
                 { 'Field': 'Closed By', 'Value': bag.closed_by || bag.sealed_by || (bag.status === 'SEALED' ? 'Staff' : '—') },
@@ -243,7 +249,7 @@ export default function ManifestTrackingTab({
                     'Inbound Manifest (MAWB)': p.inboundManifest || p.initialManifest || p.mawbRef || '—',
                     'Inbound Bag': p.inboundBag || p.initialBag || p.bagNumber || p.bag_number || '—',
                     'LMD Partner': partner,
-                    'Weight (kg)': p.weight ? Number(p.weight) : 0,
+                    'Weight (g)': normalizeWeightToGrams(p.weight),
                     'Recipient Name': p.recipientName || '—',
                     'Destination City': p.city || '—',
                     'Scanned By': p.scannedBy || 'Staff',
@@ -294,6 +300,7 @@ export default function ManifestTrackingTab({
                 'Status': m.status || 'OPEN',
                 'Total Bags': m.bags?.length || m.total_bags || 0,
                 'Total Parcels': m.total_parcels || 0,
+                'Total Weight (kg)': getWeightInKgNumber(m.total_weight || (m.bags || []).reduce((acc: number, b: any) => acc + (Number(b.total_weight) || (b.parcels || []).reduce((ps: number, p: any) => ps + (Number(p.weight) || 0), 0)), 0)),
                 'Created / Opened By': m.opened_by || m.created_by || 'Staff',
                 'Created At': m.created_at ? new Date(m.created_at).toLocaleString('en-GB') : '—',
                 'Closed By': m.closed_by || (m.status === 'CLOSED' ? 'Staff' : '—'),
@@ -301,7 +308,7 @@ export default function ManifestTrackingTab({
             }));
             const mWs = XLSX.utils.json_to_sheet(manifestsOverview);
             mWs['!cols'] = [
-                { wch: 6 }, { wch: 24 }, { wch: 24 }, { wch: 12 }, { wch: 12 }, { wch: 14 }, { wch: 18 }, { wch: 22 }, { wch: 18 }, { wch: 22 }
+                { wch: 6 }, { wch: 24 }, { wch: 24 }, { wch: 12 }, { wch: 12 }, { wch: 14 }, { wch: 18 }, { wch: 18 }, { wch: 22 }, { wch: 18 }, { wch: 22 }
             ];
             XLSX.utils.book_append_sheet(wb, mWs, 'Manifests Summary');
 
@@ -317,7 +324,7 @@ export default function ManifestTrackingTab({
                         'Target Partner': b.target_partner || 'ALL',
                         'Destination Hub': b.destination_hub || '—',
                         'Parcel Count': b.parcel_count || (b.parcels || []).length || 0,
-                        'Total Weight (kg)': Math.round((Number(b.total_weight) || 0) * 100) / 100,
+                        'Total Weight (kg)': getWeightInKgNumber(Number(b.total_weight) || (b.parcels || []).reduce((s: number, p: any) => s + (Number(p.weight) || 0), 0)),
                         'Opened By': b.opened_by || b.created_by || 'Staff',
                         'Opened At': b.opened_at || b.created_at ? new Date(b.opened_at || b.created_at).toLocaleString('en-GB') : '—',
                         'Closed By': b.closed_by || b.sealed_by || (b.status === 'SEALED' ? 'Staff' : '—'),
@@ -349,7 +356,7 @@ export default function ManifestTrackingTab({
                             'Inbound Manifest (MAWB)': p.inboundManifest || p.initialManifest || p.mawbRef || '—',
                             'Inbound Bag': p.inboundBag || p.initialBag || p.bagNumber || p.bag_number || '—',
                             'LMD Partner': partner,
-                            'Weight (kg)': p.weight ? Number(p.weight) : 0,
+                            'Weight (g)': normalizeWeightToGrams(p.weight),
                             'Recipient Name': p.recipientName || '—',
                             'Destination City': p.city || '—',
                             'Scanned By': p.scannedBy || 'Staff',
@@ -452,7 +459,7 @@ export default function ManifestTrackingTab({
                                                 {manifestTrackingData?.stats?.totalParcels || 0}
                                             </div>
                                             <div style={{ fontSize: '12px', color: '#6b7280', fontWeight: '500' }}>
-                                                Total Weight: <strong style={{ color: '#111827' }}>{manifestTrackingData?.stats?.totalWeight || 0} kg</strong>
+                                                Total Weight: <strong style={{ color: '#111827' }}>{formatKg(manifestTrackingData?.stats?.totalWeight)} kg</strong>
                                             </div>
                                         </div>
 
@@ -465,9 +472,10 @@ export default function ManifestTrackingTab({
                                                 {Object.entries(manifestTrackingData?.stats?.partnerStats || {}).map(([partner, pStats]: [string, any]) => (
                                                     <div key={partner} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: '12px' }}>
                                                         <span style={{ fontWeight: '600', color: '#374151' }}>{partner}</span>
-                                                        <div style={{ display: 'flex', gap: '8px', fontSize: '11px' }}>
+                                                        <div style={{ display: 'flex', gap: '8px', fontSize: '11px', alignItems: 'center' }}>
                                                             <span style={{ color: '#6b7280' }}>{pStats.bags} bags</span>
                                                             <span style={{ backgroundColor: '#f3f4f6', padding: '1px 6px', borderRadius: '4px', fontWeight: '600', color: '#111827' }}>{pStats.parcels} pcs</span>
+                                                            <span style={{ backgroundColor: '#fee2e2', color: '#b91c1c', padding: '1px 6px', borderRadius: '4px', fontWeight: '700' }}>{formatKg(pStats.weight)} kg</span>
                                                         </div>
                                                     </div>
                                                 ))}
@@ -731,6 +739,12 @@ export default function ManifestTrackingTab({
                                                                                 <div style={{ fontSize: '14px', fontWeight: '800', color: '#111827' }}>{manifest.total_parcels || 0} Pcs</div>
                                                                             </div>
                                                                             <div>
+                                                                                <div style={{ fontSize: '10px', color: '#6b7280', textTransform: 'uppercase', fontWeight: '700' }}>Total Weight</div>
+                                                                                <div style={{ fontSize: '14px', fontWeight: '800', color: '#111827' }}>
+                                                                                    {formatKg(manifest.total_weight || (manifest.bags || []).reduce((acc: number, b: any) => acc + (Number(b.total_weight) || (b.parcels || []).reduce((ps: number, p: any) => ps + (Number(p.weight) || 0), 0)), 0))} kg
+                                                                                </div>
+                                                                            </div>
+                                                                            <div>
                                                                                 <div style={{ fontSize: '10px', color: '#6b7280', textTransform: 'uppercase', fontWeight: '700' }}>Created By</div>
                                                                                 <div style={{ fontSize: '12px', fontWeight: '700', color: '#000000' }}>
                                                                                     {manifest.created_by || manifest.opened_by || 'Staff'}
@@ -905,6 +919,12 @@ export default function ManifestTrackingTab({
                                                                                                             </div>
                                                                                                         </div>
                                                                                                         <div>
+                                                                                                            <div style={{ fontSize: '9px', color: '#6b7280', textTransform: 'uppercase', fontWeight: '700', letterSpacing: '0.4px' }}>TOTAL WEIGHT</div>
+                                                                                                            <div style={{ fontSize: '12px', fontWeight: '800', color: '#111827' }}>
+                                                                                                                {formatKg(bag.total_weight || (bag.parcels || []).reduce((s: number, p: any) => s + (Number(p.weight) || 0), 0))} kg
+                                                                                                            </div>
+                                                                                                        </div>
+                                                                                                        <div>
                                                                                                             <div style={{ fontSize: '9px', color: '#6b7280', textTransform: 'uppercase', fontWeight: '700', letterSpacing: '0.4px' }}>CREATED AT</div>
                                                                                                             <div style={{ fontSize: '12px', fontWeight: '700', color: '#374151' }}>
                                                                                                                 {bag.opened_at || bag.created_at ? new Date(bag.opened_at || bag.created_at).toLocaleString('en-GB') : '—'}
@@ -924,7 +944,7 @@ export default function ManifestTrackingTab({
                                                                                                         {bag.parcel_count || bag.parcels?.length || 0} Parcels
                                                                                                     </span>
                                                                                                     <span style={{ color: '#6b7280', fontWeight: '600' }}>
-                                                                                                        ({bag.total_weight || 0} kg)
+                                                                                                        ({formatKg(bag.total_weight || (bag.parcels || []).reduce((s: number, p: any) => s + (Number(p.weight) || 0), 0))} kg)
                                                                                                     </span>
                                                                                                     <button
                                                                                                         type="button"
@@ -977,7 +997,7 @@ export default function ManifestTrackingTab({
                                                                                                                     <th style={{ padding: '6px 8px', color: '#6b7280', fontWeight: '600', fontSize: '10px', textTransform: 'uppercase' }}>Inbound Manifest</th>
                                                                                                                     <th style={{ padding: '6px 8px', color: '#6b7280', fontWeight: '600', fontSize: '10px', textTransform: 'uppercase' }}>Inbound Bag</th>
                                                                                                                     <th style={{ padding: '6px 8px', color: '#6b7280', fontWeight: '600', fontSize: '10px', textTransform: 'uppercase' }}>LMD Partner</th>
-                                                                                                                    <th style={{ padding: '6px 8px', color: '#6b7280', fontWeight: '600', fontSize: '10px', textTransform: 'uppercase' }}>Weight (kg)</th>
+                                                                                                                    <th style={{ padding: '6px 8px', color: '#6b7280', fontWeight: '600', fontSize: '10px', textTransform: 'uppercase' }}>Weight (g)</th>
                                                                                                                 </tr>
                                                                                                             </thead>
                                                                                                             <tbody>
@@ -1019,7 +1039,7 @@ export default function ManifestTrackingTab({
                                                                                                                                     <span style={{ color: '#9ca3af' }}>—</span>
                                                                                                                                 )}
                                                                                                                             </td>
-                                                                                                                            <td style={{ padding: '6px 8px', fontWeight: '500', color: '#111827' }}>{p.weight ? `${p.weight} kg` : '—'}</td>
+                                                                                                                            <td style={{ padding: '6px 8px', fontWeight: '500', color: '#111827' }}>{p.weight ? `${normalizeWeightToGrams(p.weight)} g` : '—'}</td>
                                                                                                                         </tr>
                                                                                                                     );
                                                                                                                 })}
@@ -1114,6 +1134,12 @@ export default function ManifestTrackingTab({
                                                                             </div>
                                                                         </div>
                                                                         <div>
+                                                                            <div style={{ fontSize: '9px', color: '#6b7280', textTransform: 'uppercase', fontWeight: '700', letterSpacing: '0.4px' }}>TOTAL WEIGHT</div>
+                                                                            <div style={{ fontSize: '12px', fontWeight: '800', color: '#111827' }}>
+                                                                                {formatKg(bag.total_weight || (bag.parcels || []).reduce((s: number, p: any) => s + (Number(p.weight) || 0), 0))} kg
+                                                                            </div>
+                                                                        </div>
+                                                                        <div>
                                                                             <div style={{ fontSize: '9px', color: '#6b7280', textTransform: 'uppercase', fontWeight: '700', letterSpacing: '0.4px' }}>CREATED AT</div>
                                                                             <div style={{ fontSize: '12px', fontWeight: '700', color: '#374151' }}>
                                                                                 {bag.opened_at || bag.created_at ? new Date(bag.opened_at || bag.created_at).toLocaleString('en-GB') : '—'}
@@ -1133,7 +1159,7 @@ export default function ManifestTrackingTab({
                                                                         {bag.parcel_count || bag.parcels?.length || 0} Parcels
                                                                     </span>
                                                                     <span style={{ color: '#6b7280', fontWeight: '600' }}>
-                                                                        ({bag.total_weight || 0} kg)
+                                                                        ({formatKg(bag.total_weight || (bag.parcels || []).reduce((s: number, p: any) => s + (Number(p.weight) || 0), 0))} kg)
                                                                     </span>
                                                                     <button
                                                                         type="button"
@@ -1184,7 +1210,7 @@ export default function ManifestTrackingTab({
                                                                                     <th style={{ padding: '6px 8px', color: '#6b7280', fontWeight: '600', fontSize: '10px', textTransform: 'uppercase' }}>Inbound Manifest</th>
                                                                                     <th style={{ padding: '6px 8px', color: '#6b7280', fontWeight: '600', fontSize: '10px', textTransform: 'uppercase' }}>Inbound Bag</th>
                                                                                     <th style={{ padding: '6px 8px', color: '#6b7280', fontWeight: '600', fontSize: '10px', textTransform: 'uppercase' }}>LMD Partner</th>
-                                                                                    <th style={{ padding: '6px 8px', color: '#6b7280', fontWeight: '600', fontSize: '10px', textTransform: 'uppercase' }}>Weight (kg)</th>
+                                                                                    <th style={{ padding: '6px 8px', color: '#6b7280', fontWeight: '600', fontSize: '10px', textTransform: 'uppercase' }}>Weight (g)</th>
                                                                                 </tr>
                                                                             </thead>
                                                                             <tbody>
@@ -1226,7 +1252,7 @@ export default function ManifestTrackingTab({
                                                                                                     <span style={{ color: '#9ca3af' }}>—</span>
                                                                                                 )}
                                                                                             </td>
-                                                                                            <td style={{ padding: '6px 8px', fontWeight: '500', color: '#111827' }}>{p.weight ? `${p.weight} kg` : '—'}</td>
+                                                                                            <td style={{ padding: '6px 8px', fontWeight: '500', color: '#111827' }}>{p.weight ? `${normalizeWeightToGrams(p.weight)} g` : '—'}</td>
                                                                                         </tr>
                                                                                     );
                                                                                 })}

@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { normalizeWeightToGrams } from '@/lib/weightUtils';
 
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
@@ -237,7 +238,7 @@ export async function GET(request: Request) {
                         initialBag: inboundBag,
                         assignedPartner,
                         partner: assignedPartner,
-                        weight: p.weight || 0,
+                        weight: normalizeWeightToGrams(p.weight || shipInfo?.weight || 0),
                         scannedBy: resolveUserName(p.scannedBy || p.scanned_by) || 'Staff',
                         recipientName: p.recipientName || shipInfo?.recipient_name || shipInfo?.consignee_name || '—',
                         city: p.city || shipInfo?.city || shipInfo?.destination_city || '—',
@@ -263,7 +264,7 @@ export async function GET(request: Request) {
                                 initialBag: inboundBag,
                                 assignedPartner,
                                 partner: assignedPartner,
-                                weight: p.weight || 0,
+                                weight: normalizeWeightToGrams(p.weight || shipInfo?.weight || 0),
                                 scannedBy: resolveUserName(p.scannedBy || p.scanned_by) || 'Staff',
                                 recipientName: p.recipientName || shipInfo?.recipient_name || shipInfo?.consignee_name || '—',
                                 city: p.city || shipInfo?.city || shipInfo?.destination_city || '—',
@@ -292,7 +293,7 @@ export async function GET(request: Request) {
                         initialBag: inboundBag,
                         assignedPartner,
                         partner: assignedPartner,
-                        weight: it.weight || 0,
+                        weight: normalizeWeightToGrams(it.weight || shipInfo?.weight || 0),
                         scannedBy: resolveUserName(it.scanned_by) || 'Staff',
                         recipientName: shipInfo?.recipient_name || shipInfo?.consignee_name || '—',
                         city: shipInfo?.city || shipInfo?.destination_city || '—',
@@ -303,6 +304,8 @@ export async function GET(request: Request) {
 
             const rawOpenedBy = bag.opened_by || bag.created_by;
             const rawClosedBy = bag.closed_by || bag.sealed_by;
+            const cumulativeParcelsWeight = parcelsList.reduce((acc, p) => acc + (Number(p.weight) || 0), 0);
+            const resolvedBagWeight = cumulativeParcelsWeight > 0 ? cumulativeParcelsWeight : normalizeWeightToGrams(bag.total_weight);
 
             return {
                 id: bag.id,
@@ -311,7 +314,7 @@ export async function GET(request: Request) {
                 destination_hub: bag.destination_hub || '—',
                 status: (bag.status as 'OPEN' | 'SEALED') || 'OPEN',
                 parcel_count: bag.parcel_count || parcelsList.length,
-                total_weight: bag.total_weight || parcelsList.reduce((acc, p) => acc + (Number(p.weight) || 0), 0),
+                total_weight: resolvedBagWeight,
                 created_by: resolveUserName(bag.created_by) || 'Staff',
                 created_at: bag.created_at,
                 opened_by: resolveUserName(rawOpenedBy) || 'Staff',
@@ -352,8 +355,12 @@ export async function GET(request: Request) {
                 return false;
             });
 
-            // Calculate total parcels across all bags in this manifest
+            // Calculate total parcels and weight across all bags in this manifest
             const calculatedTotalParcels = manifestBags.reduce((acc, b) => acc + (b.parcel_count || 0), 0);
+            const calculatedTotalWeight = manifestBags.reduce((acc, b) => {
+                const bWeight = Number(b.total_weight) || (b.parcels || []).reduce((pSum: number, p: any) => pSum + (Number(p.weight) || 0), 0);
+                return acc + bWeight;
+            }, 0);
             const providerName = manifest.service_provider ? (serviceProvidersMap[manifest.service_provider] || `Partner #${manifest.service_provider}`) : 'All Partners';
 
             const rawOpenedBy = manifest.opened_by || manifest.created_by;
@@ -368,6 +375,7 @@ export async function GET(request: Request) {
                 service_provider_name: providerName,
                 total_bags: manifest.total_bags || manifestBags.length,
                 total_parcels: manifest.total_parcels || calculatedTotalParcels,
+                total_weight: manifest.total_weight || calculatedTotalWeight,
                 created_by: resolveUserName(manifest.created_by),
                 opened_by: resolvedOpenedBy || 'Staff',
                 closed_by: resolvedClosedBy || (manifest.status === 'CLOSED' ? 'Staff' : null),

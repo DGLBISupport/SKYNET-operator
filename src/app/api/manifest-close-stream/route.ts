@@ -18,6 +18,7 @@
 
 import { NextResponse } from 'next/server';
 import { saveManifestToSupabaseStorage } from '@/lib/supabaseStorage';
+import { normalizeWeightToGrams } from '@/lib/weightUtils';
 
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
@@ -179,10 +180,9 @@ function buildShipmentXml(parcel: any, detail: any | null, bagNumber: string): s
     const ref = detail?.reference_number || parcel?.trackingNumber || parcel?.shipment_ref || '';
     const senderRef = detail?.sender_reference || parcel?.senderReference || ref;
 
-    const rawWeight = Number(detail?.weight) || Number(parcel?.weight) || 0.1;
-    const weightGrams = Math.round(rawWeight * 1000);
-    const deadWeightGrams = Math.round((Number(detail?.dead_weight) || rawWeight) * 1000);
-    const declaredWeightGrams = Math.round((Number(detail?.customer_declared_weight) || 0) * 1000);
+    const weightGrams = normalizeWeightToGrams(detail?.weight || parcel?.weight, detail?.weight_measure);
+    const deadWeightGrams = normalizeWeightToGrams(detail?.dead_weight || detail?.weight || parcel?.weight, detail?.weight_measure);
+    const declaredWeightGrams = normalizeWeightToGrams(detail?.customer_declared_weight, detail?.weight_measure);
     const cubicLength = detail?.cubic_length || 0;
     const cubicWidth = detail?.cubic_width || 0;
     const cubicHeight = detail?.cubic_height || 0;
@@ -704,8 +704,8 @@ export async function GET(request: Request) {
 
                         if (!firstShipmentDetail) firstShipmentDetail = detail;
 
-                        const weight = Number(detail?.weight) || Number(parcel?.weight) || 0.1;
-                        totalWeightKg += weight;
+                        const weight = normalizeWeightToGrams(detail?.weight || parcel?.weight, detail?.weight_measure);
+                        totalWeightKg += (weight / 1000);
                         shipmentEntries.push({ parcel, detail, bagNumber: bag.bagNumber, trackingNum });
                     }
 
@@ -742,7 +742,7 @@ export async function GET(request: Request) {
                     notes: mawbRecord?.notes || firstShipmentDetail?.notes || '',
                     manifestedBy: FFDX_UPDATE_ENTITY_ID || 'LK7171',
                     declaredWt: mawbRecord?.declared_wt || totalWeightKg.toFixed(2),
-                    weightMeasure: mawbRecord?.weight_measure || 'K',
+                    weightMeasure: mawbRecord?.weight_measure || 'G',
                     scheduledArrival: mawbRecord?.scheduled_arrival || ''
                 };
 
