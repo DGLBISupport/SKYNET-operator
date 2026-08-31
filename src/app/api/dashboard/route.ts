@@ -24,7 +24,7 @@ async function fetchAllSupabaseRows(table: string, selectFields: string, sb: { u
     let hasMore = true;
     let attempts = 0;
 
-    while (hasMore && attempts < 10) {
+    while (hasMore && attempts < 100) {
         attempts++;
         try {
             const res = await fetch(`${sb.url}/rest/v1/${table}?select=${selectFields}&limit=${limit}&offset=${offset}`, {
@@ -64,18 +64,18 @@ export async function GET(request: Request) {
         // Fetch all tables concurrently using Promise.allSettled
         // NOTE: service_provider_allocation is fetched only once (full fields).
         //       totalDispatched is derived from spAllocData.length — no duplicate count-only fetch needed.
-        // NOTE: scanned_parcels is omitted from bag_unsealing — it is a heavy JSON array not consumed
-        //       by any dashboard UI; first-scan status is already tracked via service_provider_allocation.unsealed.
-        const [shipResult, bagResult, manResult, damResult, unsealResult, spResult, spAllocResult, mawbResult, omResult] = await Promise.allSettled([
+        const [shipResult, bagResult, manResult, damResult, unsealResult, spResult, spAllocResult, mawbResult, omResult, usersResult, bagItemsResult] = await Promise.allSettled([
             fetchAllSupabaseRows('shipments', 'reference_number,sender_reference,mawb_reference,delivery_agent_code,bag_number,consignee_location_name,created_at,weight', sb),
-            fetchAllSupabaseRows('outbound_lmd_bags', 'id,bag_number,new_manifest_reference,target_partner,destination_hub,status,parcel_count,total_weight,created_by,sealed_by,created_at,sealed_at', sb),
+            fetchAllSupabaseRows('outbound_lmd_bags', 'id,bag_number,new_manifest_reference,target_partner,destination_hub,status,parcel_count,total_weight,created_by,opened_by,opened_at,sealed_by,sealed_at,closed_by,closed_at,created_at,parcels', sb),
             fetchAllSupabaseRows('manifest_sessions', 'id,manifest_id,mawb_ref,status,total_bags,total_parcels,closed_by,created_at,closed_at', sb),
             fetchAllSupabaseRows('damaged_barcodes', 'id,barcode,reason,reported_by,created_at', sb),
-            fetchAllSupabaseRows('bag_unsealing', 'id,bag_number,mawb_ref,status,unsealed_by,scanned_count,expected_count,created_at', sb),
+            fetchAllSupabaseRows('bag_unsealing', 'id,bag_number,mawb_ref,status,unsealed_by,scanned_count,expected_count,scanned_parcels,created_at', sb),
             fetchAllSupabaseRows('service_providers', 'id,name,code', sb),
             fetchAllSupabaseRows('service_provider_allocation', 'shipment_ref,service_provider,unsealed,scan_status,mawb_ref,created_at,updated_at', sb),
             fetchAllSupabaseRows('mawb', 'mawb_reference,carrier,declared_bags,declared_wt,mawb_created,shipper_name,notes,has_service_providers_allocated', sb),
-            fetchAllSupabaseRows('outbound_manifests', 'id,manifest_reference', sb)
+            fetchAllSupabaseRows('outbound_manifests', 'id,manifest_reference,bag_numbers,total_bags,total_parcels,status,closed_at,closed_by,opened_by', sb),
+            fetchAllSupabaseRows('users', 'id,first_name,last_name,email,username,role,status', sb),
+            fetchAllSupabaseRows('outbound_lmd_bag_items', 'id,bag_number,shipment_ref,weight,created_at,scanned_by', sb)
         ]);
 
         const shipData = shipResult.status === 'fulfilled' ? shipResult.value : [];
@@ -87,6 +87,8 @@ export async function GET(request: Request) {
         const spAllocData = spAllocResult.status === 'fulfilled' ? spAllocResult.value : [];
         const mawbData = mawbResult.status === 'fulfilled' ? mawbResult.value : [];
         const omBags = omResult.status === 'fulfilled' ? omResult.value : [];
+        const usersData = usersResult.status === 'fulfilled' ? usersResult.value : [];
+        const bagItemsData = bagItemsResult.status === 'fulfilled' ? bagItemsResult.value : [];
 
         // Build MAWB reference lookup map
         const mawbUuidToRef: Record<string, string> = {};
@@ -375,40 +377,437 @@ export async function GET(request: Request) {
         // 5. Dispatch Allocations — count comes from spAllocData (no separate fetch needed)
         let totalDispatched = spAllocData.length;
 
-        // 6. Aggregate Operator Productivity Breakdown
-        const userProductivityMap: Record<string, { operator: string; scanned: number; bagsSealed: number; manifestsClosed: number }> = {};
+        // 6. Aggregate Operator Productivity Breakdown (Day-Wise & All-Time)
+        interface CanonicalUser {
+            id: number | string;
+            first_name: string;
+            last_name: string;
+            username: string;
+            email: string;
+            role: string;
+            status: string;
+            displayName: string;
+        }
 
-        const addActivity = (opName: string, type: 'scan' | 'seal' | 'close') => {
-            const cleanOp = (opName || '').trim();
-            if (!cleanOp || cleanOp === 'System') return;
-            if (!userProductivityMap[cleanOp]) {
-                userProductivityMap[cleanOp] = { operator: cleanOp, scanned: 0, bagsSealed: 0, manifestsClosed: 0 };
+        const canonicalUsers: CanonicalUser[] = [];
+        const userLookup = new Map<string, CanonicalUser>();
+
+        usersData.forEach((u: any) => {
+            const fn = (u.first_name || '').trim();
+            const ln = (u.last_name || '').trim();
+            const un = (u.username || '').trim();
+            const em = (u.email || '').trim();
+            const fullName = [fn, ln].filter(Boolean).join(' ').trim();
+            const displayName = fullName || un || em || `User #${u.id}`;
+
+            const userObj: CanonicalUser = {
+                id: u.id,
+                first_name: fn || displayName,
+                last_name: ln,
+                username: un,
+                email: em,
+                role: u.role || 'Operator',
+                status: u.status || 'ACTIVE',
+                displayName
+            };
+            canonicalUsers.push(userObj);
+
+            if (u.id !== undefined && u.id !== null) {
+                userLookup.set(String(u.id), userObj);
             }
-            if (type === 'scan') userProductivityMap[cleanOp].scanned++;
-            if (type === 'seal') userProductivityMap[cleanOp].bagsSealed++;
-            if (type === 'close') userProductivityMap[cleanOp].manifestsClosed++;
+            if (un) {
+                userLookup.set(un.toLowerCase(), userObj);
+            }
+            if (em) {
+                userLookup.set(em.toLowerCase(), userObj);
+            }
+            if (fullName) {
+                userLookup.set(fullName.toLowerCase(), userObj);
+            }
+            if (fn) {
+                if (!userLookup.has(fn.toLowerCase())) userLookup.set(fn.toLowerCase(), userObj);
+            }
+        });
+
+        const resolveOperatorUser = (rawVal: any): CanonicalUser => {
+            if (rawVal === undefined || rawVal === null || rawVal === '') {
+                return {
+                    id: 'unassigned-operator',
+                    first_name: 'Unassigned Staff',
+                    last_name: '',
+                    username: 'staff',
+                    email: 'staff@skynet.lk',
+                    role: 'Operator',
+                    status: 'ACTIVE',
+                    displayName: 'Unassigned Staff'
+                };
+            }
+            const str = String(rawVal).trim();
+            if (str === 'System' || str === 'System Operator' || str === '-' || str === 'Unknown') {
+                return {
+                    id: 'system-operator',
+                    first_name: 'System Operator',
+                    last_name: '',
+                    username: 'system',
+                    email: 'system@skynet.lk',
+                    role: 'System',
+                    status: 'ACTIVE',
+                    displayName: 'System Operator'
+                };
+            }
+            const lower = str.toLowerCase();
+            if (userLookup.has(lower)) return userLookup.get(lower)!;
+            if (userLookup.has(str)) return userLookup.get(str)!;
+
+            for (const u of canonicalUsers) {
+                if (u.first_name.toLowerCase() === lower || u.username.toLowerCase() === lower) {
+                    return u;
+                }
+                if (u.displayName.toLowerCase().includes(lower) || lower.includes(u.displayName.toLowerCase())) {
+                    return u;
+                }
+            }
+
+            const synthUser: CanonicalUser = {
+                id: `op-${str}`,
+                first_name: str,
+                last_name: '',
+                username: str.toLowerCase().replace(/\s+/g, '_'),
+                email: `${str.toLowerCase().replace(/[^a-z0-9]/g, '.')}@skynet.lk`,
+                role: 'Operator',
+                status: 'ACTIVE',
+                displayName: str
+            };
+            userLookup.set(lower, synthUser);
+            canonicalUsers.push(synthUser);
+            return synthUser;
         };
 
-        bagData.forEach(b => {
-            if (b.sealed_by) addActivity(b.sealed_by, 'seal');
-            if (b.created_by) addActivity(b.created_by, 'scan');
-        });
+        const parseValidIsoDate = (primary?: string | null, fallback?: string | null): string => {
+            if (primary && typeof primary === 'string' && primary.includes('-')) {
+                const d = new Date(primary);
+                if (!isNaN(d.getTime())) return primary;
+            }
+            if (fallback && typeof fallback === 'string') {
+                const d = new Date(fallback);
+                if (!isNaN(d.getTime())) return fallback;
+            }
+            return '';
+        };
 
-        manData.forEach(m => {
-            if (m.closed_by) addActivity(m.closed_by, 'close');
-        });
+        const getColomboDate = (dateStr?: string | null, fallbackDate?: string | null): string => {
+            const validIso = parseValidIsoDate(dateStr, fallbackDate);
+            if (!validIso) return '';
+            try {
+                const d = new Date(validIso);
+                if (isNaN(d.getTime())) return '';
+                return d.toLocaleDateString('en-CA', { timeZone: 'Asia/Colombo' });
+            } catch {
+                return '';
+            }
+        };
 
-        unsealData.forEach(u => {
-            if (u.unsealed_by) {
-                const cleanOp = u.unsealed_by.trim();
-                if (!userProductivityMap[cleanOp]) {
-                    userProductivityMap[cleanOp] = { operator: cleanOp, scanned: 0, bagsSealed: 0, manifestsClosed: 0 };
+        interface OperatorDailyStats {
+            userId: string | number;
+            operator: string;
+            username: string;
+            firstName: string;
+            lastName: string;
+            email: string;
+            role: string;
+            isActive: boolean;
+            firstScanCount: number;      // 1st Scan (Inbound parcels unsealed)
+            secondScanCount: number;     // 2nd Scan (Outbound LMD bag parcel items)
+            inboundBagsUnsealed: number; // Inbound bags unsealed
+            outboundBagsOpened: number;  // Outbound bags opened
+            outboundBagsClosed: number;  // Outbound bags sealed/closed
+            manifestsClosed: number;     // Manifest sessions closed
+            totalScans: number;          // firstScanCount + secondScanCount
+            totalActions: number;        // total operational activity score
+            lastActiveAt?: string;
+            scanned: number;             // backward compatibility
+            bagsSealed: number;          // backward compatibility
+        }
+
+        const dateMap: Record<string, Record<string, OperatorDailyStats>> = { 'ALL': {} };
+
+        const getOrCreateStats = (dateKey: string, user: CanonicalUser): OperatorDailyStats => {
+            if (!dateMap[dateKey]) dateMap[dateKey] = {};
+            const opKey = String(user.id || user.displayName).toLowerCase();
+            if (!dateMap[dateKey][opKey]) {
+                dateMap[dateKey][opKey] = {
+                    userId: user.id,
+                    operator: user.displayName,
+                    username: user.username,
+                    firstName: user.first_name,
+                    lastName: user.last_name,
+                    email: user.email,
+                    role: user.role,
+                    isActive: user.status === 'ACTIVE' || user.status === undefined,
+                    firstScanCount: 0,
+                    secondScanCount: 0,
+                    inboundBagsUnsealed: 0,
+                    outboundBagsOpened: 0,
+                    outboundBagsClosed: 0,
+                    manifestsClosed: 0,
+                    totalScans: 0,
+                    totalActions: 0,
+                    scanned: 0,
+                    bagsSealed: 0
+                };
+            }
+            return dateMap[dateKey][opKey];
+        };
+
+        const recordOpActivity = (
+            dateStr: string | null | undefined,
+            rawOperator: any,
+            counts: {
+                firstScan?: number;
+                secondScan?: number;
+                inboundUnseal?: number;
+                outboundOpen?: number;
+                outboundClose?: number;
+                manifestClose?: number;
+            },
+            timestamp?: string,
+            fallbackDate?: string
+        ) => {
+            const user = resolveOperatorUser(rawOperator);
+            if (!user) return;
+            const colomboDate = getColomboDate(dateStr || timestamp, fallbackDate);
+
+            const apply = (dKey: string) => {
+                const stats = getOrCreateStats(dKey, user);
+                if (counts.firstScan) stats.firstScanCount += counts.firstScan;
+                if (counts.secondScan) stats.secondScanCount += counts.secondScan;
+                if (counts.inboundUnseal) stats.inboundBagsUnsealed += counts.inboundUnseal;
+                if (counts.outboundOpen) stats.outboundBagsOpened += counts.outboundOpen;
+                if (counts.outboundClose) stats.outboundBagsClosed += counts.outboundClose;
+                if (counts.manifestClose) stats.manifestsClosed += counts.manifestClose;
+
+                stats.totalScans = stats.firstScanCount + stats.secondScanCount;
+                stats.scanned = stats.totalScans;
+                stats.bagsSealed = stats.outboundBagsClosed;
+                stats.totalActions = stats.firstScanCount + stats.secondScanCount + stats.inboundBagsUnsealed + stats.outboundBagsOpened + stats.outboundBagsClosed + stats.manifestsClosed;
+
+                const validTime = parseValidIsoDate(timestamp, fallbackDate);
+                if (validTime) {
+                    if (!stats.lastActiveAt || new Date(validTime) > new Date(stats.lastActiveAt)) {
+                        stats.lastActiveAt = validTime;
+                    }
                 }
-                userProductivityMap[cleanOp].scanned += (u.scanned_count || 1);
+            };
+
+            if (colomboDate) {
+                apply(colomboDate);
+            }
+            apply('ALL');
+        };
+
+        // 1. Process Inbound Unsealing & 1st Scans (bag_unsealing)
+        unsealData.forEach((u: any) => {
+            const uDate = u.created_at;
+            const uOp = u.unsealed_by || 'Staff';
+            const sCount = Number(u.scanned_count) || 0;
+
+            // Inbound master bag unsealed count (1 bag unsealed by uOp)
+            recordOpActivity(uDate, uOp, { inboundUnseal: 1 }, uDate, uDate);
+
+            let parsedParcels = u.scanned_parcels;
+            if (typeof parsedParcels === 'string') {
+                try { parsedParcels = JSON.parse(parsedParcels); } catch { parsedParcels = []; }
+            }
+
+            if (Array.isArray(parsedParcels) && parsedParcels.length > 0) {
+                // Credit every individual unsealed parcel to its operator
+                parsedParcels.forEach((p: any) => {
+                    const pOp = (p && typeof p === 'object')
+                        ? (p.unsealedBy || p.unsealed_by || p.operator || p.scannedBy || p.scanned_by || uOp)
+                        : uOp;
+                    const pTime = (p && typeof p === 'object')
+                        ? parseValidIsoDate(p.scannedAt || p.scanned_at || p.unsealed_at || p.created_at, uDate)
+                        : uDate;
+                    recordOpActivity(pTime, pOp, { firstScan: 1 }, pTime, uDate);
+                });
+            } else if (sCount > 0) {
+                // Fallback to scanned_count if scanned_parcels array was not serialized
+                recordOpActivity(uDate, uOp, { firstScan: sCount }, uDate, uDate);
             }
         });
 
-        const userProductivity = Object.values(userProductivityMap).sort((a, b) => b.scanned - a.scanned);
+        // 2. Process Outbound Parcel 2nd Scans (outbound_lmd_bag_items + outbound_lmd_bags.parcels)
+        const countedBagItems = new Set<string>();
+
+        // (a) Outbound bag items table (primary 2nd scan table)
+        bagItemsData.forEach((it: any) => {
+            const itOp = it.scanned_by || 'Staff';
+            const itTime = it.created_at;
+            const ref = String(it.shipment_ref || '').trim();
+            const bagNum = String(it.bag_number || '').trim();
+            if (ref && bagNum) {
+                countedBagItems.add(`${bagNum}_${ref}`.toLowerCase());
+            }
+            recordOpActivity(itTime, itOp, { secondScan: 1 }, itTime);
+        });
+
+        // (b) Outbound LMD Bags: Open, Closed/Sealed, and any bag parcels not already in bag_items
+        bagData.forEach((b: any) => {
+            const bagNum = String(b.bag_number || '').trim();
+
+            // Outbound Bag Opened / Created
+            const openTime = b.opened_at || b.created_at;
+            const openOp = b.opened_by || b.created_by;
+            if (openOp && openOp !== 'Unknown') {
+                recordOpActivity(openTime, openOp, { outboundOpen: 1 }, openTime);
+            }
+
+            // Outbound Bag Sealed / Closed
+            const isClosed = b.status === 'SEALED' || b.status === 'CLOSED' || !!b.sealed_at || !!b.closed_at;
+            if (isClosed) {
+                const closeTime = b.closed_at || b.sealed_at || b.created_at;
+                const closeOp = b.closed_by || b.sealed_by || b.created_by || b.opened_by;
+                if (closeOp && closeOp !== 'Unknown') {
+                    recordOpActivity(closeTime, closeOp, { outboundClose: 1 }, closeTime);
+                }
+            }
+
+            // Fallback parcel scans from parcels JSONB (if not already counted in bagItemsData)
+            let bagParcels = b.parcels;
+            if (typeof bagParcels === 'string') {
+                try { bagParcels = JSON.parse(bagParcels); } catch { bagParcels = []; }
+            }
+            if (Array.isArray(bagParcels)) {
+                bagParcels.forEach((p: any) => {
+                    let trk = '';
+                    let pOp = '';
+                    let pTime = '';
+                    if (typeof p === 'string') {
+                        trk = p.trim();
+                    } else if (p && typeof p === 'object') {
+                        trk = String(p.trackingNumber || p.referenceNumber || p.scannedBarcode || p.reference_number || '').trim();
+                        pOp = p.scannedBy || p.operator || p.scanned_by;
+                        pTime = p.scannedAt || p.timestamp || p.scanned_at || '';
+                    }
+                    if (trk && bagNum) {
+                        const key = `${bagNum}_${trk}`.toLowerCase();
+                        if (!countedBagItems.has(key)) {
+                            countedBagItems.add(key);
+                            const finalOp = pOp || b.sealed_by || b.created_by || b.opened_by || 'Staff';
+                            const finalTime = pTime || b.sealed_at || b.created_at || b.opened_at;
+                            recordOpActivity(finalTime, finalOp, { secondScan: 1 }, finalTime);
+                        }
+                    }
+                });
+            }
+        });
+
+        // 4. Process Closed Manifests
+        manData.forEach((m: any) => {
+            if (m.status === 'CLOSED' && m.closed_by) {
+                const closeTime = m.closed_at || m.created_at;
+                recordOpActivity(closeTime, m.closed_by, { manifestClose: 1 }, closeTime);
+            }
+        });
+
+        omBags.forEach((om: any) => {
+            if (om.status === 'CLOSED' && om.closed_by) {
+                const closeTime = om.closed_at || om.created_at;
+                recordOpActivity(closeTime, om.closed_by, { manifestClose: 1 }, closeTime);
+            }
+        });
+
+        // 5. Build final per-date structures and day KPIs
+        const userProductivityByDate: Record<string, OperatorDailyStats[]> = {};
+        const userProductivityKPIs: Record<string, {
+            totalFirstScans: number;
+            totalSecondScans: number;
+            totalInboundBagsUnsealed: number;
+            totalOutboundBagsOpened: number;
+            totalOutboundBagsClosed: number;
+            totalManifestsClosed: number;
+            activeOperatorsCount: number;
+            totalOperators: number;
+        }> = {};
+
+        const allDates = Object.keys(dateMap).filter(d => d !== 'ALL').sort((a, b) => b.localeCompare(a));
+        const todayColombo = getColomboDate(new Date().toISOString());
+        if (!allDates.includes(todayColombo)) {
+            allDates.unshift(todayColombo);
+            dateMap[todayColombo] = {};
+        }
+
+        const datesToProcess = ['ALL', ...allDates];
+
+        datesToProcess.forEach(dKey => {
+            const currentOpMap = dateMap[dKey] || {};
+
+            canonicalUsers.forEach(u => {
+                const opKey = String(u.id || u.displayName).toLowerCase();
+                if (!currentOpMap[opKey]) {
+                    currentOpMap[opKey] = {
+                        userId: u.id,
+                        operator: u.displayName,
+                        username: u.username,
+                        firstName: u.first_name,
+                        lastName: u.last_name,
+                        email: u.email,
+                        role: u.role,
+                        isActive: u.status === 'ACTIVE' || u.status === undefined,
+                        firstScanCount: 0,
+                        secondScanCount: 0,
+                        inboundBagsUnsealed: 0,
+                        outboundBagsOpened: 0,
+                        outboundBagsClosed: 0,
+                        manifestsClosed: 0,
+                        totalScans: 0,
+                        totalActions: 0,
+                        scanned: 0,
+                        bagsSealed: 0
+                    };
+                }
+            });
+
+            const list = Object.values(currentOpMap).sort((a, b) => {
+                if (b.totalScans !== a.totalScans) return b.totalScans - a.totalScans;
+                if (b.totalActions !== a.totalActions) return b.totalActions - a.totalActions;
+                return a.operator.localeCompare(b.operator);
+            });
+
+            userProductivityByDate[dKey] = list;
+
+            let totalFirstScans = 0;
+            let totalSecondScans = 0;
+            let totalInboundBagsUnsealed = 0;
+            let totalOutboundBagsOpened = 0;
+            let totalOutboundBagsClosed = 0;
+            let totalManifestsClosed = 0;
+            let activeOperatorsCount = 0;
+
+            list.forEach(op => {
+                totalFirstScans += op.firstScanCount;
+                totalSecondScans += op.secondScanCount;
+                totalInboundBagsUnsealed += op.inboundBagsUnsealed;
+                totalOutboundBagsOpened += op.outboundBagsOpened;
+                totalOutboundBagsClosed += op.outboundBagsClosed;
+                totalManifestsClosed += op.manifestsClosed;
+                if (op.totalActions > 0) activeOperatorsCount++;
+            });
+
+            userProductivityKPIs[dKey] = {
+                totalFirstScans,
+                totalSecondScans,
+                totalInboundBagsUnsealed,
+                totalOutboundBagsOpened,
+                totalOutboundBagsClosed,
+                totalManifestsClosed,
+                activeOperatorsCount,
+                totalOperators: list.length
+            };
+        });
+
+        const userProductivity = userProductivityByDate['ALL'] || [];
+        const availableProductivityDates = allDates;
 
         const mawbTableList = mawbData
             .filter((m: any) => {
@@ -478,6 +877,9 @@ export async function GET(request: Request) {
                 bagPartnerCounts,
                 partnerDetails,
                 userProductivity,
+                userProductivityByDate,
+                userProductivityKPIs,
+                availableProductivityDates,
                 receivedParcels,
                 mawbWiseSummary,
                 bagsList,

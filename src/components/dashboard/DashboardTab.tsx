@@ -58,6 +58,35 @@ export default function DashboardTab({
     status,
     usersList
 }: any) {
+    const todayStr = React.useMemo(() => {
+        try {
+            return new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Colombo' });
+        } catch {
+            return new Date().toISOString().split('T')[0];
+        }
+    }, []);
+
+    const [prodDateFilter, setProdDateFilter] = React.useState<string>(todayStr);
+    const [prodSearchQuery, setProdSearchQuery] = React.useState<string>('');
+    const [prodActiveOnly, setProdActiveOnly] = React.useState<boolean>(false);
+    const [prodSortColumn, setProdSortColumn] = React.useState<string>('totalScans');
+    const [prodSortDirection, setProdSortDirection] = React.useState<'asc' | 'desc'>('desc');
+    const [prodPage, setProdPage] = React.useState<number>(1);
+    const [prodRowsPerPage, setProdRowsPerPage] = React.useState<number>(10);
+
+    const formatDisplayDate = (dateStr: string) => {
+        if (!dateStr || dateStr === 'ALL') return 'All Time Performance (Lifetime)';
+        try {
+            const d = new Date(`${dateStr}T00:00:00`);
+            if (isNaN(d.getTime())) return dateStr;
+            const options: Intl.DateTimeFormatOptions = { weekday: 'short', year: 'numeric', month: 'short', day: 'numeric' };
+            const isToday = dateStr === todayStr;
+            return `${isToday ? 'Today, ' : ''}${d.toLocaleDateString('en-GB', options)}`;
+        } catch {
+            return dateStr;
+        }
+    };
+
     return (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
 
@@ -972,56 +1001,571 @@ export default function DashboardTab({
                         {/* ═══════════════════════════════════════════════════════
                                         DETAIL TAB 7: USER PRODUCTIVITY PERFORMANCE
                                     ═══════════════════════════════════════════════════════ */}
-                        {dashboardSubTab === 'productivity' && (
-                            <div style={card}>
-                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
-                                    <div>
-                                        <div style={label}>User Productivity Performance Overview</div>
-                                        <p style={{ fontSize: '12px', color: '#6b7280', margin: '4px 0 0 0' }}>Real-time parcel sorting, bag sealing, and operational activity across all system operators.</p>
-                                    </div>
-                                    <div style={{ fontSize: '12px', color: '#6b7280' }}>
-                                        Total System Operators: <strong>{(usersList || []).length || (dashboardData.userProductivity || []).length}</strong>
-                                    </div>
-                                </div>
+                        {dashboardSubTab === 'productivity' && (() => {
+                            const rawListForDate: any[] = (dashboardData.userProductivityByDate && dashboardData.userProductivityByDate[prodDateFilter])
+                                || (prodDateFilter === 'ALL' ? (dashboardData.userProductivity || []) : []);
 
-                                {(() => {
-                                    const list = usersList && usersList.length > 0
-                                        ? usersList
-                                        : (dashboardData.userProductivity || []).map((p: any) => ({ first_name: p.operator, last_name: '', email: `${p.operator.toLowerCase().replace(/\s+/g, '.')}@skynet.lk`, role: 'Operator', is_active: true }));
-                                    const paginatedList = list.slice((dashTablePage - 1) * dashTableRowsPerPage, dashTablePage * dashTableRowsPerPage);
-                                    return (
-                                        <>
-                                            <div style={{ overflowX: 'auto' }}>
-                                                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px', textAlign: 'left' }}>
-                                                    <thead>
-                                                        <tr style={{ borderBottom: '2px solid #e5e7eb', backgroundColor: '#f9fafb' }}>
-                                                            {['#', 'Operator / User Name', 'Email Address', 'Role', 'Inbound Parcels Scanned', 'Outbound Bags Sealed', 'Manifest Sessions Closed', 'System Duty Status'].map(h => (
-                                                                <th key={h} style={{ padding: '10px 12px', color: '#6b7280', fontWeight: '700', fontSize: '11px', textTransform: 'uppercase' }}>{h}</th>
-                                                            ))}
+                            // Normalize operator list
+                            const prodListForDate: any[] = rawListForDate.length > 0
+                                ? rawListForDate
+                                : (dashboardData.userProductivity || []).map((p: any) => ({
+                                    userId: p.userId || p.operator,
+                                    operator: p.operator || 'Operator',
+                                    username: p.username || '',
+                                    firstName: p.firstName || p.operator || 'Operator',
+                                    lastName: p.lastName || '',
+                                    email: p.email || `${(p.operator || 'operator').toLowerCase().replace(/\s+/g, '.')}@skynet.lk`,
+                                    role: p.role || 'Operator',
+                                    isActive: p.isActive !== false,
+                                    firstScanCount: p.firstScanCount || 0,
+                                    secondScanCount: p.secondScanCount || 0,
+                                    inboundBagsUnsealed: p.inboundBagsUnsealed || 0,
+                                    outboundBagsOpened: p.outboundBagsOpened || 0,
+                                    outboundBagsClosed: p.outboundBagsClosed || p.bagsSealed || 0,
+                                    manifestsClosed: p.manifestsClosed || 0,
+                                    totalScans: p.totalScans || (p.firstScanCount || 0) + (p.secondScanCount || 0) || p.scanned || 0,
+                                    totalActions: p.totalActions || (p.scanned || 0) + (p.bagsSealed || 0)
+                                }));
+
+                            const kpiStats = (dashboardData.userProductivityKPIs && dashboardData.userProductivityKPIs[prodDateFilter]) || {
+                                totalFirstScans: prodListForDate.reduce((acc, p) => acc + (p.firstScanCount || 0), 0),
+                                totalSecondScans: prodListForDate.reduce((acc, p) => acc + (p.secondScanCount || 0), 0),
+                                totalInboundBagsUnsealed: prodListForDate.reduce((acc, p) => acc + (p.inboundBagsUnsealed || 0), 0),
+                                totalOutboundBagsOpened: prodListForDate.reduce((acc, p) => acc + (p.outboundBagsOpened || 0), 0),
+                                totalOutboundBagsClosed: prodListForDate.reduce((acc, p) => acc + (p.outboundBagsClosed || p.bagsSealed || 0), 0),
+                                totalManifestsClosed: prodListForDate.reduce((acc, p) => acc + (p.manifestsClosed || 0), 0),
+                                activeOperatorsCount: prodListForDate.filter(p => (p.totalActions || 0) > 0).length,
+                                totalOperators: prodListForDate.length
+                            };
+
+                            let filteredProdList = [...prodListForDate];
+
+                            // Filter by search query
+                            if (prodSearchQuery.trim()) {
+                                const q = prodSearchQuery.toLowerCase().trim();
+                                filteredProdList = filteredProdList.filter(item =>
+                                    (item.operator && item.operator.toLowerCase().includes(q)) ||
+                                    (item.email && item.email.toLowerCase().includes(q)) ||
+                                    (item.username && item.username.toLowerCase().includes(q)) ||
+                                    (item.role && item.role.toLowerCase().includes(q))
+                                );
+                            }
+
+                            // Filter active only
+                            if (prodActiveOnly) {
+                                filteredProdList = filteredProdList.filter(item => (item.totalActions || 0) > 0);
+                            }
+
+                            // Sorting
+                            filteredProdList.sort((a, b) => {
+                                let valA = a[prodSortColumn] ?? 0;
+                                let valB = b[prodSortColumn] ?? 0;
+
+                                if (typeof valA === 'string') {
+                                    valA = valA.toLowerCase();
+                                    valB = (valB || '').toString().toLowerCase();
+                                    return prodSortDirection === 'asc' ? valA.localeCompare(valB) : valB.localeCompare(valA);
+                                }
+
+                                return prodSortDirection === 'asc' ? Number(valA) - Number(valB) : Number(valB) - Number(valA);
+                            });
+
+                            const paginatedProdList = filteredProdList.slice(
+                                (prodPage - 1) * prodRowsPerPage,
+                                prodPage * prodRowsPerPage
+                            );
+
+                            const handleSort = (column: string) => {
+                                if (prodSortColumn === column) {
+                                    setProdSortDirection(prev => prev === 'asc' ? 'desc' : 'asc');
+                                } else {
+                                    setProdSortColumn(column);
+                                    setProdSortDirection('desc');
+                                }
+                            };
+
+                            const getSortIndicator = (column: string) => {
+                                if (prodSortColumn !== column) return <span style={{ color: '#d1d5db', marginLeft: '4px' }}>↕</span>;
+                                return <span style={{ color: '#b91c1c', marginLeft: '4px' }}>{prodSortDirection === 'asc' ? '▲' : '▼'}</span>;
+                            };
+
+                            const handleExportProductivityExcel = () => {
+                                const headers = [
+                                    '#',
+                                    'Operator Name',
+                                    'Username',
+                                    'Email Address',
+                                    'Role',
+                                    '1st Scan Count (Inbound Parcels)',
+                                    '2nd Scan Count (Outbound Parcels)',
+                                    'Inbound Bags Unsealed',
+                                    'Outbound Bags Opened',
+                                    'Outbound Bags Sealed & Closed',
+                                    'Manifest Sessions Closed',
+                                    'Total Scans (1st + 2nd)',
+                                    'Total Operational Actions',
+                                    'Daily Duty Status',
+                                    'Active Date'
+                                ];
+
+                                const rows = filteredProdList.map((op, idx) => [
+                                    idx + 1,
+                                    op.operator || 'Unknown',
+                                    op.username || '—',
+                                    op.email || '—',
+                                    op.role || 'Operator',
+                                    op.firstScanCount || 0,
+                                    op.secondScanCount || 0,
+                                    op.inboundBagsUnsealed || 0,
+                                    op.outboundBagsOpened || 0,
+                                    op.outboundBagsClosed || 0,
+                                    op.manifestsClosed || 0,
+                                    op.totalScans || 0,
+                                    op.totalActions || 0,
+                                    (op.totalActions || 0) > 0 ? 'Active On-Duty' : 'Idle',
+                                    prodDateFilter === 'ALL' ? 'All Time' : prodDateFilter
+                                ]);
+
+                                const dateTag = prodDateFilter === 'ALL' ? 'All_Time' : prodDateFilter;
+                                const filename = `Skynet_User_Productivity_${dateTag}_${new Date().toISOString().split('T')[0]}.csv`;
+
+                                exportToExcel(headers, rows, filename, {
+                                    reportTitle: `USER PRODUCTIVITY PERFORMANCE REPORT (${dateTag})`,
+                                    mawb: 'All Manifests',
+                                    partner: 'All Courier Partners',
+                                    totalRecords: filteredProdList.length
+                                });
+                            };
+
+                            return (
+                                <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+
+                                    {/* ── 1. Top Date Filter & Action Control Banner ── */}
+                                    <div style={{
+                                        backgroundColor: '#ffffff',
+                                        padding: '16px 20px',
+                                        borderRadius: '10px',
+                                        border: '1px solid #cacccf',
+                                        boxShadow: '0 2px 6px rgba(0,0,0,0.04)',
+                                        display: 'flex',
+                                        flexDirection: 'column',
+                                        gap: '14px'
+                                    }}>
+                                        {/* Row 1: Active Date Status Chip + Quick Date Buttons + Datepicker + Refresh */}
+                                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '12px' }}>
+                                            <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                                                <div style={{
+                                                    width: '36px',
+                                                    height: '36px',
+                                                    borderRadius: '8px',
+                                                    backgroundColor: prodDateFilter === todayStr ? '#fef2f2' : '#f3f4f6',
+                                                    color: prodDateFilter === todayStr ? '#b91c1c' : '#374151',
+                                                    display: 'flex',
+                                                    alignItems: 'center',
+                                                    justifyContent: 'center'
+                                                }}>
+                                                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                                        <rect x="3" y="4" width="18" height="18" rx="2" ry="2" />
+                                                        <line x1="16" y1="2" x2="16" y2="6" />
+                                                        <line x1="8" y1="2" x2="8" y2="6" />
+                                                        <line x1="3" y1="10" x2="21" y2="10" />
+                                                    </svg>
+                                                </div>
+                                                <div>
+                                                    <div style={{ fontSize: '11px', fontWeight: '700', color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+                                                        Operational Date View
+                                                    </div>
+                                                    <div style={{ fontSize: '15px', fontWeight: '800', color: '#111827' }}>
+                                                        {formatDisplayDate(prodDateFilter)}
+                                                    </div>
+                                                </div>
+                                            </div>
+
+                                            {/* Quick Date Pills + Date Input + Refresh */}
+                                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                                                <button
+                                                    type="button"
+                                                    onClick={() => setProdDateFilter(todayStr)}
+                                                    style={{
+                                                        padding: '6px 14px',
+                                                        borderRadius: '6px',
+                                                        border: '1px solid',
+                                                        borderColor: prodDateFilter === todayStr ? '#b91c1c' : '#d1d5db',
+                                                        backgroundColor: prodDateFilter === todayStr ? '#b91c1c' : '#ffffff',
+                                                        color: prodDateFilter === todayStr ? '#ffffff' : '#374151',
+                                                        fontSize: '12px',
+                                                        fontWeight: '700',
+                                                        cursor: 'pointer',
+                                                        transition: 'all 0.15s'
+                                                    }}
+                                                >
+                                                    Today
+                                                </button>
+
+                                                <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginLeft: '4px' }}>
+                                                    <span style={{ fontSize: '12px', fontWeight: '600', color: '#6b7280' }}>Pick Date:</span>
+                                                    <input
+                                                        type="date"
+                                                        value={prodDateFilter === 'ALL' ? '' : prodDateFilter}
+                                                        onChange={(e) => {
+                                                            if (e.target.value) setProdDateFilter(e.target.value);
+                                                        }}
+                                                        style={{
+                                                            padding: '6px 12px',
+                                                            borderRadius: '6px',
+                                                            border: '1px solid #d1d5db',
+                                                            fontSize: '12px',
+                                                            fontWeight: '700',
+                                                            color: '#111827',
+                                                            backgroundColor: '#ffffff',
+                                                            outline: 'none',
+                                                            cursor: 'pointer'
+                                                        }}
+                                                    />
+                                                </div>
+
+                                                <button
+                                                    type="button"
+                                                    onClick={() => fetchDashboard && fetchDashboard()}
+                                                    disabled={isLoadingDashboard}
+                                                    title="Refresh Productivity Data"
+                                                    style={{
+                                                        padding: '6px 12px',
+                                                        borderRadius: '6px',
+                                                        border: '1px solid #d1d5db',
+                                                        backgroundColor: '#ffffff',
+                                                        color: '#374151',
+                                                        fontSize: '12px',
+                                                        fontWeight: '600',
+                                                        cursor: 'pointer',
+                                                        display: 'flex',
+                                                        alignItems: 'center',
+                                                        gap: '6px'
+                                                    }}
+                                                >
+                                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ animation: isLoadingDashboard ? 'spin 1s linear infinite' : 'none' }}>
+                                                        <path d="M23 4v6h-6" />
+                                                        <path d="M1 20v-6h6" />
+                                                        <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15" />
+                                                    </svg>
+                                                    <span>Refresh</span>
+                                                </button>
+                                            </div>
+                                        </div>
+
+                                        {/* Row 2: Search Input + Active Only Toggle + Export Excel */}
+                                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '12px', borderTop: '1px solid #f3f4f6', paddingTop: '12px' }}>
+                                            <div style={{ display: 'flex', alignItems: 'center', gap: '16px', flex: '1 1 300px', flexWrap: 'wrap' }}>
+                                                <div style={{ position: 'relative', width: '100%', maxWidth: '360px' }}>
+                                                    <input
+                                                        type="text"
+                                                        value={prodSearchQuery}
+                                                        onChange={e => setProdSearchQuery(e.target.value)}
+                                                        placeholder="Search operator by name, email, or role..."
+                                                        style={{
+                                                            width: '100%',
+                                                            padding: '7px 12px 7px 32px',
+                                                            fontSize: '13px',
+                                                            borderRadius: '6px',
+                                                            border: '1px solid #d1d5db',
+                                                            outline: 'none'
+                                                        }}
+                                                    />
+                                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#9ca3af" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ position: 'absolute', left: '10px', top: '10px' }}>
+                                                        <circle cx="11" cy="11" r="8" />
+                                                        <line x1="21" y1="21" x2="16.65" y2="16.65" />
+                                                    </svg>
+                                                    {prodSearchQuery && (
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => setProdSearchQuery('')}
+                                                            style={{ position: 'absolute', right: '8px', top: '7px', border: 'none', background: 'transparent', cursor: 'pointer', color: '#9ca3af', fontSize: '14px' }}
+                                                        >
+                                                            ✕
+                                                        </button>
+                                                    )}
+                                                </div>
+
+                                                <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '13px', color: '#374151', cursor: 'pointer', userSelect: 'none' }}>
+                                                    <input
+                                                        type="checkbox"
+                                                        checked={prodActiveOnly}
+                                                        onChange={e => setProdActiveOnly(e.target.checked)}
+                                                        style={{ cursor: 'pointer', width: '15px', height: '15px', accentColor: '#b91c1c' }}
+                                                    />
+                                                    <span style={{ fontWeight: '600' }}>Active Operators Only</span>
+                                                    <span style={{ fontSize: '11px', color: '#6b7280', backgroundColor: '#f3f4f6', padding: '1px 6px', borderRadius: '10px' }}>
+                                                        {kpiStats.activeOperatorsCount} / {kpiStats.totalOperators}
+                                                    </span>
+                                                </label>
+                                            </div>
+
+                                            <button
+                                                type="button"
+                                                onClick={handleExportProductivityExcel}
+                                                style={{
+                                                    display: 'flex',
+                                                    alignItems: 'center',
+                                                    gap: '6px',
+                                                    padding: '7px 14px',
+                                                    backgroundColor: '#166534',
+                                                    color: '#ffffff',
+                                                    border: 'none',
+                                                    borderRadius: '6px',
+                                                    fontSize: '12px',
+                                                    fontWeight: '700',
+                                                    cursor: 'pointer',
+                                                    boxShadow: '0 1px 2px rgba(0,0,0,0.05)'
+                                                }}
+                                            >
+                                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                                                    <polyline points="7 10 12 15 17 10" />
+                                                    <line x1="12" y1="15" x2="12" y2="3" />
+                                                </svg>
+                                                <span>Export Excel Report</span>
+                                            </button>
+                                        </div>
+                                    </div>
+
+                                    {/* ── 2. Top 6 Summary KPI Cards Grid ── */}
+                                    <div style={{
+                                        display: 'grid',
+                                        gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))',
+                                        gap: '12px'
+                                    }}>
+                                        {/* Card 1: 1st Scan */}
+                                        <div style={{
+                                            backgroundColor: '#ffffff',
+                                            border: '1px solid #e5e7eb',
+                                            borderLeft: '4px solid #16a34a',
+                                            borderRadius: '10px',
+                                            padding: '12px 16px',
+                                            boxShadow: '0 1px 3px rgba(0,0,0,0.04)'
+                                        }}>
+                                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
+                                                <span style={{ fontSize: '11px', fontWeight: '700', color: '#166534', textTransform: 'uppercase', letterSpacing: '0.5px' }}>1st Scan (Inbound)</span>
+                                                <span style={{ padding: '1px 6px', borderRadius: '4px', fontSize: '10px', fontWeight: '800', backgroundColor: '#dcfce7', color: '#166534' }}>PARCELS</span>
+                                            </div>
+                                            <div style={{ fontSize: '22px', fontWeight: '800', color: '#111827' }}>
+                                                {kpiStats.totalFirstScans.toLocaleString()}
+                                            </div>
+                                            <div style={{ fontSize: '11px', color: '#6b7280', marginTop: '2px' }}>
+                                                Inbound parcels unsealed
+                                            </div>
+                                        </div>
+
+                                        {/* Card 2: 2nd Scan */}
+                                        <div style={{
+                                            backgroundColor: '#ffffff',
+                                            border: '1px solid #e5e7eb',
+                                            borderLeft: '4px solid #2563eb',
+                                            borderRadius: '10px',
+                                            padding: '12px 16px',
+                                            boxShadow: '0 1px 3px rgba(0,0,0,0.04)'
+                                        }}>
+                                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
+                                                <span style={{ fontSize: '11px', fontWeight: '700', color: '#1d4ed8', textTransform: 'uppercase', letterSpacing: '0.5px' }}>2nd Scan (Outbound)</span>
+                                                <span style={{ padding: '1px 6px', borderRadius: '4px', fontSize: '10px', fontWeight: '800', backgroundColor: '#dbeafe', color: '#1e40af' }}>SORTED</span>
+                                            </div>
+                                            <div style={{ fontSize: '22px', fontWeight: '800', color: '#111827' }}>
+                                                {kpiStats.totalSecondScans.toLocaleString()}
+                                            </div>
+                                            <div style={{ fontSize: '11px', color: '#6b7280', marginTop: '2px' }}>
+                                                Parcels sorted into LMD bags
+                                            </div>
+                                        </div>
+
+                                        {/* Card 3: Inbound Bags Unsealed */}
+                                        <div style={{
+                                            backgroundColor: '#ffffff',
+                                            border: '1px solid #e5e7eb',
+                                            borderLeft: '4px solid #9333ea',
+                                            borderRadius: '10px',
+                                            padding: '12px 16px',
+                                            boxShadow: '0 1px 3px rgba(0,0,0,0.04)'
+                                        }}>
+                                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
+                                                <span style={{ fontSize: '11px', fontWeight: '700', color: '#7e22ce', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Bags Unsealed</span>
+                                                <span style={{ padding: '1px 6px', borderRadius: '4px', fontSize: '10px', fontWeight: '800', backgroundColor: '#f3e8ff', color: '#7e22ce' }}>INBOUND</span>
+                                            </div>
+                                            <div style={{ fontSize: '22px', fontWeight: '800', color: '#111827' }}>
+                                                {kpiStats.totalInboundBagsUnsealed.toLocaleString()}
+                                            </div>
+                                            <div style={{ fontSize: '11px', color: '#6b7280', marginTop: '2px' }}>
+                                                Inbound master bags unsealed
+                                            </div>
+                                        </div>
+
+                                        {/* Card 4: Outbound Bags Opened */}
+                                        <div style={{
+                                            backgroundColor: '#ffffff',
+                                            border: '1px solid #e5e7eb',
+                                            borderLeft: '4px solid #d97706',
+                                            borderRadius: '10px',
+                                            padding: '12px 16px',
+                                            boxShadow: '0 1px 3px rgba(0,0,0,0.04)'
+                                        }}>
+                                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
+                                                <span style={{ fontSize: '11px', fontWeight: '700', color: '#b45309', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Bags Opened</span>
+                                                <span style={{ padding: '1px 6px', borderRadius: '4px', fontSize: '10px', fontWeight: '800', backgroundColor: '#fef3c7', color: '#b45309' }}>CREATED</span>
+                                            </div>
+                                            <div style={{ fontSize: '22px', fontWeight: '800', color: '#111827' }}>
+                                                {kpiStats.totalOutboundBagsOpened.toLocaleString()}
+                                            </div>
+                                            <div style={{ fontSize: '11px', color: '#6b7280', marginTop: '2px' }}>
+                                                Outbound LMD bags created
+                                            </div>
+                                        </div>
+
+                                        {/* Card 5: Outbound Bags Sealed */}
+                                        <div style={{
+                                            backgroundColor: '#ffffff',
+                                            border: '1px solid #e5e7eb',
+                                            borderLeft: '4px solid #059669',
+                                            borderRadius: '10px',
+                                            padding: '12px 16px',
+                                            boxShadow: '0 1px 3px rgba(0,0,0,0.04)'
+                                        }}>
+                                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
+                                                <span style={{ fontSize: '11px', fontWeight: '700', color: '#047857', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Bags Sealed</span>
+                                                <span style={{ padding: '1px 6px', borderRadius: '4px', fontSize: '10px', fontWeight: '800', backgroundColor: '#d1fae5', color: '#047857' }}>CLOSED</span>
+                                            </div>
+                                            <div style={{ fontSize: '22px', fontWeight: '800', color: '#111827' }}>
+                                                {kpiStats.totalOutboundBagsClosed.toLocaleString()}
+                                            </div>
+                                            <div style={{ fontSize: '11px', color: '#6b7280', marginTop: '2px' }}>
+                                                Outbound LMD bags sealed
+                                            </div>
+                                        </div>
+
+                                        {/* Card 6: Active Operators */}
+                                        <div style={{
+                                            backgroundColor: '#ffffff',
+                                            border: '1px solid #e5e7eb',
+                                            borderLeft: '4px solid #b91c1c',
+                                            borderRadius: '10px',
+                                            padding: '12px 16px',
+                                            boxShadow: '0 1px 3px rgba(0,0,0,0.04)'
+                                        }}>
+                                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
+                                                <span style={{ fontSize: '11px', fontWeight: '700', color: '#b91c1c', textTransform: 'uppercase', letterSpacing: '0.5px' }}>On-Duty Staff</span>
+                                                <span style={{ padding: '1px 6px', borderRadius: '4px', fontSize: '10px', fontWeight: '800', backgroundColor: '#fee2e2', color: '#b91c1c' }}>ACTIVE</span>
+                                            </div>
+                                            <div style={{ fontSize: '22px', fontWeight: '800', color: '#111827' }}>
+                                                {kpiStats.activeOperatorsCount} <span style={{ fontSize: '13px', fontWeight: '600', color: '#6b7280' }}>/ {kpiStats.totalOperators}</span>
+                                            </div>
+                                            <div style={{ fontSize: '11px', color: '#6b7280', marginTop: '2px' }}>
+                                                Operators active on date
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    {/* ── 3. User Productivity Detailed Performance Table ── */}
+                                    <div style={card}>
+                                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', flexWrap: 'wrap', gap: '8px' }}>
+                                            <div>
+                                                <div style={label}>User Productivity Performance Overview</div>
+                                                <p style={{ fontSize: '12px', color: '#6b7280', margin: '4px 0 0 0' }}>
+                                                    Showing <strong>{filteredProdList.length}</strong> operator{filteredProdList.length !== 1 ? 's' : ''} for <strong>{formatDisplayDate(prodDateFilter)}</strong>.
+                                                </p>
+                                            </div>
+                                            <div style={{ fontSize: '12px', color: '#6b7280', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                                <span>Active Staff: <strong style={{ color: '#166534' }}>{kpiStats.activeOperatorsCount}</strong></span>
+                                                <span>•</span>
+                                                <span>Total Registered: <strong>{kpiStats.totalOperators}</strong></span>
+                                            </div>
+                                        </div>
+
+                                        <div style={{ overflowX: 'auto' }}>
+                                            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px', textAlign: 'left', minWidth: '980px' }}>
+                                                <thead>
+                                                    <tr style={{ borderBottom: '2px solid #e5e7eb', backgroundColor: '#f9fafb' }}>
+                                                        <th style={{ padding: '10px 12px', color: '#6b7280', fontWeight: '700', fontSize: '11px', textTransform: 'uppercase', width: '40px' }}>#</th>
+                                                        <th onClick={() => handleSort('operator')} style={{ padding: '10px 12px', color: '#6b7280', fontWeight: '700', fontSize: '11px', textTransform: 'uppercase', cursor: 'pointer' }}>
+                                                            Operator / User Name {getSortIndicator('operator')}
+                                                        </th>
+                                                        <th style={{ padding: '10px 12px', color: '#6b7280', fontWeight: '700', fontSize: '11px', textTransform: 'uppercase' }}>Email Address</th>
+                                                        <th style={{ padding: '10px 12px', color: '#6b7280', fontWeight: '700', fontSize: '11px', textTransform: 'uppercase' }}>Role</th>
+                                                        <th onClick={() => handleSort('firstScanCount')} style={{ padding: '10px 12px', color: '#166534', fontWeight: '700', fontSize: '11px', textTransform: 'uppercase', cursor: 'pointer', textAlign: 'right' }}>
+                                                            1st Scan (Inbound) {getSortIndicator('firstScanCount')}
+                                                        </th>
+                                                        <th onClick={() => handleSort('secondScanCount')} style={{ padding: '10px 12px', color: '#1d4ed8', fontWeight: '700', fontSize: '11px', textTransform: 'uppercase', cursor: 'pointer', textAlign: 'right' }}>
+                                                            2nd Scan (Outbound) {getSortIndicator('secondScanCount')}
+                                                        </th>
+                                                        <th onClick={() => handleSort('inboundBagsUnsealed')} style={{ padding: '10px 12px', color: '#7e22ce', fontWeight: '700', fontSize: '11px', textTransform: 'uppercase', cursor: 'pointer', textAlign: 'right' }}>
+                                                            Inbound Unsealed {getSortIndicator('inboundBagsUnsealed')}
+                                                        </th>
+                                                        <th onClick={() => handleSort('outboundBagsOpened')} style={{ padding: '10px 12px', color: '#b45309', fontWeight: '700', fontSize: '11px', textTransform: 'uppercase', cursor: 'pointer', textAlign: 'right' }}>
+                                                            Bags Opened {getSortIndicator('outboundBagsOpened')}
+                                                        </th>
+                                                        <th onClick={() => handleSort('outboundBagsClosed')} style={{ padding: '10px 12px', color: '#047857', fontWeight: '700', fontSize: '11px', textTransform: 'uppercase', cursor: 'pointer', textAlign: 'right' }}>
+                                                            Bags Sealed {getSortIndicator('outboundBagsClosed')}
+                                                        </th>
+                                                        <th onClick={() => handleSort('manifestsClosed')} style={{ padding: '10px 12px', color: '#374151', fontWeight: '700', fontSize: '11px', textTransform: 'uppercase', cursor: 'pointer', textAlign: 'right' }}>
+                                                            Manifests Closed {getSortIndicator('manifestsClosed')}
+                                                        </th>
+                                                        <th onClick={() => handleSort('totalScans')} style={{ padding: '10px 12px', color: '#111827', fontWeight: '800', fontSize: '11px', textTransform: 'uppercase', cursor: 'pointer', textAlign: 'right' }}>
+                                                            Total Scans {getSortIndicator('totalScans')}
+                                                        </th>
+                                                        <th style={{ padding: '10px 12px', color: '#6b7280', fontWeight: '700', fontSize: '11px', textTransform: 'uppercase', textAlign: 'center' }}>Duty Status</th>
+                                                    </tr>
+                                                </thead>
+                                                <tbody>
+                                                    {paginatedProdList.length === 0 ? (
+                                                        <tr>
+                                                            <td colSpan={12} style={{ textAlign: 'center', padding: '36px 20px', color: '#6b7280' }}>
+                                                                <div style={{ fontSize: '14px', fontWeight: '600' }}>No operator records found for {formatDisplayDate(prodDateFilter)}</div>
+                                                                <p style={{ fontSize: '12px', color: '#9ca3af', margin: '4px 0 0 0' }}>Try choosing another date or clearing your search filters.</p>
+                                                            </td>
                                                         </tr>
-                                                    </thead>
-                                                    <tbody>
-                                                        {paginatedList.map((user: any, idx: number) => {
-                                                            const globalIdx = (dashTablePage - 1) * dashTableRowsPerPage + idx + 1;
-                                                            const fullName = `${user.first_name || ''} ${user.last_name || ''}`.trim() || user.name || user.email || 'Operator';
-                                                            const prod = (dashboardData.userProductivity || []).find((p: any) =>
-                                                                p.operator?.toLowerCase().includes(fullName.toLowerCase()) ||
-                                                                p.operator?.toLowerCase().includes((user.first_name || '').toLowerCase())
-                                                            );
-
-                                                            const scanned = prod ? prod.scanned : 0;
-                                                            const bagsSealed = prod ? prod.bagsSealed : 0;
-                                                            const manifestsClosed = prod ? prod.manifestsClosed : 0;
+                                                    ) : (
+                                                        paginatedProdList.map((user: any, idx: number) => {
+                                                            const globalIdx = (prodPage - 1) * prodRowsPerPage + idx + 1;
+                                                            const displayName = user.operator || `${user.first_name || ''} ${user.last_name || ''}`.trim() || user.name || user.email || 'Operator';
+                                                            const firstScan = user.firstScanCount || 0;
+                                                            const secondScan = user.secondScanCount || 0;
+                                                            const inboundUnsealed = user.inboundBagsUnsealed || 0;
+                                                            const bagsOpened = user.outboundBagsOpened || 0;
+                                                            const bagsClosed = user.outboundBagsClosed || user.bagsSealed || 0;
+                                                            const manifestsClosed = user.manifestsClosed || 0;
+                                                            const totalScans = user.totalScans || (firstScan + secondScan);
+                                                            const totalActions = user.totalActions || (totalScans + inboundUnsealed + bagsOpened + bagsClosed + manifestsClosed);
+                                                            const hasActivity = totalActions > 0;
 
                                                             return (
-                                                                <tr key={`u-prod-${user.id || idx}`} style={{ borderBottom: '1px solid #f3f4f6' }}>
+                                                                <tr
+                                                                    key={`u-prod-${user.userId || user.id || displayName || idx}`}
+                                                                    style={{
+                                                                        borderBottom: '1px solid #f3f4f6',
+                                                                        backgroundColor: hasActivity ? 'transparent' : '#fbfcfd'
+                                                                    }}
+                                                                >
                                                                     <td style={{ padding: '10px 12px', color: '#9ca3af', fontSize: '11px' }}>{globalIdx}</td>
                                                                     <td style={{ padding: '10px 12px', fontWeight: '700', color: '#111827' }}>
                                                                         <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                                                                            <div style={{ width: '28px', height: '28px', borderRadius: '50%', backgroundColor: '#f3f4f6', border: '1px solid #d1d5db', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: '700', fontSize: '11px', color: '#374151' }}>
-                                                                                {(user.first_name || user.name || user.email || 'O')[0].toUpperCase()}
+                                                                            <div style={{
+                                                                                width: '28px',
+                                                                                height: '28px',
+                                                                                borderRadius: '50%',
+                                                                                backgroundColor: hasActivity ? '#fee2e2' : '#f3f4f6',
+                                                                                border: '1px solid',
+                                                                                borderColor: hasActivity ? '#fca5a5' : '#d1d5db',
+                                                                                display: 'flex',
+                                                                                alignItems: 'center',
+                                                                                justifyContent: 'center',
+                                                                                fontWeight: '700',
+                                                                                fontSize: '11px',
+                                                                                color: hasActivity ? '#b91c1c' : '#374151'
+                                                                            }}>
+                                                                                {(displayName || 'O')[0].toUpperCase()}
                                                                             </div>
-                                                                            <span>{fullName}</span>
+                                                                            <div>
+                                                                                <div>{displayName}</div>
+                                                                                {user.username && user.username !== displayName && (
+                                                                                    <div style={{ fontSize: '10px', color: '#9ca3af', fontWeight: '400' }}>@{user.username}</div>
+                                                                                )}
+                                                                            </div>
                                                                         </div>
                                                                     </td>
                                                                     <td style={{ padding: '10px 12px', color: '#4b5563', fontSize: '12px', fontFamily: 'monospace' }}>{user.email || '—'}</td>
@@ -1030,32 +1574,66 @@ export default function DashboardTab({
                                                                             {user.role || 'Operator'}
                                                                         </span>
                                                                     </td>
-                                                                    <td style={{ padding: '10px 12px', fontWeight: '800', color: '#166534' }}>{scanned} parcels</td>
-                                                                    <td style={{ padding: '10px 12px', fontWeight: '700', color: '#111827' }}>{bagsSealed} bags</td>
-                                                                    <td style={{ padding: '10px 12px', fontWeight: '700', color: '#374151' }}>{manifestsClosed} manifests</td>
-                                                                    <td style={{ padding: '10px 12px' }}>
-                                                                        <span style={{ padding: '2px 8px', borderRadius: '4px', fontSize: '11px', fontWeight: '700', backgroundColor: '#dcfce7', color: '#15803d' }}>
-                                                                            ● Active On-Duty
+                                                                    <td style={{ padding: '10px 12px', fontWeight: '700', color: firstScan > 0 ? '#166534' : '#9ca3af', textAlign: 'right' }}>
+                                                                        {firstScan > 0 ? `${firstScan} pcs` : '0'}
+                                                                    </td>
+                                                                    <td style={{ padding: '10px 12px', fontWeight: '700', color: secondScan > 0 ? '#1d4ed8' : '#9ca3af', textAlign: 'right' }}>
+                                                                        {secondScan > 0 ? `${secondScan} pcs` : '0'}
+                                                                    </td>
+                                                                    <td style={{ padding: '10px 12px', fontWeight: '700', color: inboundUnsealed > 0 ? '#7e22ce' : '#9ca3af', textAlign: 'right' }}>
+                                                                        {inboundUnsealed > 0 ? `${inboundUnsealed} bags` : '0'}
+                                                                    </td>
+                                                                    <td style={{ padding: '10px 12px', fontWeight: '700', color: bagsOpened > 0 ? '#b45309' : '#9ca3af', textAlign: 'right' }}>
+                                                                        {bagsOpened > 0 ? `${bagsOpened} bags` : '0'}
+                                                                    </td>
+                                                                    <td style={{ padding: '10px 12px', fontWeight: '700', color: bagsClosed > 0 ? '#047857' : '#9ca3af', textAlign: 'right' }}>
+                                                                        {bagsClosed > 0 ? `${bagsClosed} bags` : '0'}
+                                                                    </td>
+                                                                    <td style={{ padding: '10px 12px', fontWeight: '700', color: manifestsClosed > 0 ? '#374151' : '#9ca3af', textAlign: 'right' }}>
+                                                                        {manifestsClosed > 0 ? `${manifestsClosed} mnf` : '0'}
+                                                                    </td>
+                                                                    <td style={{ padding: '10px 12px', textAlign: 'right' }}>
+                                                                        <span style={{
+                                                                            padding: '2px 8px',
+                                                                            borderRadius: '4px',
+                                                                            fontSize: '12px',
+                                                                            fontWeight: '800',
+                                                                            backgroundColor: totalScans > 0 ? '#f3f4f6' : 'transparent',
+                                                                            color: totalScans > 0 ? '#111827' : '#9ca3af'
+                                                                        }}>
+                                                                            {totalScans}
                                                                         </span>
+                                                                    </td>
+                                                                    <td style={{ padding: '10px 12px', textAlign: 'center' }}>
+                                                                        {hasActivity ? (
+                                                                            <span style={{ padding: '2px 8px', borderRadius: '4px', fontSize: '11px', fontWeight: '700', backgroundColor: '#dcfce7', color: '#15803d' }}>
+                                                                                ● Active
+                                                                            </span>
+                                                                        ) : (
+                                                                            <span style={{ padding: '2px 8px', borderRadius: '4px', fontSize: '11px', fontWeight: '500', backgroundColor: '#f3f4f6', color: '#9ca3af' }}>
+                                                                                ○ Idle
+                                                                            </span>
+                                                                        )}
                                                                     </td>
                                                                 </tr>
                                                             );
-                                                        })}
-                                                    </tbody>
-                                                </table>
-                                            </div>
-                                            <PaginationControl
-                                                currentPage={dashTablePage}
-                                                totalItems={list.length}
-                                                rowsPerPage={dashTableRowsPerPage}
-                                                onPageChange={(page) => setDashTablePage(page)}
-                                                onRowsPerPageChange={(rows) => setDashTableRowsPerPage(rows)}
-                                            />
-                                        </>
-                                    );
-                                })()}
-                            </div>
-                        )}
+                                                        })
+                                                    )}
+                                                </tbody>
+                                            </table>
+                                        </div>
+
+                                        <PaginationControl
+                                            currentPage={prodPage}
+                                            totalItems={filteredProdList.length}
+                                            rowsPerPage={prodRowsPerPage}
+                                            onPageChange={(page) => setProdPage(page)}
+                                            onRowsPerPageChange={(rows) => setProdRowsPerPage(rows)}
+                                        />
+                                    </div>
+                                </div>
+                            );
+                        })()}
 
                         {/* ═══════════════════════════════════════════════════════
                                         DETAIL TAB 8: COURIER PARTNER DISTRIBUTION
