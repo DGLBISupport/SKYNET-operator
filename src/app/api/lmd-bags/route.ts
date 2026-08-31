@@ -255,7 +255,18 @@ export async function GET(request: Request) {
                 const spData = await spRes.json();
                 if (Array.isArray(spData)) spData.forEach((sp: any) => { serviceProvidersMap[sp.id] = sp.name; });
 
-                const omRes = await fetch(`${sb.url}/rest/v1/outbound_manifests?order=created_at.desc`, { headers: sb.headers, cache: 'no-store' });
+                // Filter: only OPEN manifests created today (based on created_at column)
+                const todayStart = new Date();
+                todayStart.setHours(0, 0, 0, 0);
+                const todayEnd = new Date();
+                todayEnd.setHours(23, 59, 59, 999);
+                const todayStartISO = todayStart.toISOString();
+                const todayEndISO = todayEnd.toISOString();
+
+                const omRes = await fetch(
+                    `${sb.url}/rest/v1/outbound_manifests?status=eq.OPEN&created_at=gte.${encodeURIComponent(todayStartISO)}&created_at=lte.${encodeURIComponent(todayEndISO)}&order=created_at.desc`,
+                    { headers: sb.headers, cache: 'no-store' }
+                );
                 const omData = await omRes.json();
                 if (Array.isArray(omData)) {
                     supabaseSuccess = true;
@@ -293,9 +304,10 @@ export async function GET(request: Request) {
         }
 
         // Only append fallback in-memory manifests if Supabase fetch failed or is unconfigured
+        // Also filter to only OPEN manifests (closed ones are excluded from the dropdown)
         if (!supabaseSuccess) {
             manifestsMap.forEach((session, ref) => {
-                if (ref && ref.startsWith('LK-') && !manifestsList.some(m => m.manifest_reference === ref)) {
+                if (ref && ref.startsWith('LK-') && session.status === 'OPEN' && !manifestsList.some(m => m.manifest_reference === ref)) {
                     manifestsList.push({ manifest_reference: ref, bag_numbers: [], total_bags: 0, service_provider: session.serviceProviderId || null, service_provider_name: session.serviceProviderName || 'All Partners', total_parcels: 0, status: session.status });
                 }
             });

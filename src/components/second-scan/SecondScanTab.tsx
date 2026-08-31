@@ -72,7 +72,7 @@ export default function SecondScanTab({
                                                 <option value="">-- Select an Outbound Manifest --</option>
                                                 {outboundManifestsList.map(m => (
                                                     <option key={m.manifest_reference} value={m.manifest_reference}>
-                                                        {m.manifest_reference} ({m.service_provider_name || 'Partner'} - {m.total_bags || 0} Bags, {m.total_parcels || 0} Pcs) {m.status === 'CLOSED' ? '[CLOSED]' : ''}
+                                                        {m.manifest_reference} ({m.service_provider_name || 'Partner'} - {m.total_bags || 0} Bags, {m.total_parcels || 0} Pcs)
                                                     </option>
                                                 ))}
                                             </select>
