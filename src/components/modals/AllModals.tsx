@@ -19,6 +19,8 @@ export default function AllModals({
     customDiscrepancyNote,
     damagedSelectedPhotosModal,
     discrepancyReason,
+    duplicateBagError,
+    duplicateManifestError,
     duplicateModal,
     expandedBags,
     extraParcelModal,
@@ -79,6 +81,8 @@ export default function AllModals({
     setCustomDiscrepancyNote,
     setDamagedSelectedPhotosModal,
     setDiscrepancyReason,
+    setDuplicateBagError,
+    setDuplicateManifestError,
     setDuplicateModal,
     setExtraParcelModal,
     setExtraParcelNote,
@@ -2606,7 +2610,7 @@ export default function AllModals({
                                 <h3 style={{ fontSize: '16px', fontWeight: '800', color: '#111827', margin: 0, display: 'flex', alignItems: 'center', gap: '6px' }}>
                                     <span>Create New Outbound Manifest</span>
                                 </h3>
-                                <button onClick={() => setCreateManifestModalOpen(false)} style={{ background: 'none', border: 'none', fontSize: '18px', cursor: 'pointer', color: '#6b7280', fontWeight: 'bold' }}>✕</button>
+                                <button onClick={() => { setCreateManifestModalOpen(false); setDuplicateManifestError(''); }} style={{ background: 'none', border: 'none', fontSize: '18px', cursor: 'pointer', color: '#6b7280', fontWeight: 'bold' }}>✕</button>
                             </div>
 
                             <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
@@ -2640,7 +2644,10 @@ export default function AllModals({
                                         disabled={Boolean(isCreatingManifest)}
                                         type="text"
                                         value={customManifestName !== undefined && customManifestName !== '' ? customManifestName : getNextManifestPreviewCode(selectedProviderForManifest)}
-                                        onChange={(e) => setCustomManifestName && setCustomManifestName(e.target.value)}
+                                        onChange={(e) => {
+                                            setCustomManifestName && setCustomManifestName(e.target.value);
+                                            if (duplicateManifestError) setDuplicateManifestError('');
+                                        }}
                                         style={{
                                             ...inputStyle,
                                             width: '100%',
@@ -2661,6 +2668,29 @@ export default function AllModals({
                                     </span>
                                 </div>
                             </div>
+
+                            {/* ── Duplicate Manifest Error Banner ── */}
+                            {duplicateManifestError && (
+                                <div style={{
+                                    backgroundColor: '#fef2f2',
+                                    border: '1.5px solid #f87171',
+                                    borderRadius: '8px',
+                                    padding: '10px 14px',
+                                    display: 'flex',
+                                    alignItems: 'flex-start',
+                                    gap: '8px',
+                                    fontSize: '12px',
+                                    fontWeight: '600',
+                                    color: '#b91c1c',
+                                    lineHeight: '1.5'
+                                }}>
+                                    <span style={{ fontSize: '15px', flexShrink: 0, marginTop: '1px' }}>🚫</span>
+                                    <div>
+                                        <div style={{ fontWeight: '800', marginBottom: '2px' }}>Duplicate Manifest — Already Exists</div>
+                                        <div style={{ fontWeight: '500', color: '#dc2626' }}>{duplicateManifestError}</div>
+                                    </div>
+                                </div>
+                            )}
 
                             <div style={{ display: 'flex', gap: '10px', marginTop: '10px' }}>
                                 <button
@@ -2696,7 +2726,7 @@ export default function AllModals({
                                     )}
                                 </button>
                                 <button
-                                    onClick={() => setCreateManifestModalOpen(false)}
+                                    onClick={() => { setCreateManifestModalOpen(false); setDuplicateManifestError(''); }}
                                     disabled={Boolean(isCreatingManifest)}
                                     style={{
                                         flex: 1,
@@ -2747,7 +2777,7 @@ export default function AllModals({
                                 </h3>
                                 <button 
                                     disabled={Boolean(isCreatingBag)}
-                                    onClick={() => !isCreatingBag && setCreateBagModalOpen(false)} 
+                                    onClick={() => { if (!isCreatingBag) { setCreateBagModalOpen(false); setDuplicateBagError(''); } }} 
                                     style={{ background: 'none', border: 'none', fontSize: '18px', cursor: isCreatingBag ? 'not-allowed' : 'pointer', color: '#6b7280', fontWeight: 'bold' }}
                                 >
                                     ✕
@@ -2772,6 +2802,7 @@ export default function AllModals({
                                             const mawbPrefix = selectedSecondScanMawb ? selectedSecondScanMawb : 'LMD';
                                             const partnerCode = `-${p.toUpperCase()}`;
                                             setCustomBagNumber(`${mawbPrefix}${partnerCode}-BAG-${String((outboundBags?.length || 0) + 1).padStart(2, '0')}`);
+                                            if (duplicateBagError) setDuplicateBagError('');
                                         }}
                                         style={{ ...inputStyle, width: '100%', fontWeight: '700', padding: '10px', opacity: isCreatingBag ? 0.7 : 1 }}
                                     >
@@ -2790,7 +2821,10 @@ export default function AllModals({
                                         disabled={Boolean(isCreatingBag)}
                                         type="text"
                                         value={customBagNumber !== '' ? customBagNumber : `${selectedSecondScanMawb ? selectedSecondScanMawb : 'LMD'}-${newBagPartner.toUpperCase()}-BAG-${String((outboundBags?.length || 0) + 1).padStart(2, '0')}`}
-                                        onChange={(e) => setCustomBagNumber(e.target.value)}
+                                        onChange={(e) => {
+                                            setCustomBagNumber(e.target.value);
+                                            if (duplicateBagError) setDuplicateBagError('');
+                                        }}
                                         style={{ ...inputStyle, width: '100%', fontWeight: '700', fontFamily: "'Inter', sans-serif", padding: '10px', backgroundColor: isCreatingBag ? '#f3f4f6' : '#ffffff', border: '1px solid #d1d5db', opacity: isCreatingBag ? 0.7 : 1 }}
                                         placeholder="Enter or edit Bag Number"
                                     />
@@ -2799,6 +2833,29 @@ export default function AllModals({
                                     </span>
                                 </div>
                             </div>
+
+                            {/* ── Duplicate Bag Error Banner ── */}
+                            {duplicateBagError && (
+                                <div style={{
+                                    backgroundColor: '#fef2f2',
+                                    border: '1.5px solid #f87171',
+                                    borderRadius: '8px',
+                                    padding: '10px 14px',
+                                    display: 'flex',
+                                    alignItems: 'flex-start',
+                                    gap: '8px',
+                                    fontSize: '12px',
+                                    fontWeight: '600',
+                                    color: '#b91c1c',
+                                    lineHeight: '1.5'
+                                }}>
+                                    <span style={{ fontSize: '15px', flexShrink: 0, marginTop: '1px' }}>🚫</span>
+                                    <div>
+                                        <div style={{ fontWeight: '800', marginBottom: '2px' }}>Duplicate Bag — Already Exists</div>
+                                        <div style={{ fontWeight: '500', color: '#dc2626' }}>{duplicateBagError}</div>
+                                    </div>
+                                </div>
+                            )}
 
                             <div style={{ display: 'flex', gap: '10px', marginTop: '10px' }}>
                                 <button
@@ -2834,7 +2891,7 @@ export default function AllModals({
                                     )}
                                 </button>
                                 <button
-                                    onClick={() => setCreateBagModalOpen(false)}
+                                    onClick={() => { setCreateBagModalOpen(false); setDuplicateBagError(''); }}
                                     disabled={Boolean(isCreatingBag)}
                                     style={{
                                         flex: 1,

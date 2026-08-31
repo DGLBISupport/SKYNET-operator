@@ -345,6 +345,8 @@ export default function WorkstationDashboard() {
     const [newBagPartner, setNewBagPartner] = useState<'PickMe' | 'Domex' | 'SITREK' | 'Pronto'>('PickMe');
     const [newBagHub, setNewBagHub] = useState('');
     const [customBagNumber, setCustomBagNumber] = useState('');
+    const [duplicateBagError, setDuplicateBagError] = useState('');
+    const [duplicateManifestError, setDuplicateManifestError] = useState('');
     const [validationCard, setValidationCard] = useState<{
         status: 'CORRECT' | 'INCORRECT';
         reason?: string;
@@ -2146,14 +2148,23 @@ export default function WorkstationDashboard() {
 
     const handleCreateOutboundManifest = async () => {
         if (isCreatingManifest) return;
+
+        // ── Duplicate Manifest Check ──
+        const defaultCode = getNextManifestPreviewCode(selectedProviderForManifest);
+        const finalManifestRef = customManifestName.trim() || defaultCode;
+        const manifestAlreadyExists = outboundManifestsList.some(
+            m => m.manifest_reference.trim().toLowerCase() === finalManifestRef.trim().toLowerCase()
+        );
+        if (manifestAlreadyExists) {
+            setDuplicateManifestError(`Outbound Manifest "${finalManifestRef}" already exists. Please use a different manifest name or reference.`);
+            return;
+        }
+
         setIsCreatingManifest(true);
         try {
             const activeOperator = currentUser
                 ? `${currentUser.firstName || ''} ${currentUser.lastName || ''}`.trim() || currentUser.username || currentUser.email
                 : 'Staff';
-
-            const defaultCode = getNextManifestPreviewCode(selectedProviderForManifest);
-            const finalManifestRef = customManifestName.trim() || defaultCode;
 
             const res = await fetch('/api/lmd-bags', {
                 method: 'POST',
@@ -2234,6 +2245,15 @@ export default function WorkstationDashboard() {
 
         const defaultCalculatedBagNumber = `${selectedSecondScanMawb}-${newBagPartner.toUpperCase()}-BAG-${String((outboundBags?.length || 0) + 1).padStart(2, '0')}`;
         const finalBagNumber = customBagNumber.trim() || defaultCalculatedBagNumber;
+
+        // ── Duplicate Bag Check ──
+        const bagAlreadyExists = outboundBags.some(
+            b => b.bagNumber.trim().toLowerCase() === finalBagNumber.trim().toLowerCase()
+        );
+        if (bagAlreadyExists) {
+            setDuplicateBagError(`Outbound Bag "${finalBagNumber}" already exists. Please use a different bag number or change the partner/manifest selection.`);
+            return;
+        }
 
         setIsCreatingBag(true);
         try {
@@ -3343,6 +3363,8 @@ export default function WorkstationDashboard() {
         dashboardData,
         dashboardSubTab,
         discrepancyReason,
+        duplicateBagError,
+        duplicateManifestError,
         duplicateModal,
         errorMessage,
         expandedBags,
@@ -3514,6 +3536,8 @@ export default function WorkstationDashboard() {
         setDashboardData,
         setDashboardSubTab,
         setDiscrepancyReason,
+        setDuplicateBagError,
+        setDuplicateManifestError,
         setDuplicateModal,
         setErrorMessage,
         setExpandedBags,
