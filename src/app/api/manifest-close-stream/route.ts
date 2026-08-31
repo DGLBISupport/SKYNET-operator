@@ -117,6 +117,46 @@ function nowFormatted(): string {
     return `${m.year}/${m.month}/${m.day} ${h24}:${m.minute}:${m.second}`;
 }
 
+// ─── Global In-Flight Mutex ──────────────────────────────────────────────────
+const activeManifestClosures = new Set<string>();
+
+// ─── Batch fetch shipment details from Supabase ─────────────────────────────
+async function fetchShipmentsBatch(sb: any, trackingNumbers: string[]): Promise<Map<string, any>> {
+    const resultMap = new Map<string, any>();
+    if (!sb || !trackingNumbers || trackingNumbers.length === 0) return resultMap;
+
+    const rawRefs = Array.from(new Set(trackingNumbers.map(t => t.trim()).filter(Boolean)));
+    const cleanRefs = Array.from(new Set(rawRefs.map(r => r.replace(/^skyt-?/i, '').trim()).filter(Boolean)));
+    const allSearchKeys = Array.from(new Set([...rawRefs, ...cleanRefs, ...cleanRefs.map(c => `SKYT-${c}`)]));
+
+    const CHUNK_SIZE = 80;
+    for (let i = 0; i < allSearchKeys.length; i += CHUNK_SIZE) {
+        const chunk = allSearchKeys.slice(i, i + CHUNK_SIZE);
+        const encodedChunk = chunk.map(k => encodeURIComponent(k)).join(',');
+
+        try {
+            const query = `or=(reference_number.in.(${encodedChunk}),sender_reference.in.(${encodedChunk}),alternate_reference.in.(${encodedChunk}))&select=*`;
+            const res = await fetch(`${sb.url}/rest/v1/shipments?${query}`, {
+                headers: sb.headers,
+                cache: 'no-store'
+            });
+            const data = await res.json();
+            if (Array.isArray(data)) {
+                for (const row of data) {
+                    if (row.reference_number) resultMap.set(String(row.reference_number).toLowerCase().trim(), row);
+                    if (row.sender_reference) resultMap.set(String(row.sender_reference).toLowerCase().trim(), row);
+                    if (row.alternate_reference) resultMap.set(String(row.alternate_reference).toLowerCase().trim(), row);
+                    if (row.sender_reference_2) resultMap.set(String(row.sender_reference_2).toLowerCase().trim(), row);
+                }
+            }
+        } catch (e) {
+            console.error('[manifest-close-stream] Batch fetch error:', e);
+        }
+    }
+
+    return resultMap;
+}
+
 // ─── Fetch shipment detail from Supabase with multi-column fallback ─────────────────
 async function fetchShipmentDetails(sb: any, trackingNumber: string): Promise<any | null> {
     if (!sb || !trackingNumber) return null;
@@ -465,8 +505,8 @@ ${shipmentsContent}
 
 // ─── POST XML to FFDX API ─────────────────────────────────────────────────────
 async function postToFfdx(xmlStream: string, manifestReference: string): Promise<{ success: boolean; response?: string; error?: string }> {
-    const MAX_RETRIES = 3;
-    const RETRY_BACKOFF_MS = 4000;
+    // For full manifest XML uploads, MAX_RETRIES must be 1 to prevent duplicate manifest creation on GETonline
+    const MAX_RETRIES = 1;
     let lastError = '';
     for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
         try {
@@ -479,12 +519,11 @@ async function postToFfdx(xmlStream: string, manifestReference: string): Promise
                 method: 'POST',
                 headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
                 body: formData.toString(),
-                signal: AbortSignal.timeout(60_000),
+                signal: AbortSignal.timeout(120_000), // 2 minutes timeout for large manifests
             });
             const text = await res.text();
             if (!res.ok) {
                 lastError = `HTTP ${res.status}: ${text.slice(0, 200)}`;
-                if (attempt < MAX_RETRIES) { await new Promise(r => setTimeout(r, RETRY_BACKOFF_MS)); continue; }
                 return { success: false, error: lastError };
             }
             const rawContent = text.replace(/<[^>]+>/g, '').trim();
@@ -496,10 +535,9 @@ async function postToFfdx(xmlStream: string, manifestReference: string): Promise
             return { success: true, response: text };
         } catch (err: any) {
             lastError = err?.message || String(err);
-            if (attempt < MAX_RETRIES) { await new Promise(r => setTimeout(r, RETRY_BACKOFF_MS)); }
         }
     }
-    return { success: false, error: `FFDX upload failed after ${MAX_RETRIES} attempts: ${lastError}` };
+    return { success: false, error: `FFDX upload failed: ${lastError}` };
 }
 
 // ─── GET /api/manifest-close-stream ──────────────────────────────────────────
@@ -513,6 +551,8 @@ export async function GET(request: Request) {
         return new NextResponse('Missing mawbRef', { status: 400 });
     }
 
+    const normalizedRef = mawbRef.trim().toUpperCase();
+
     // Helper: encode an SSE event line
     const encode = (data: object) => `data: ${JSON.stringify(data)}\n\n`;
 
@@ -521,6 +561,16 @@ export async function GET(request: Request) {
             const emit = (data: object) => {
                 try { controller.enqueue(new TextEncoder().encode(encode(data))); } catch { /* stream may be closed */ }
             };
+
+            // In-flight mutex check: prevent duplicate simultaneous upload jobs for same manifest
+            if (activeManifestClosures.has(normalizedRef)) {
+                console.warn(`[manifest-close-stream] Manifest "${mawbRef}" is already closing/uploading in an active request.`);
+                emit({ type: 'error', message: `Manifest "${mawbRef}" close is already in progress. Please wait for completion.` });
+                try { controller.close(); } catch { }
+                return;
+            }
+
+            activeManifestClosures.add(normalizedRef);
 
             try {
                 const sb = getSupabaseConfig();
@@ -546,6 +596,8 @@ export async function GET(request: Request) {
                 } catch (e) {
                     console.error('[manifest-close-stream] Error fetching outbound_manifests:', e);
                 }
+
+                const isAlreadyUploaded = manifestRecord?.is_uploaded === true;
 
                 // ── Step 2: Mark manifest CLOSED in DB ───────────────────────
                 const closedTimestamp = new Date().toISOString();
@@ -661,15 +713,16 @@ export async function GET(request: Request) {
                 }
                 if (!receiverCode) { receiverCode = 'PICKME'; receiverName = 'PickMe'; }
 
-                // ── Step 6: Build XML — emit per-bag and per-parcel events ────
-                // NOTE: we no longer collect every parcel into one shared shipmentBlocks
-                // array and send them all in a single FFDX call. That's what was causing
-                // "Object reference not set to an instance of an object" — one parcel with
-                // no matching `shipments` row produced a near-empty <Shipment> block, FFDX's
-                // server crashed on it, and the whole manifest upload got rejected/corrupted
-                // after only partially registering (hence "only last scanned parcel" on GETonline).
-                // Instead: enrich first, skip parcels with no DB record, then upload each
-                // remaining parcel to FFDX individually so one bad record can't take the rest down.
+                // ── Step 6: Batch fetch shipment details for fast processing ────
+                const allTrackingNumbers: string[] = [];
+                for (const bag of allBagsList) {
+                    for (const parcel of (bag.parcels || [])) {
+                        const tn = String(parcel.trackingNumber || parcel.shipment_ref || '').replace(/^skyt-?/i, '').trim();
+                        if (tn) allTrackingNumbers.push(tn);
+                    }
+                }
+                const batchDetailsMap = await fetchShipmentsBatch(sb, allTrackingNumbers);
+
                 type ShipmentEntry = { parcel: any; detail: any; bagNumber: string; trackingNum: string };
                 const shipmentEntries: ShipmentEntry[] = [];
                 let firstShipmentDetail: any = null;
@@ -692,12 +745,12 @@ export async function GET(request: Request) {
 
                         emit({ type: 'parcel', bagNumber: bag.bagNumber, trackingNumber: trackingNum, index: parcelIdx, total: parcels.length, status: 'enriching' });
 
-                        const detail = await fetchShipmentDetails(sb, trackingNum);
+                        const detail = batchDetailsMap.get(trackingNum.toLowerCase())
+                            || batchDetailsMap.get(`skyt-${trackingNum.toLowerCase()}`)
+                            || await fetchShipmentDetails(sb, trackingNum);
 
                         if (!detail) {
-                            // No DB record for this parcel — do NOT send it to FFDX. Sending a
-                            // near-empty <Shipment> block is what triggers the null-reference
-                            // rejection and can take the whole batch down with it.
+                            // No DB record for this parcel — skip from FFDX XML to prevent null-ref errors
                             emit({ type: 'parcel', bagNumber: bag.bagNumber, trackingNumber: trackingNum, index: parcelIdx, total: parcels.length, status: 'skipped', message: 'No matching shipment record in database' });
                             continue;
                         }
@@ -746,13 +799,16 @@ export async function GET(request: Request) {
                     scheduledArrival: mawbRecord?.scheduled_arrival || ''
                 };
 
-                emit({ type: 'ffdx_start', parcelCount: shipmentEntries.length });
-
+                let ffdxResult: { success: boolean; response?: string; error?: string } = { success: true };
                 const allShipmentBlocks = shipmentEntries.map(e => buildShipmentXml(e.parcel, e.detail, e.bagNumber));
                 const fullXmlPayload = buildUploadXml(mawbRef, allShipmentBlocks, headerInfo);
 
-                let ffdxResult: { success: boolean; response?: string; error?: string } = { success: true };
-                if (allShipmentBlocks.length > 0) {
+                // IDEMPOTENCY CHECK: If already uploaded, do NOT post to FFDX again!
+                if (isAlreadyUploaded) {
+                    console.log(`[manifest-close-stream] Manifest "${mawbRef}" was already uploaded to GETonline. Skipping duplicate API POST.`);
+                    emit({ type: 'ffdx_start', parcelCount: shipmentEntries.length, alreadyUploaded: true });
+                } else if (allShipmentBlocks.length > 0) {
+                    emit({ type: 'ffdx_start', parcelCount: shipmentEntries.length });
                     ffdxResult = await postToFfdx(fullXmlPayload, mawbRef);
                 }
 
@@ -761,7 +817,7 @@ export async function GET(request: Request) {
 
                 for (const entry of shipmentEntries) {
                     if (ffdxResult.success) {
-                        emit({ type: 'parcel', bagNumber: entry.bagNumber, trackingNumber: entry.trackingNum, status: 'ok', message: 'Uploaded to GETonline' });
+                        emit({ type: 'parcel', bagNumber: entry.bagNumber, trackingNumber: entry.trackingNum, status: 'ok', message: isAlreadyUploaded ? 'Already uploaded to GETonline' : 'Uploaded to GETonline' });
                     } else {
                         emit({ type: 'parcel', bagNumber: entry.bagNumber, trackingNumber: entry.trackingNum, status: 'error', message: ffdxResult.error || 'GETonline upload failed' });
                     }
@@ -826,7 +882,8 @@ export async function GET(request: Request) {
                         totalParcels,
                         uploaded: uploadedCount,
                         errors: failedCount,
-                        ffdxError: ffdxResult.error
+                        ffdxError: ffdxResult.error,
+                        alreadyUploaded: isAlreadyUploaded
                     }
                 });
 
@@ -834,6 +891,7 @@ export async function GET(request: Request) {
                 console.error('[manifest-close-stream] Fatal error:', err);
                 try { controller.enqueue(new TextEncoder().encode(encode({ type: 'error', message: err?.message || 'Internal server error' }))); } catch { /* ignore */ }
             } finally {
+                activeManifestClosures.delete(normalizedRef);
                 try { controller.close(); } catch { /* ignore */ }
             }
         }

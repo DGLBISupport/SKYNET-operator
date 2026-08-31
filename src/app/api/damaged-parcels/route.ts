@@ -48,7 +48,8 @@ export async function GET(request: Request) {
         const sb = getSupabaseConfig();
         if (sb) {
             try {
-                let query = `${sb.url}/rest/v1/damaged_parcels?select=*&order=created_at.desc`;
+                // Explicit column list — avoids fetching unused columns via select=*
+                let query = `${sb.url}/rest/v1/damaged_parcels?select=id,created_at,tracking_number,temu_barcode,mawb_reference,consignee_name,assigned_partner,assigned_zone,damage_type,severity,image_url_1,image_url_2,remarks,reported_by,status&order=created_at.desc`;
                 if (tracking) {
                     query += `&tracking_number=ilike.*${encodeURIComponent(tracking)}*`;
                 }
@@ -56,7 +57,11 @@ export async function GET(request: Request) {
                     query += `&status=eq.${encodeURIComponent(status)}`;
                 }
 
-                const res = await fetch(query, { headers: sb.headers });
+                const res = await fetch(query, {
+                    headers: sb.headers,
+                    cache: 'no-store',
+                    signal: AbortSignal.timeout(10000)
+                });
                 if (res.ok) {
                     const data = await res.json();
                     if (Array.isArray(data)) {

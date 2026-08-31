@@ -448,15 +448,17 @@ ${shipmentsContent}
 </WSGET>`;
 }
 
-// ─── POST the XML to FFDX ─────────────────────────────────────────────────────
+// ─── In-Flight Mutex ────────────────────────────────────────────────────────
+const activeFfdxUploads = new Set<string>();
+
+// ─── POST XML to FFDX WSDataTransfer API ──────────────────────────────────────
 async function postToFfdx(xmlStream: string, manifestReference: string): Promise<{ success: boolean; response?: string; error?: string }> {
-    const MAX_RETRIES = 3;
-    const RETRY_BACKOFF_MS = 5000;
-    let lastError: string = '';
+    const MAX_RETRIES = 1;
+    let lastError = '';
 
     for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
         try {
-            console.log(`[ffdx-upload] [${manifestReference}] Attempt ${attempt}/${MAX_RETRIES} — posting to FFDX...`);
+            console.log(`[ffdx-upload] [${manifestReference}] Sending WSGET XML to FFDX...`);
 
             const formData = new URLSearchParams();
             formData.append('Username', FFDX_USERNAME);
@@ -468,7 +470,7 @@ async function postToFfdx(xmlStream: string, manifestReference: string): Promise
                 method: 'POST',
                 headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
                 body: formData.toString(),
-                signal: AbortSignal.timeout(60_000),
+                signal: AbortSignal.timeout(120_000),
             });
 
             const text = await res.text();
@@ -476,10 +478,6 @@ async function postToFfdx(xmlStream: string, manifestReference: string): Promise
 
             if (!res.ok) {
                 lastError = `HTTP ${res.status}: ${text.slice(0, 200)}`;
-                if (attempt < MAX_RETRIES) {
-                    await new Promise(r => setTimeout(r, RETRY_BACKOFF_MS));
-                    continue;
-                }
                 return { success: false, error: lastError };
             }
 
@@ -497,14 +495,11 @@ async function postToFfdx(xmlStream: string, manifestReference: string): Promise
             return { success: true, response: text };
         } catch (err: any) {
             lastError = err?.message || String(err);
-            console.error(`[ffdx-upload] [${manifestReference}] Attempt ${attempt} failed:`, lastError);
-            if (attempt < MAX_RETRIES) {
-                await new Promise(r => setTimeout(r, RETRY_BACKOFF_MS));
-            }
+            console.error(`[ffdx-upload] [${manifestReference}] Upload failed:`, lastError);
         }
     }
 
-    return { success: false, error: `FFDX upload failed after ${MAX_RETRIES} attempts: ${lastError}` };
+    return { success: false, error: `FFDX upload failed: ${lastError}` };
 }
 
 // ─── Mark manifest as uploaded in Supabase ───────────────────────────────────
@@ -536,6 +531,7 @@ async function markManifestUploaded(sb: any, manifestId: number | null, manifest
 
 // ─── POST /api/ffdx-upload ────────────────────────────────────────────────────
 export async function POST(request: Request) {
+    let normalizedRef = '';
     try {
         const body = await request.json();
         const { manifestReference, manifestId, serviceProviderName, bags } = body as {
@@ -561,7 +557,32 @@ export async function POST(request: Request) {
             return NextResponse.json({ success: false, error: 'Missing manifestReference' }, { status: 400 });
         }
 
+        normalizedRef = manifestReference.trim().toUpperCase();
+
+        if (activeFfdxUploads.has(normalizedRef)) {
+            console.warn(`[ffdx-upload] Upload for "${manifestReference}" already in progress.`);
+            return NextResponse.json({ success: false, error: 'Upload already in progress for this manifest.' }, { status: 409 });
+        }
+        activeFfdxUploads.add(normalizedRef);
+
         const sb = getSupabaseConfig();
+
+        // ─── Idempotency Check ─────────────────────────────────────────────────
+        if (sb) {
+            try {
+                const checkRes = await fetch(
+                    `${sb.url}/rest/v1/outbound_manifests?manifest_reference=eq.${encodeURIComponent(manifestReference)}&select=is_uploaded`,
+                    { headers: sb.headers, cache: 'no-store' }
+                );
+                const checkData = await checkRes.json();
+                if (Array.isArray(checkData) && checkData.length > 0 && checkData[0].is_uploaded === true) {
+                    console.log(`[ffdx-upload] Manifest "${manifestReference}" was already uploaded. Skipping duplicate upload.`);
+                    return NextResponse.json({ success: true, alreadyUploaded: true, message: 'Manifest was already uploaded.' });
+                }
+            } catch (e) {
+                console.error('[ffdx-upload] Error checking is_uploaded status:', e);
+            }
+        }
 
         // ─── 1. Dynamically resolve Receiver Code & Name ──────────────────────
         let receiverCode = '';
@@ -760,5 +781,7 @@ export async function POST(request: Request) {
     } catch (err: any) {
         console.error('[ffdx-upload] Internal error:', err);
         return NextResponse.json({ success: false, error: err?.message || 'Internal error' }, { status: 500 });
+    } finally {
+        if (normalizedRef) activeFfdxUploads.delete(normalizedRef);
     }
 }

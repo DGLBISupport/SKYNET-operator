@@ -60,7 +60,11 @@ export async function GET() {
                 Authorization: `Bearer ${key}`
             };
 
-            const res = await fetch(`${supabaseUrl}/rest/v1/untracked_parcels?select=*&order=created_at.desc`, { headers, cache: 'no-store' });
+            // Explicit column list — matches localUntrackedStore type, avoids select=*
+            const res = await fetch(
+                `${supabaseUrl}/rest/v1/untracked_parcels?select=id,tracking_number,scan_mode,bag_number,mawb_ref,operator_name,operator_email,created_at,notes&order=created_at.desc`,
+                { headers, cache: 'no-store', signal: AbortSignal.timeout(10000) }
+            );
             if (res.ok) {
                 const data = await res.json();
                 return NextResponse.json({ success: true, untrackedParcels: data });

@@ -413,10 +413,6 @@ CREATE TABLE public.unknown_parcels (
   notes text,
   CONSTRAINT unknown_parcels_pkey PRIMARY KEY (id)
 );
-CREATE INDEX idx_unknown_parcels_scan_date ON public.unknown_parcels (scan_date);
-CREATE INDEX idx_unknown_parcels_barcode ON public.unknown_parcels (barcode);
-CREATE INDEX idx_unknown_parcels_is_email_sent ON public.unknown_parcels (is_email_sent);
-
 CREATE TABLE public.unknown_parcel_email_logs (
   id bigint GENERATED ALWAYS AS IDENTITY NOT NULL,
   created_at timestamp with time zone NOT NULL DEFAULT now(),
@@ -429,4 +425,3 @@ CREATE TABLE public.unknown_parcel_email_logs (
   notes text,
   CONSTRAINT unknown_parcel_email_logs_pkey PRIMARY KEY (id)
 );
-CREATE INDEX idx_unknown_parcel_email_logs_scan_date ON public.unknown_parcel_email_logs (scan_date);

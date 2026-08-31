@@ -346,8 +346,11 @@ export async function GET(request: Request) {
     if (mawbRef) {
         if (sb) {
             try {
-                // Fetch manifest status from outbound_manifests only
-                const omRes = await fetch(`${sb.url}/rest/v1/outbound_manifests?manifest_reference=eq.${encodeURIComponent(mawbRef)}&select=id,status`, { headers: sb.headers, cache: 'no-store' });
+                // Fetch manifest status — increase timeout to avoid abort on slow connections
+                const omRes = await fetch(
+                    `${sb.url}/rest/v1/outbound_manifests?manifest_reference=eq.${encodeURIComponent(mawbRef)}&select=id,status`,
+                    { headers: sb.headers, cache: 'no-store', signal: AbortSignal.timeout(20000) }
+                );
                 const omData = await omRes.json();
                 let manifestStatus: 'OPEN' | 'CLOSED' = 'OPEN';
                 let manifestDbId: number | null = null;
@@ -363,10 +366,13 @@ export async function GET(request: Request) {
                     outboundBagsMap.forEach((bag, bNum) => { if (bag.mawbRef.toLowerCase() === mawbRef.toLowerCase()) outboundBagsMap.delete(bNum); });
                 }
 
-                // Fetch bags via new_manifest_reference FK (outbound_lmd_bags has no mawb_ref column)
+                // Fetch bags via new_manifest_reference FK — explicit column projection to reduce payload
                 let bagsData: any[] = [];
                 if (manifestDbId) {
-                    const bagsRes = await fetch(`${sb.url}/rest/v1/outbound_lmd_bags?new_manifest_reference=eq.${manifestDbId}&order=created_at.desc`, { headers: sb.headers, cache: 'no-store' });
+                    const bagsRes = await fetch(
+                        `${sb.url}/rest/v1/outbound_lmd_bags?new_manifest_reference=eq.${manifestDbId}&select=id,bag_number,target_partner,destination_hub,status,parcel_count,total_weight,created_by,created_at,sealed_at,sealed_by,new_manifest_reference,parcels&order=created_at.desc`,
+                        { headers: sb.headers, cache: 'no-store', signal: AbortSignal.timeout(20000) }
+                    );
                     const fetchedBags = await bagsRes.json();
                     if (Array.isArray(fetchedBags)) bagsData = fetchedBags;
                 }
@@ -831,14 +837,27 @@ export async function POST(request: Request) {
                         });
                     }
 
-                    // Step 7 – Trigger FFDX GETonline upload (bulk) for entire manifest
-                    triggerFfdxUpload({
-                        manifestReference: mawbRef,
-                        manifestId: manifestId || manifestSession?.dbId,
-                        serviceProviderName: body.serviceProviderName || manifestSession?.serviceProviderName || 'All Partners',
-                        bags: allBagsList,
-                        baseUrl
-                    });
+                    // Step 7 – Trigger FFDX GETonline upload (bulk) for entire manifest only if not already uploaded
+                    let isAlreadyUploaded = false;
+                    try {
+                        const omCheck = await fetch(`${sb.url}/rest/v1/outbound_manifests?manifest_reference=eq.${encodeURIComponent(mawbRef)}&select=id,is_uploaded`, { headers: sb.headers, cache: 'no-store' });
+                        const omCheckData = await omCheck.json();
+                        if (Array.isArray(omCheckData) && omCheckData.length > 0 && omCheckData[0].is_uploaded === true) {
+                            isAlreadyUploaded = true;
+                        }
+                    } catch { }
+
+                    if (!isAlreadyUploaded) {
+                        triggerFfdxUpload({
+                            manifestReference: mawbRef,
+                            manifestId: manifestId || manifestSession?.dbId,
+                            serviceProviderName: body.serviceProviderName || manifestSession?.serviceProviderName || 'All Partners',
+                            bags: allBagsList,
+                            baseUrl
+                        });
+                    } else {
+                        console.log(`[close-manifest] Manifest "${mawbRef}" was already uploaded to GETonline. Skipping duplicate background trigger.`);
+                    }
 
                 } catch (err) {
                     console.error("[close-manifest] Bulk update error:", err);

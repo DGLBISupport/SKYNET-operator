@@ -21,7 +21,8 @@ export async function GET() {
 
     const res = await fetch(`${supabaseUrl}/rest/v1/users?status=eq.ACTIVE&select=id,first_name,last_name,email,username,role`, {
       headers,
-      cache: 'no-store'
+      cache: 'no-store',
+      signal: AbortSignal.timeout(8000)
     });
 
     if (!res.ok) {

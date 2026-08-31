@@ -62,13 +62,16 @@ export async function GET(request: Request) {
         }
 
         // Fetch all tables concurrently using Promise.allSettled
-        const [shipResult, bagResult, manResult, damResult, unsealResult, spaResult, spResult, spAllocResult, mawbResult, omResult] = await Promise.allSettled([
+        // NOTE: service_provider_allocation is fetched only once (full fields).
+        //       totalDispatched is derived from spAllocData.length — no duplicate count-only fetch needed.
+        // NOTE: scanned_parcels is omitted from bag_unsealing — it is a heavy JSON array not consumed
+        //       by any dashboard UI; first-scan status is already tracked via service_provider_allocation.unsealed.
+        const [shipResult, bagResult, manResult, damResult, unsealResult, spResult, spAllocResult, mawbResult, omResult] = await Promise.allSettled([
             fetchAllSupabaseRows('shipments', 'reference_number,sender_reference,mawb_reference,delivery_agent_code,bag_number,consignee_location_name,created_at,weight', sb),
             fetchAllSupabaseRows('outbound_lmd_bags', 'id,bag_number,new_manifest_reference,target_partner,destination_hub,status,parcel_count,total_weight,created_by,sealed_by,created_at,sealed_at', sb),
             fetchAllSupabaseRows('manifest_sessions', 'id,manifest_id,mawb_ref,status,total_bags,total_parcels,closed_by,created_at,closed_at', sb),
             fetchAllSupabaseRows('damaged_barcodes', 'id,barcode,reason,reported_by,created_at', sb),
-            fetchAllSupabaseRows('bag_unsealing', 'id,bag_number,mawb_ref,status,unsealed_by,scanned_count,expected_count,created_at,scanned_parcels', sb),
-            fetchAllSupabaseRows('service_provider_allocation', 'id', sb),
+            fetchAllSupabaseRows('bag_unsealing', 'id,bag_number,mawb_ref,status,unsealed_by,scanned_count,expected_count,created_at', sb),
             fetchAllSupabaseRows('service_providers', 'id,name,code', sb),
             fetchAllSupabaseRows('service_provider_allocation', 'shipment_ref,service_provider,unsealed,scan_status,mawb_ref,created_at,updated_at', sb),
             fetchAllSupabaseRows('mawb', 'mawb_reference,carrier,declared_bags,declared_wt,mawb_created,shipper_name,notes,has_service_providers_allocated', sb),
@@ -80,7 +83,6 @@ export async function GET(request: Request) {
         const manData = manResult.status === 'fulfilled' ? manResult.value : [];
         const damData = damResult.status === 'fulfilled' ? damResult.value : [];
         const unsealData = unsealResult.status === 'fulfilled' ? unsealResult.value : [];
-        const spaData = spaResult.status === 'fulfilled' ? spaResult.value : [];
         const spData = spResult.status === 'fulfilled' ? spResult.value : [];
         const spAllocData = spAllocResult.status === 'fulfilled' ? spAllocResult.value : [];
         const mawbData = mawbResult.status === 'fulfilled' ? mawbResult.value : [];
@@ -110,20 +112,8 @@ export async function GET(request: Request) {
             providerMap[sp.id] = normName;
         });
 
-        // Build set of parcel reference numbers that have completed 1st scan (from bag_unsealing scanned_parcels)
-        const unsealedParcelRefsSet = new Set<string>();
-        unsealData.forEach((u: any) => {
-            if (u.scanned_parcels && Array.isArray(u.scanned_parcels)) {
-                u.scanned_parcels.forEach((p: any) => {
-                    if (typeof p === 'string' && p.trim()) {
-                        unsealedParcelRefsSet.add(p.trim().toLowerCase());
-                    } else if (p && typeof p === 'object') {
-                        const trk = p.trackingNumber || p.referenceNumber || p.refNumber;
-                        if (trk) unsealedParcelRefsSet.add(String(trk).trim().toLowerCase());
-                    }
-                });
-            }
-        });
+        // scanned_parcels is no longer fetched from bag_unsealing (heavy JSON column, not used by UI).
+        // First-scan status is derived entirely from service_provider_allocation.unsealed / scan_status.
 
         // Build Shipment Ref -> Partner Name + Scan Status Map from service_provider_allocation
         const shipmentToPartnerMap: Record<string, string> = {};
@@ -172,7 +162,6 @@ export async function GET(request: Request) {
         const receivedParcels = shipData.map(s => {
             const refLower = String(s.reference_number || '').trim().toLowerCase();
             const scanInfo = shipmentToScanStatusMap[s.reference_number] || shipmentToScanStatusMap[refLower];
-            const isUnsealedInBag = unsealedParcelRefsSet.has(refLower);
 
             // Allocation Status Stage Breakdown:
             // Stage 2: 2nd Scan Done (2ND_SCAN_DONE, VERIFIED, DISPATCHED, COMPLETED)
@@ -184,7 +173,7 @@ export async function GET(request: Request) {
             if (scanInfo?.secondScanDone) {
                 allocationStage = '2ND_SCAN_DONE';
                 allocationStatusLabel = '2nd Scan Done';
-            } else if (scanInfo?.firstScanDone || scanInfo?.unsealed || isUnsealedInBag) {
+            } else if (scanInfo?.firstScanDone || scanInfo?.unsealed) {
                 allocationStage = '1ST_SCAN_DONE';
                 allocationStatusLabel = '1st Scan Done';
             } else {
@@ -343,7 +332,7 @@ export async function GET(request: Request) {
             unsealedBy: u.unsealed_by || 'Staff',
             status: u.status || 'Unsealed',
             createdAt: u.created_at || '',
-            scannedParcels: u.scanned_parcels || []
+            scannedParcels: [] // field removed from fetch (heavy JSON, not consumed by UI)
         }));
 
         // 4. Exception Counts & Structured List according to database
@@ -383,8 +372,8 @@ export async function GET(request: Request) {
             }))
         ];
 
-        // 5. Dispatch Allocations
-        let totalDispatched = spaData.length;
+        // 5. Dispatch Allocations — count comes from spAllocData (no separate fetch needed)
+        let totalDispatched = spAllocData.length;
 
         // 6. Aggregate Operator Productivity Breakdown
         const userProductivityMap: Record<string, { operator: string; scanned: number; bagsSealed: number; manifestsClosed: number }> = {};

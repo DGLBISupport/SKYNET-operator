@@ -48,6 +48,7 @@ export default function AllModals({
     isCreatingBag,
     isCreatingManifest,
     isSealingBag,
+    isClosingManifest,
     isDeviceManagerOpen,
     label,
     manifestClosedModal,
@@ -84,6 +85,7 @@ export default function AllModals({
     setFirstScanInput,
     setInvalidBagParcelModal,
     setInvalidBarcodeModal,
+    setIsClosingManifest,
     setIsDeviceManagerOpen,
     setLastScanned,
     setManifestClosedModal,
@@ -674,7 +676,10 @@ export default function AllModals({
                                 {isFinished && (
                                     <button
                                         autoFocus
-                                        onClick={() => setManifestProgressModal(null)}
+                                        onClick={() => {
+                                            if (setIsClosingManifest) setIsClosingManifest(false);
+                                            setManifestProgressModal(null);
+                                        }}
                                         style={{
                                             backgroundColor: status === 'completed' ? '#10b981' : '#e21b22',
                                             color: '#ffffff',
@@ -1882,25 +1887,27 @@ export default function AllModals({
                             {/* Actions */}
                             <div style={{ display: 'flex', gap: '10px' }}>
                                 <button
+                                    disabled={isClosingManifest}
                                     onClick={() => {
+                                        if (isClosingManifest) return;
                                         const action = customConfirmModal.onConfirm;
                                         setCustomConfirmModal(null);
                                         action();
                                     }}
                                     style={{
                                         flex: 1,
-                                        backgroundColor: '#e21b22',
+                                        backgroundColor: isClosingManifest ? '#9ca3af' : '#e21b22',
                                         color: '#ffffff',
                                         border: 'none',
                                         borderRadius: '8px',
                                         padding: '12px 18px',
                                         fontSize: '14px',
                                         fontWeight: '600',
-                                        cursor: 'pointer',
+                                        cursor: isClosingManifest ? 'not-allowed' : 'pointer',
                                         transition: 'all 0.15s ease'
                                     }}
                                 >
-                                    Yes, Confirm (Enter/Space)
+                                    {isClosingManifest ? 'Processing...' : 'Yes, Confirm (Enter/Space)'}
                                 </button>
                                 <button
                                     onClick={() => {

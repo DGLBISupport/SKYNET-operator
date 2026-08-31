@@ -69,12 +69,17 @@ export async function GET(request: Request) {
                     Authorization: `Bearer ${key}`
                 };
 
-                let queryUrl = `${supabaseUrl}/rest/v1/unknown_parcels?select=*&order=created_at.desc`;
+                // Explicit column list — matches UnknownParcelItem interface, avoids select=*
+                let queryUrl = `${supabaseUrl}/rest/v1/unknown_parcels?select=id,created_at,scan_date,barcode,scanned_by,bag_number,mawb_reference,scan_source,status,is_email_sent,email_sent_at,email_sent_to,notes&order=created_at.desc`;
                 if (dateParam) {
                     queryUrl += `&scan_date=eq.${dateParam}`;
                 }
 
-                const res = await fetch(queryUrl, { headers, cache: 'no-store' });
+                const res = await fetch(queryUrl, {
+                    headers,
+                    cache: 'no-store',
+                    signal: AbortSignal.timeout(10000)
+                });
                 if (res.ok) {
                     const data: UnknownParcelItem[] = await res.json();
                     return NextResponse.json({

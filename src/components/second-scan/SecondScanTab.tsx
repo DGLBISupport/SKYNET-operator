@@ -19,6 +19,7 @@ export default function SecondScanTab({
     isCreatingBag,
     isCreatingManifest,
     isSealingBag,
+    isClosingManifest,
     label,
     lastScanned,
     outboundBags,
@@ -197,7 +198,9 @@ export default function SecondScanTab({
 
                                                 {secondScanManifestStatus === 'OPEN' && (
                                                     <button
+                                                        disabled={isClosingManifest}
                                                         onClick={() => {
+                                                            if (isClosingManifest) return;
                                                             const relevantBags = (outboundBags || []).filter(b => !selectedSecondScanMawb || (b.mawbRef || '').toLowerCase() === selectedSecondScanMawb.toLowerCase());
                                                             const openBags = relevantBags.filter(b => b.status === 'OPEN' || b.status !== 'SEALED');
                                                             if (openBags.length > 0) {
@@ -214,9 +217,9 @@ export default function SecondScanTab({
                                                             });
                                                         }}
                                                         style={{
-                                                            backgroundColor: '#ffffff',
-                                                            border: '1px solid #d1d5db',
-                                                            color: '#374151',
+                                                            backgroundColor: isClosingManifest ? '#f3f4f6' : '#ffffff',
+                                                            border: isClosingManifest ? '1px solid #e5e7eb' : '1px solid #d1d5db',
+                                                            color: isClosingManifest ? '#9ca3af' : '#374151',
                                                             borderRadius: '8px',
                                                             padding: '0 14px',
                                                             height: '38px',
@@ -226,10 +229,10 @@ export default function SecondScanTab({
                                                             gap: '6px',
                                                             fontSize: '12px',
                                                             fontWeight: '600',
-                                                            cursor: 'pointer'
+                                                            cursor: isClosingManifest ? 'not-allowed' : 'pointer'
                                                         }}
                                                     >
-                                                        🔒 Close Manifest
+                                                        {isClosingManifest ? '⏳ Closing Manifest...' : '🔒 Close Manifest'}
                                                     </button>
                                                 )}
                                             </div>

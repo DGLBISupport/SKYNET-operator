@@ -464,84 +464,53 @@ export default function UnknownParcelsTab({
         <div style={{ display: 'flex', flexDirection: 'column', gap: '16px', width: '100%', paddingBottom: '30px' }}>
             {/* ═══ UNIFIED DATE CONTROLS & METRICS SUMMARY BOX (RED & WHITE THEME) ═══ */}
             <div style={{ ...defaultCard, padding: '16px 20px', display: 'flex', flexDirection: 'column', gap: '14px' }}>
-                {/* Top Row: Date Controls & Actions */}
+                {/* Top Row: Date Controls on Right Side */}
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '12px' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
-                        <span style={{ fontSize: '13px', fontWeight: '700', color: '#374151' }}>Scan Date:</span>
-                        <input
-                            type="date"
-                            value={selectedDate}
-                            onChange={(e) => {
-                                setSelectedDate(e.target.value);
-                                setFilterAllDates(false);
-                                setCurrentPage(1);
-                            }}
-                            disabled={filterAllDates}
-                            style={{
-                                backgroundColor: '#f9fafb',
-                                border: '1px solid #d1d5db',
-                                color: '#111827',
-                                borderRadius: '6px',
-                                padding: '6px 12px',
-                                fontSize: '13px',
-                                fontWeight: '600',
-                                outline: 'none'
-                            }}
-                        />
-                        <button
-                            type="button"
-                            onClick={() => {
-                                setSelectedDate(todayStr);
-                                setFilterAllDates(false);
-                                setCurrentPage(1);
-                            }}
-                            style={{
-                                backgroundColor: selectedDate === todayStr && !filterAllDates ? '#e21b22' : '#ffffff',
-                                color: selectedDate === todayStr && !filterAllDates ? '#ffffff' : '#374151',
-                                border: selectedDate === todayStr && !filterAllDates ? '1px solid #e21b22' : '1px solid #d1d5db',
-                                padding: '6px 14px',
-                                borderRadius: '6px',
-                                fontSize: '12px',
-                                fontWeight: '700',
-                                cursor: 'pointer',
-                                transition: 'all 0.15s ease'
-                            }}
-                        >
-                            Today
-                        </button>
-                        <button
-                            type="button"
-                            onClick={() => {
-                                setFilterAllDates(!filterAllDates);
-                                setCurrentPage(1);
-                            }}
-                            style={{
-                                backgroundColor: filterAllDates ? '#e21b22' : '#ffffff',
-                                color: filterAllDates ? '#ffffff' : '#374151',
-                                border: filterAllDates ? '1px solid #e21b22' : '1px solid #d1d5db',
-                                padding: '6px 14px',
-                                borderRadius: '6px',
-                                fontSize: '12px',
-                                fontWeight: '700',
-                                cursor: 'pointer',
-                                transition: 'all 0.15s ease'
-                            }}
-                        >
-                            {filterAllDates ? 'Viewing All' : 'Show All'}
-                        </button>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        <div style={{ fontSize: '14px', fontWeight: '700', color: '#111827' }}>
+                            Daily Overview & Activity
+                        </div>
                     </div>
 
-                    <button
-                        type="button"
-                        onClick={fetchParcels}
-                        disabled={loading}
-                        style={{ ...defaultBtnSecondary, padding: '6px 14px', fontSize: '12px', fontWeight: '600' }}
-                    >
-                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ animation: loading ? 'spin 1s linear infinite' : 'none' }}>
-                            <path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l6 5.67" />
-                        </svg>
-                        Refresh
-                    </button>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
+                        <div style={{ display: 'inline-flex', alignItems: 'center', gap: '8px' }}>
+                            <span style={{ fontSize: '12px', fontWeight: '600', color: '#6b7280' }}>Select Date:</span>
+                            <input
+                                type="date"
+                                value={selectedDate}
+                                onChange={(e) => {
+                                    if (e.target.value) {
+                                        setSelectedDate(e.target.value);
+                                        setFilterAllDates(false);
+                                        setCurrentPage(1);
+                                    }
+                                }}
+                                style={{
+                                    backgroundColor: '#ffffff',
+                                    border: '1px solid #d1d5db',
+                                    color: '#111827',
+                                    borderRadius: '6px',
+                                    padding: '6px 12px',
+                                    fontSize: '13px',
+                                    fontWeight: '700',
+                                    outline: 'none',
+                                    cursor: 'pointer'
+                                }}
+                            />
+                        </div>
+
+                        <button
+                            type="button"
+                            onClick={fetchParcels}
+                            disabled={loading}
+                            style={{ ...defaultBtnSecondary, padding: '6px 14px', fontSize: '12px', fontWeight: '600' }}
+                        >
+                            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ animation: loading ? 'spin 1s linear infinite' : 'none' }}>
+                                <path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l6 5.67" />
+                            </svg>
+                            Refresh
+                        </button>
+                    </div>
                 </div>
 
                 {/* Divider */}

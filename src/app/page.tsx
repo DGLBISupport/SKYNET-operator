@@ -341,6 +341,7 @@ export default function WorkstationDashboard() {
     const [isCreatingBag, setIsCreatingBag] = useState(false);
     const [isCreatingManifest, setIsCreatingManifest] = useState(false);
     const [isSealingBag, setIsSealingBag] = useState(false);
+    const [isClosingManifest, setIsClosingManifest] = useState(false);
     const [newBagPartner, setNewBagPartner] = useState<'PickMe' | 'Domex' | 'SITREK' | 'Pronto'>('PickMe');
     const [newBagHub, setNewBagHub] = useState('');
     const [customBagNumber, setCustomBagNumber] = useState('');
@@ -2268,6 +2269,7 @@ export default function WorkstationDashboard() {
     };
 
     const handleCloseManifest = async (targetMawb?: string) => {
+        if (isClosingManifest) return;
         const mawbToClose = targetMawb || selectedSecondScanMawb || manifestTrackingMawb;
         if (!mawbToClose) return;
 
@@ -2285,6 +2287,8 @@ export default function WorkstationDashboard() {
             });
             return;
         }
+
+        setIsClosingManifest(true);
 
         const providerCode = getManifestProviderName(mawbToClose);
         const providerDisplay = providerCode === 'PickMe' ? 'PickMe Express'
@@ -2387,6 +2391,7 @@ export default function WorkstationDashboard() {
                     }
                 } else if (data.type === 'done') {
                     es.close();
+                    setIsClosingManifest(false);
                     setSecondScanManifestStatus('CLOSED');
                     setManifestProgressModal(prev => prev ? ({
                         ...prev,
@@ -2396,6 +2401,7 @@ export default function WorkstationDashboard() {
                     }) : null);
                 } else if (data.type === 'error') {
                     es.close();
+                    setIsClosingManifest(false);
                     setManifestProgressModal(prev => prev ? ({
                         ...prev,
                         status: 'error',
@@ -2410,6 +2416,7 @@ export default function WorkstationDashboard() {
         es.onerror = (err) => {
             console.error('[manifest-close-stream] SSE error:', err);
             es.close();
+            setIsClosingManifest(false);
             setManifestProgressModal(prev => {
                 if (!prev) return null;
                 // If it's already finished or nearing finish, just complete it
@@ -3403,6 +3410,7 @@ export default function WorkstationDashboard() {
         isCreatingBag,
         isCreatingManifest,
         isSealingBag,
+        isClosingManifest,
         isDeviceManagerOpen,
         isLoadingDashboard,
         isLoadingManifestTracking,
@@ -3526,6 +3534,7 @@ export default function WorkstationDashboard() {
         setInvalidBagParcelModal,
         setInvalidBarcodeModal,
         setIsBagsLoading,
+        setIsClosingManifest,
         setIsDeviceManagerOpen,
         setIsLoadingDashboard,
         setIsLoadingManifestTracking,
