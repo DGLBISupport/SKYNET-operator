@@ -524,6 +524,11 @@ export default function WorkstationDashboard() {
         outboundManifest: string;
         unsealed: boolean;
         verified: boolean;
+        firstScanTime?: string | null;
+        firstScannedBy?: string | null;
+        secondScanTime?: string | null;
+        secondScannedBy?: string | null;
+        scannedBy?: string | null;
         scanStatus: string;
         serviceProvider: string;
         scannedAt: string;

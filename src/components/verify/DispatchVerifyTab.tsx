@@ -19,6 +19,84 @@ export default function DispatchVerifyTab({
     verifyScannedParcels,
     verifySelectedDate
 }: any) {
+    const [verifySortColumn, setVerifySortColumn] = React.useState<string>('secondScanTime');
+    const [verifySortDirection, setVerifySortDirection] = React.useState<'asc' | 'desc'>('desc');
+
+    const handleSort = (col: string) => {
+        if (verifySortColumn === col) {
+            setVerifySortDirection(prev => prev === 'asc' ? 'desc' : 'asc');
+        } else {
+            setVerifySortColumn(col);
+            if (col === 'firstScanTime' || col === 'secondScanTime') {
+                setVerifySortDirection('desc');
+            } else {
+                setVerifySortDirection('asc');
+            }
+        }
+        setVerifyParcelsPage(1);
+    };
+
+    const parseTimeToMs = (timeVal?: string | null): number => {
+        if (!timeVal) return 0;
+        const str = String(timeVal).trim();
+        if (!str || str === '-') return 0;
+
+        if (/^\d{10,}$/.test(str)) {
+            return Number(str);
+        }
+
+        const d = new Date(str);
+        if (!isNaN(d.getTime())) {
+            return d.getTime();
+        }
+
+        const match = str.match(/^(\d{1,2}):(\d{2})(?::(\d{2}))?\s*([AP]M)?$/i);
+        if (match) {
+            let h = parseInt(match[1], 10);
+            const m = parseInt(match[2], 10) || 0;
+            const s = parseInt(match[3], 10) || 0;
+            const ampm = (match[4] || '').toUpperCase();
+            if (ampm === 'PM' && h < 12) h += 12;
+            if (ampm === 'AM' && h === 12) h = 0;
+            return h * 3600000 + m * 60000 + s * 1000;
+        }
+
+        return 0;
+    };
+
+    const renderSortableHeader = (colKey: string, title: string, width?: string) => {
+        const isSorted = verifySortColumn === colKey;
+        const arrow = isSorted ? (verifySortDirection === 'asc' ? '▲' : '▼') : '↕';
+        return (
+            <th
+                onClick={() => handleSort(colKey)}
+                title={`Click to sort by ${title}`}
+                style={{
+                    padding: '10px 10px',
+                    color: isSorted ? '#b91c1c' : '#475569',
+                    fontWeight: '800',
+                    fontSize: '11px',
+                    textTransform: 'uppercase',
+                    cursor: 'pointer',
+                    userSelect: 'none',
+                    backgroundColor: isSorted ? '#fef2f2' : 'transparent',
+                    transition: 'all 0.15s ease',
+                    width: width || 'auto'
+                }}
+            >
+                <div style={{ display: 'inline-flex', alignItems: 'center', gap: '5px' }}>
+                    <span>{title}</span>
+                    <span style={{
+                        fontSize: isSorted ? '10px' : '11px',
+                        color: isSorted ? '#b91c1c' : '#94a3b8',
+                        fontWeight: '900'
+                    }}>
+                        {arrow}
+                    </span>
+                </div>
+            </th>
+        );
+    };
     return (
                         <div style={{ fontFamily: 'var(--font-sans, "Inter", "Inter Fallback", sans-serif)' }}>
                             {/* Page Title & Subtitle Matching Screenshot Style */}
@@ -196,7 +274,7 @@ export default function DispatchVerifyTab({
 
                                 {/* 4. PickMe Allocated (Scanned) */}
                                 <div
-                                    onMouseOver={(e) => { e.currentTarget.style.outline = '2px solid #e21b22'; e.currentTarget.style.outlineOffset = '-2px'; }}
+                                    onMouseOver={(e) => { e.currentTarget.style.outline = '2px solid #ffcc00'; e.currentTarget.style.outlineOffset = '-2px'; }}
                                     onMouseOut={(e) => { e.currentTarget.style.outline = 'none'; }}
                                     style={{
                                         backgroundColor: '#ffffff',
@@ -212,7 +290,7 @@ export default function DispatchVerifyTab({
                                     <div style={{ fontSize: '10.5px', fontWeight: '700', color: '#6b7280', letterSpacing: '0.5px', fontFamily: 'var(--font-sans, "Inter", "Inter Fallback", sans-serif)' }}>
                                         PickMe Allocated
                                     </div>
-                                    <div style={{ fontSize: '26px', fontWeight: '800', color: '#991b1b', marginTop: '4px', fontFamily: 'var(--font-sans, "Inter", "Inter Fallback", sans-serif)' }}>
+                                    <div style={{ fontSize: '26px', fontWeight: '800', color: '#ca8a04', marginTop: '4px', fontFamily: 'var(--font-sans, "Inter", "Inter Fallback", sans-serif)' }}>
                                         {verifyLoadingStats ? '...' : verifyDailyStats.pickMeScanned}
                                     </div>
                                     <div style={{ fontSize: '11px', color: '#6b7280', marginTop: '4px', fontFamily: 'var(--font-sans, "Inter", "Inter Fallback", sans-serif)' }}>
@@ -222,7 +300,7 @@ export default function DispatchVerifyTab({
 
                                 {/* 5. Domex Allocated (Scanned) */}
                                 <div
-                                    onMouseOver={(e) => { e.currentTarget.style.outline = '2px solid #e21b22'; e.currentTarget.style.outlineOffset = '-2px'; }}
+                                    onMouseOver={(e) => { e.currentTarget.style.outline = '2px solid #7b0f1a'; e.currentTarget.style.outlineOffset = '-2px'; }}
                                     onMouseOut={(e) => { e.currentTarget.style.outline = 'none'; }}
                                     style={{
                                         backgroundColor: '#ffffff',
@@ -238,7 +316,7 @@ export default function DispatchVerifyTab({
                                     <div style={{ fontSize: '10.5px', fontWeight: '700', color: '#6b7280', letterSpacing: '0.5px', fontFamily: 'var(--font-sans, "Inter", "Inter Fallback", sans-serif)' }}>
                                         Domex Allocated
                                     </div>
-                                    <div style={{ fontSize: '26px', fontWeight: '800', color: '#991b1b', marginTop: '4px', fontFamily: 'var(--font-sans, "Inter", "Inter Fallback", sans-serif)' }}>
+                                    <div style={{ fontSize: '26px', fontWeight: '800', color: '#7b0f1a', marginTop: '4px', fontFamily: 'var(--font-sans, "Inter", "Inter Fallback", sans-serif)' }}>
                                         {verifyLoadingStats ? '...' : verifyDailyStats.domexScanned}
                                     </div>
                                     <div style={{ fontSize: '11px', color: '#6b7280', marginTop: '4px', fontFamily: 'var(--font-sans, "Inter", "Inter Fallback", sans-serif)' }}>
@@ -280,13 +358,13 @@ export default function DispatchVerifyTab({
                                     <div>
                                         <div style={{ ...label, marginBottom: '2px' }}>Scanned Parcels Verification Log Table</div>
                                         <div style={{ fontSize: '12px', color: '#64748b' }}>
-                                            List of each scanned parcel record for {verifySelectedDate} with Inbound & Outbound Manifest details
+                                            List of each scanned parcel record for {verifySelectedDate} with Inbound & Outbound Manifest details, scan timestamps, and operator logs
                                         </div>
                                     </div>
                                     <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
                                         <input
                                             type="text"
-                                            placeholder="Search Tracking No, MAWB, Outbound Manifest..."
+                                            placeholder="Search Tracking No, MAWB, Operator, Manifest..."
                                             value={verifyParcelSearchQuery}
                                             onChange={(e) => {
                                                 setVerifyParcelSearchQuery(e.target.value);
@@ -297,13 +375,69 @@ export default function DispatchVerifyTab({
                                                 fontSize: '12px',
                                                 border: '1px solid #cbd5e1',
                                                 borderRadius: '6px',
-                                                width: '280px',
+                                                width: '270px',
                                                 outline: 'none'
                                             }}
                                         />
+
+                                        {/* Sort By Dropdown */}
+                                        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                                            <span style={{ fontSize: '11.5px', fontWeight: '700', color: '#475569' }}>Sort:</span>
+                                            <select
+                                                value={`${verifySortColumn}-${verifySortDirection}`}
+                                                onChange={(e) => {
+                                                    const [col, dir] = e.target.value.split('-');
+                                                    setVerifySortColumn(col);
+                                                    setVerifySortDirection(dir as 'asc' | 'desc');
+                                                    setVerifyParcelsPage(1);
+                                                }}
+                                                style={{
+                                                    padding: '6px 10px',
+                                                    fontSize: '11.5px',
+                                                    fontWeight: '600',
+                                                    border: '1px solid #cbd5e1',
+                                                    borderRadius: '6px',
+                                                    backgroundColor: '#ffffff',
+                                                    color: '#0f172a',
+                                                    outline: 'none',
+                                                    cursor: 'pointer'
+                                                }}
+                                            >
+                                                <option value="secondScanTime-desc">2nd Scan Time (Latest First ⬇)</option>
+                                                <option value="secondScanTime-asc">2nd Scan Time (Oldest First ⬆)</option>
+                                                <option value="firstScanTime-desc">1st Scan Time (Latest First ⬇)</option>
+                                                <option value="firstScanTime-asc">1st Scan Time (Oldest First ⬆)</option>
+                                                <option value="trackingNumber-asc">Tracking No. (A - Z)</option>
+                                                <option value="trackingNumber-desc">Tracking No. (Z - A)</option>
+                                                <option value="serviceProvider-asc">Allocated Courier (A - Z)</option>
+                                                <option value="inboundMawb-asc">Inbound MAWB (A - Z)</option>
+                                            </select>
+                                        </div>
+
+                                        {/* Partner & Scan Filter Tabs */}
                                         <div style={{ display: 'flex', backgroundColor: '#f1f5f9', borderRadius: '6px', padding: '2px' }}>
                                             {(['ALL', 'UNSEALED', 'VERIFIED', 'PICKME', 'DOMEX', 'SITREK'] as const).map(tabKey => {
                                                 const active = verifyFilterTab === tabKey;
+                                                let activeBg = '#ffffff';
+                                                let activeColor = '#b91c1c';
+                                                if (active) {
+                                                    if (tabKey === 'PICKME') {
+                                                        activeBg = '#ffcc00';
+                                                        activeColor = '#000000';
+                                                    } else if (tabKey === 'DOMEX') {
+                                                        activeBg = '#7b0f1a';
+                                                        activeColor = '#ffffff';
+                                                    } else if (tabKey === 'SITREK') {
+                                                        activeBg = '#0f2b6e';
+                                                        activeColor = '#ffffff';
+                                                    } else if (tabKey === 'UNSEALED') {
+                                                        activeBg = '#0284c7';
+                                                        activeColor = '#ffffff';
+                                                    } else if (tabKey === 'VERIFIED') {
+                                                        activeBg = '#16a34a';
+                                                        activeColor = '#ffffff';
+                                                    }
+                                                }
                                                 return (
                                                     <button
                                                         key={tabKey}
@@ -315,8 +449,8 @@ export default function DispatchVerifyTab({
                                                             border: 'none',
                                                             borderRadius: '4px',
                                                             cursor: 'pointer',
-                                                            backgroundColor: active ? '#ffffff' : 'transparent',
-                                                            color: active ? '#b91c1c' : '#475569',
+                                                            backgroundColor: active ? activeBg : 'transparent',
+                                                            color: active ? activeColor : '#475569',
                                                             boxShadow: active ? '0 1px 2px rgba(0,0,0,0.08)' : 'none',
                                                             transition: 'all 0.15s'
                                                         }}
@@ -335,19 +469,68 @@ export default function DispatchVerifyTab({
                                         <thead>
                                             <tr style={{ borderBottom: '2px solid #cbd5e1', backgroundColor: '#f8fafc' }}>
                                                 <th style={{ padding: '10px 10px', color: '#475569', fontWeight: '800', fontSize: '11px', textTransform: 'uppercase', width: '45px' }}>#</th>
-                                                <th style={{ padding: '10px 10px', color: '#475569', fontWeight: '800', fontSize: '11px', textTransform: 'uppercase' }}>Parcel Tracking No.</th>
-                                                <th style={{ padding: '10px 10px', color: '#475569', fontWeight: '800', fontSize: '11px', textTransform: 'uppercase' }}>Inbound Manifest (MAWB Ref)</th>
-                                                <th style={{ padding: '10px 10px', color: '#475569', fontWeight: '800', fontSize: '11px', textTransform: 'uppercase' }}>Outbound Bag</th>
-                                                <th style={{ padding: '10px 10px', color: '#475569', fontWeight: '800', fontSize: '11px', textTransform: 'uppercase' }}>Outbound Manifest</th>
-                                                <th style={{ padding: '10px 10px', color: '#475569', fontWeight: '800', fontSize: '11px', textTransform: 'uppercase', textAlign: 'center' }}>1st Scan (Unsealed)</th>
-                                                <th style={{ padding: '10px 10px', color: '#475569', fontWeight: '800', fontSize: '11px', textTransform: 'uppercase', textAlign: 'center' }}>2nd Scan (Verified)</th>
-                                                <th style={{ padding: '10px 10px', color: '#475569', fontWeight: '800', fontSize: '11px', textTransform: 'uppercase' }}>Allocated Courier</th>
-                                                <th style={{ padding: '10px 10px', color: '#475569', fontWeight: '800', fontSize: '11px', textTransform: 'uppercase' }}>Scan Time</th>
+                                                {renderSortableHeader('trackingNumber', 'Parcel Tracking No.')}
+                                                {renderSortableHeader('inboundMawb', 'Inbound MAWB Ref')}
+                                                {renderSortableHeader('outboundBag', 'Outbound Bag')}
+                                                {renderSortableHeader('outboundManifest', 'Outbound Manifest')}
+                                                {renderSortableHeader('firstScanTime', '1st Scan Time')}
+                                                {renderSortableHeader('firstScannedBy', '1st Scanned By')}
+                                                {renderSortableHeader('secondScanTime', '2nd Scan Time')}
+                                                {renderSortableHeader('secondScannedBy', '2nd Scanned By')}
+                                                {renderSortableHeader('serviceProvider', 'Allocated Courier')}
                                             </tr>
                                         </thead>
                                         <tbody>
                                             {(() => {
-                                                const filtered = verifyScannedParcels.filter(p => {
+                                                const formatScanTime = (isoString?: string | null) => {
+                                                    if (!isoString) return '-';
+                                                    try {
+                                                        const str = String(isoString).trim();
+                                                        if (!str || str === '-') return '-';
+                                                        if (/^\d{1,2}:\d{2}(:\d{2})?\s?[AP]M$/i.test(str)) {
+                                                            return str.toUpperCase();
+                                                        }
+                                                        if (/^\d{1,2}:\d{2}(:\d{2})?$/.test(str)) {
+                                                            const parts = str.split(':');
+                                                            let h = parseInt(parts[0], 10);
+                                                            const m = parts[1] || '00';
+                                                            const s = parts[2] ? `:${parts[2]}` : ':00';
+                                                            const ampm = h >= 12 ? 'PM' : 'AM';
+                                                            h = h % 12;
+                                                            h = h ? h : 12;
+                                                            const hh = h < 10 ? `0${h}` : `${h}`;
+                                                            return `${hh}:${m}${s} ${ampm}`;
+                                                        }
+                                                        if (/^\d{10,}$/.test(str)) {
+                                                            const d = new Date(Number(str));
+                                                            if (!isNaN(d.getTime())) return d.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true });
+                                                        }
+                                                        const d = new Date(str);
+                                                        if (isNaN(d.getTime())) return str;
+                                                        return d.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true });
+                                                    } catch {
+                                                        return String(isoString);
+                                                    }
+                                                };
+
+                                                const getCourierBadgeStyle = (partnerStr?: string | null) => {
+                                                    const p = (partnerStr || '').toLowerCase().trim();
+                                                    if (p.includes('pickme') || p === '1') {
+                                                        return { bg: '#ffcc00', color: '#000000', label: 'PickMe' };
+                                                    }
+                                                    if (p.includes('domex') || p === '2') {
+                                                        return { bg: '#7b0f1a', color: '#ffffff', label: 'Domex' };
+                                                    }
+                                                    if (p.includes('sitrek') || p === '3') {
+                                                        return { bg: '#0f2b6e', color: '#ffffff', label: 'SITREK' };
+                                                    }
+                                                    if (p.includes('pronto') || p === '4') {
+                                                        return { bg: '#ea580c', color: '#ffffff', label: 'Pronto' };
+                                                    }
+                                                    return { bg: '#6b7280', color: '#ffffff', label: partnerStr || 'Unassigned' };
+                                                };
+
+                                                const filtered = verifyScannedParcels.filter((p: any) => {
                                                     // Search filter
                                                     if (verifyParcelSearchQuery.trim()) {
                                                         const q = verifyParcelSearchQuery.toLowerCase();
@@ -356,7 +539,10 @@ export default function DispatchVerifyTab({
                                                             (p.inboundMawb || '').toLowerCase().includes(q) ||
                                                             (p.outboundBag || '').toLowerCase().includes(q) ||
                                                             (p.outboundManifest || '').toLowerCase().includes(q) ||
-                                                            (p.serviceProvider || '').toLowerCase().includes(q);
+                                                            (p.serviceProvider || '').toLowerCase().includes(q) ||
+                                                            (p.firstScannedBy || '').toLowerCase().includes(q) ||
+                                                            (p.secondScannedBy || '').toLowerCase().includes(q) ||
+                                                            (p.scannedBy || '').toLowerCase().includes(q);
                                                         if (!matches) return false;
                                                     }
                                                     // Tab filter
@@ -368,35 +554,92 @@ export default function DispatchVerifyTab({
                                                     return true;
                                                 });
 
+                                                // Sort the filtered results
+                                                const sorted = [...filtered].sort((a: any, b: any) => {
+                                                    if (verifySortColumn === 'firstScanTime') {
+                                                        const tA = parseTimeToMs(a.firstScanTime);
+                                                        const tB = parseTimeToMs(b.firstScanTime);
+                                                        if (!tA && !tB) return 0;
+                                                        if (!tA) return 1;
+                                                        if (!tB) return -1;
+                                                        return verifySortDirection === 'asc' ? tA - tB : tB - tA;
+                                                    }
+                                                    if (verifySortColumn === 'secondScanTime') {
+                                                        const tA = parseTimeToMs(a.secondScanTime);
+                                                        const tB = parseTimeToMs(b.secondScanTime);
+                                                        if (!tA && !tB) return 0;
+                                                        if (!tA) return 1;
+                                                        if (!tB) return -1;
+                                                        return verifySortDirection === 'asc' ? tA - tB : tB - tA;
+                                                    }
+                                                    if (verifySortColumn === 'trackingNumber') {
+                                                        const valA = (a.trackingNumber || '').toLowerCase();
+                                                        const valB = (b.trackingNumber || '').toLowerCase();
+                                                        return verifySortDirection === 'asc' ? valA.localeCompare(valB) : valB.localeCompare(valA);
+                                                    }
+                                                    if (verifySortColumn === 'inboundMawb') {
+                                                        const valA = (a.inboundMawb || '').toLowerCase();
+                                                        const valB = (b.inboundMawb || '').toLowerCase();
+                                                        return verifySortDirection === 'asc' ? valA.localeCompare(valB) : valB.localeCompare(valA);
+                                                    }
+                                                    if (verifySortColumn === 'outboundBag') {
+                                                        const valA = (a.outboundBag || '').toLowerCase();
+                                                        const valB = (b.outboundBag || '').toLowerCase();
+                                                        return verifySortDirection === 'asc' ? valA.localeCompare(valB) : valB.localeCompare(valA);
+                                                    }
+                                                    if (verifySortColumn === 'outboundManifest') {
+                                                        const valA = (a.outboundManifest || '').toLowerCase();
+                                                        const valB = (b.outboundManifest || '').toLowerCase();
+                                                        return verifySortDirection === 'asc' ? valA.localeCompare(valB) : valB.localeCompare(valA);
+                                                    }
+                                                    if (verifySortColumn === 'firstScannedBy') {
+                                                        const valA = (a.firstScannedBy || '').toLowerCase();
+                                                        const valB = (b.firstScannedBy || '').toLowerCase();
+                                                        return verifySortDirection === 'asc' ? valA.localeCompare(valB) : valB.localeCompare(valA);
+                                                    }
+                                                    if (verifySortColumn === 'secondScannedBy') {
+                                                        const valA = (a.secondScannedBy || '').toLowerCase();
+                                                        const valB = (b.secondScannedBy || '').toLowerCase();
+                                                        return verifySortDirection === 'asc' ? valA.localeCompare(valB) : valB.localeCompare(valA);
+                                                    }
+                                                    if (verifySortColumn === 'serviceProvider') {
+                                                        const valA = (a.serviceProvider || '').toLowerCase();
+                                                        const valB = (b.serviceProvider || '').toLowerCase();
+                                                        return verifySortDirection === 'asc' ? valA.localeCompare(valB) : valB.localeCompare(valA);
+                                                    }
+                                                    return 0;
+                                                });
+
                                                 if (verifyLoadingStats) {
                                                     return (
                                                         <tr>
-                                                            <td colSpan={9} style={{ padding: '24px', textAlign: 'center', color: '#64748b', fontSize: '13px' }}>
+                                                            <td colSpan={10} style={{ padding: '24px', textAlign: 'center', color: '#64748b', fontSize: '13px' }}>
                                                                 Loading scanned parcel details...
                                                             </td>
                                                         </tr>
                                                     );
                                                 }
 
-                                                if (filtered.length === 0) {
+                                                if (sorted.length === 0) {
                                                     return (
                                                         <tr>
-                                                            <td colSpan={9} style={{ padding: '24px', textAlign: 'center', color: '#94a3b8', fontSize: '13px' }}>
+                                                            <td colSpan={10} style={{ padding: '24px', textAlign: 'center', color: '#94a3b8', fontSize: '13px' }}>
                                                                 No scanned parcel records found for {verifySelectedDate}.
                                                             </td>
                                                         </tr>
                                                     );
                                                 }
 
-                                                const totalPages = Math.ceil(filtered.length / verifyParcelsRowsPerPage);
+                                                const totalPages = Math.ceil(sorted.length / verifyParcelsRowsPerPage);
                                                 const page = Math.min(verifyParcelsPage, totalPages || 1);
                                                 const startIndex = (page - 1) * verifyParcelsRowsPerPage;
-                                                const visibleRows = filtered.slice(startIndex, startIndex + verifyParcelsRowsPerPage);
+                                                const visibleRows = sorted.slice(startIndex, startIndex + verifyParcelsRowsPerPage);
 
                                                 return (
                                                     <>
-                                                        {visibleRows.map((parcel, idx) => {
+                                                        {visibleRows.map((parcel: any, idx: number) => {
                                                             const rowNo = startIndex + idx + 1;
+                                                            const courierBadge = getCourierBadgeStyle(parcel.serviceProvider);
                                                             return (
                                                                 <tr key={parcel.id || idx} style={{ borderBottom: '1px solid #e2e8f0', backgroundColor: idx % 2 === 0 ? '#ffffff' : '#f8fafc' }}>
                                                                     <td style={{ padding: '9px 10px', color: '#1e293b', fontSize: '12px', fontWeight: '600' }}>{rowNo}</td>
@@ -417,17 +660,65 @@ export default function DispatchVerifyTab({
                                                                     <td style={{ padding: '9px 10px', fontWeight: '600', color: '#0f172a' }}>
                                                                         {parcel.outboundManifest || 'Pending Manifest'}
                                                                     </td>
-                                                                    <td style={{ padding: '9px 10px', textAlign: 'center', color: '#0f172a', fontWeight: '600' }}>
-                                                                        {parcel.unsealed ? 'Unsealed' : '-'}
+                                                                    <td style={{ padding: '9px 10px', color: '#0f172a', fontSize: '12px' }}>
+                                                                        {parcel.firstScanTime ? (
+                                                                            <span style={{ fontFamily: 'monospace', fontWeight: '700', color: '#0f172a' }}>
+                                                                                {formatScanTime(parcel.firstScanTime)}
+                                                                            </span>
+                                                                        ) : parcel.unsealed ? (
+                                                                            <span style={{ color: '#0369a1', fontWeight: '600', fontSize: '11.5px' }}>Unsealed</span>
+                                                                        ) : (
+                                                                            <span style={{ color: '#94a3b8' }}>-</span>
+                                                                        )}
                                                                     </td>
-                                                                    <td style={{ padding: '9px 10px', textAlign: 'center', color: '#0f172a', fontWeight: '600' }}>
-                                                                        {parcel.verified ? 'Verified (2nd)' : 'Pending'}
-                                                                    </td>
-                                                                    <td style={{ padding: '9px 10px', fontWeight: '700', color: '#0f172a' }}>
-                                                                        {parcel.serviceProvider}
+                                                                    <td style={{ padding: '9px 10px', color: '#334155', fontSize: '12px', fontWeight: '600' }}>
+                                                                        {parcel.firstScannedBy ? (
+                                                                            <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+                                                                                <span style={{ fontSize: '11px', color: '#64748b' }}>👤</span> {parcel.firstScannedBy}
+                                                                            </span>
+                                                                        ) : parcel.unsealed ? (
+                                                                            <span style={{ color: '#64748b' }}>Staff</span>
+                                                                        ) : (
+                                                                            <span style={{ color: '#94a3b8' }}>-</span>
+                                                                        )}
                                                                     </td>
                                                                     <td style={{ padding: '9px 10px', color: '#0f172a', fontSize: '12px' }}>
-                                                                        {parcel.scannedAt ? new Date(parcel.scannedAt).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', second: '2-digit' }) : '-'}
+                                                                        {parcel.secondScanTime ? (
+                                                                            <span style={{ fontFamily: 'monospace', fontWeight: '700', color: '#0f172a' }}>
+                                                                                {formatScanTime(parcel.secondScanTime)}
+                                                                            </span>
+                                                                        ) : parcel.verified ? (
+                                                                            <span style={{ color: '#15803d', fontWeight: '600', fontSize: '11.5px' }}>Verified</span>
+                                                                        ) : (
+                                                                            <span style={{ color: '#d97706', fontSize: '11px', fontWeight: '700', backgroundColor: '#fef3c7', padding: '2px 6px', borderRadius: '4px' }}>Pending</span>
+                                                                        )}
+                                                                    </td>
+                                                                    <td style={{ padding: '9px 10px', color: '#334155', fontSize: '12px', fontWeight: '600' }}>
+                                                                        {parcel.secondScannedBy ? (
+                                                                            <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+                                                                                <span style={{ fontSize: '11px', color: '#64748b' }}>👤</span> {parcel.secondScannedBy}
+                                                                            </span>
+                                                                        ) : parcel.verified ? (
+                                                                            <span style={{ color: '#64748b' }}>Staff</span>
+                                                                        ) : (
+                                                                            <span style={{ color: '#94a3b8' }}>-</span>
+                                                                        )}
+                                                                    </td>
+                                                                    <td style={{ padding: '9px 10px' }}>
+                                                                        <span style={{
+                                                                            backgroundColor: courierBadge.bg,
+                                                                            color: courierBadge.color,
+                                                                            padding: '4px 9px',
+                                                                            borderRadius: '4px',
+                                                                            fontSize: '11px',
+                                                                            fontWeight: '700',
+                                                                            textTransform: 'uppercase',
+                                                                            display: 'inline-block',
+                                                                            letterSpacing: '0.4px',
+                                                                            boxShadow: '0 1px 2px rgba(0,0,0,0.08)'
+                                                                        }}>
+                                                                            {courierBadge.label}
+                                                                        </span>
                                                                     </td>
                                                                 </tr>
                                                             );
@@ -435,14 +726,14 @@ export default function DispatchVerifyTab({
 
                                                         {/* Pagination Footer */}
                                                         <tr>
-                                                            <td colSpan={9} style={{ padding: '12px 10px', borderTop: '2px solid #e2e8f0', backgroundColor: '#f8fafc' }}>
+                                                            <td colSpan={10} style={{ padding: '12px 10px', borderTop: '2px solid #e2e8f0', backgroundColor: '#f8fafc' }}>
                                                                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '10px' }}>
                                                                     <span style={{ fontSize: '11.5px', color: '#475569', fontWeight: '600' }}>
-                                                                        Showing {startIndex + 1} - {Math.min(startIndex + verifyParcelsRowsPerPage, filtered.length)} of {filtered.length} scanned parcels
+                                                                        Showing {startIndex + 1} - {Math.min(startIndex + verifyParcelsRowsPerPage, sorted.length)} of {sorted.length} scanned parcels
                                                                     </span>
                                                                     <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
                                                                         <button
-                                                                            onClick={() => setVerifyParcelsPage(prev => Math.max(prev - 1, 1))}
+                                                                            onClick={() => setVerifyParcelsPage((prev: number) => Math.max(prev - 1, 1))}
                                                                             disabled={page <= 1}
                                                                             style={{
                                                                                 padding: '4px 10px',
@@ -461,7 +752,7 @@ export default function DispatchVerifyTab({
                                                                             Page {page} of {totalPages || 1}
                                                                         </span>
                                                                         <button
-                                                                            onClick={() => setVerifyParcelsPage(prev => Math.min(prev + 1, totalPages))}
+                                                                            onClick={() => setVerifyParcelsPage((prev: number) => Math.min(prev + 1, totalPages))}
                                                                             disabled={page >= totalPages}
                                                                             style={{
                                                                                 padding: '4px 10px',
