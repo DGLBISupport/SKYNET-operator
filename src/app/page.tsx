@@ -16,6 +16,7 @@ import ReportsTab from '@/components/reports/ReportsTab';
 import ManifestTrackingTab from '@/components/manifest-tracking/ManifestTrackingTab';
 import DashboardTab from '@/components/dashboard/DashboardTab';
 import UnknownParcelsTab from '@/components/unknown-parcels/UnknownParcelsTab';
+import MissedParcelsTab from '@/components/missed-parcels/MissedParcelsTab';
 import AllModals from '@/components/modals/AllModals';
 
 // SVG Code 128 Barcode Generator
@@ -217,7 +218,7 @@ export default function WorkstationDashboard() {
         }
     };
 
-    const [activeTab, setActiveTab] = useState<'first-scan' | 'second-scan' | 'damaged-barcode' | 'unknown-parcels' | 'verify' | 'config' | 'reports' | 'search' | 'dashboard' | 'tracking' | 'manifest-tracking'>('first-scan');
+    const [activeTab, setActiveTab] = useState<'first-scan' | 'second-scan' | 'missed-parcels' | 'damaged-barcode' | 'unknown-parcels' | 'verify' | 'config' | 'reports' | 'search' | 'dashboard' | 'tracking' | 'manifest-tracking'>('first-scan');
     const [isSidebarExpanded, setIsSidebarExpanded] = useState<boolean>(true);
     const [scannedToday, setScannedToday] = useState<number>(0);
     const [timeString, setTimeString] = useState<string>('');
@@ -3293,6 +3294,11 @@ export default function WorkstationDashboard() {
                     title: 'Manifest & Outbound Bag Tracking',
                     description: 'Select a manifest to view all created outbound bags, inspect parcels inside each bag, and track allocation breakdowns.'
                 };
+            case 'missed-parcels':
+                return {
+                    title: 'Missed & Shortage Parcels Recovery',
+                    description: 'View physically missed parcels from unsealed bags, mark them as found, and register 1st scan for LMD processing.'
+                };
             case 'damaged-barcode':
                 return {
                     title: 'Damaged Labels Exception Management',
@@ -3873,6 +3879,18 @@ export default function WorkstationDashboard() {
                                 )
                             },
                             {
+                                id: 'missed-parcels',
+                                label: 'Missed Parcels',
+                                icon: (
+                                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                        <path d="M21 8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16Z" />
+                                        <circle cx="12" cy="12" r="2" />
+                                        <path d="m16 16 3 3" />
+                                        <path d="m19 16-3 3" />
+                                    </svg>
+                                )
+                            },
+                            {
                                 id: 'damaged-barcode',
                                 label: 'Damaged Labels',
                                 icon: (
@@ -4283,6 +4301,11 @@ export default function WorkstationDashboard() {
                     {/* ═══ DamagedBarcodeTab ═══ */}
                     {activeTab === 'damaged-barcode' && (
                         <DamagedBarcodeTab {...appState} />
+                    )}
+
+                    {/* ═══ MissedParcelsTab ═══ */}
+                    {activeTab === 'missed-parcels' && (
+                        <MissedParcelsTab {...appState} />
                     )}
 
                     {/* ═══ UnknownParcelsTab ═══ */}
