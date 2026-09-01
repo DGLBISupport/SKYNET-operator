@@ -249,6 +249,7 @@ export default function WorkstationDashboard() {
 
     // Tab 1: Box Unsealing (First Scan)
     const [mawbsList, setMawbsList] = useState<any[]>([]);
+    const [mawbDateFilter, setMawbDateFilter] = useState<string>(() => new Date().toISOString().slice(0, 10));
     const [firstScanMawb, setFirstScanMawb] = useState('');
     const [firstScanBags, setFirstScanBags] = useState<{
         bagNumber: string;
@@ -775,19 +776,23 @@ export default function WorkstationDashboard() {
         return () => window.removeEventListener('keydown', handleKeyDown);
     }, []);
 
-    // Fetch MAWBs list and existing unsealed bags on mount
+    // Fetch MAWBs list and existing unsealed bags on mount (and when date filter changes)
     useEffect(() => {
-        fetch('/api/allocate?mawbs=true')
+        fetch(`/api/allocate?mawbs=true&date=${mawbDateFilter}`)
             .then(res => res.json())
             .then(data => {
                 if (data.success && data.mawbs) {
                     setMawbsList(data.mawbs);
                     if (data.mawbs.length > 0) {
                         setFirstScanMawb(prev => prev || data.mawbs[0].mawb_reference);
+                    } else {
+                        setFirstScanMawb('');
                     }
                 }
             }).catch(console.error);
+    }, [mawbDateFilter]);
 
+    useEffect(() => {
         fetch('/api/allocate?getUnsealedBags=true')
             .then(res => res.json())
             .then(data => {
@@ -2080,10 +2085,11 @@ export default function WorkstationDashboard() {
             const res = await fetch('/api/lmd-bags?getOutboundManifests=true', { cache: 'no-store' });
             const data = await res.json();
             if (data.success && Array.isArray(data.manifests)) {
-                setOutboundManifestsList(data.manifests);
-                const isValidSelection = selectedSecondScanMawb && data.manifests.some((m: any) => m.manifest_reference === selectedSecondScanMawb);
+                const unclosedManifests = data.manifests.filter((m: any) => (m.status || 'OPEN').toUpperCase() !== 'CLOSED');
+                setOutboundManifestsList(unclosedManifests);
+                const isValidSelection = selectedSecondScanMawb && unclosedManifests.some((m: any) => m.manifest_reference === selectedSecondScanMawb);
                 if (!isValidSelection) {
-                    const openManifest = data.manifests.find((m: any) => m.status === 'OPEN') || data.manifests[0];
+                    const openManifest = unclosedManifests.find((m: any) => (m.status || 'OPEN').toUpperCase() === 'OPEN') || unclosedManifests[0];
                     setSelectedSecondScanMawb(openManifest ? openManifest.manifest_reference : '');
                 }
             }
@@ -2424,6 +2430,7 @@ export default function WorkstationDashboard() {
                         processedParcels: prev.totalParcels,
                         summary: data.summary
                     }) : null);
+                    fetchOutboundManifests();
                 } else if (data.type === 'error') {
                     es.close();
                     setIsClosingManifest(false);
@@ -3459,6 +3466,7 @@ export default function WorkstationDashboard() {
         manifestTrackingSearchQuery,
         manifestTrackingStatusFilter,
         manifestUnsealsPage,
+        mawbDateFilter,
         mawbsList,
         mismatchCount,
         missedFirstScanModal,
@@ -3584,6 +3592,7 @@ export default function WorkstationDashboard() {
         setManifestTrackingSearchQuery,
         setManifestTrackingStatusFilter,
         setManifestUnsealsPage,
+        setMawbDateFilter,
         setMawbsList,
         setMismatchCount,
         setMissedFirstScanModal,

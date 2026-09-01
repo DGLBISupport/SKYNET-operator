@@ -504,6 +504,8 @@ ${shipmentsContent}
 }
 
 // ─── POST XML to FFDX API ─────────────────────────────────────────────────────
+const FFDX_TIMEOUT_MS = Number(process.env.FFDX_TIMEOUT_MS) || 300_000; // 5 minutes default timeout for large manifest payloads
+
 async function postToFfdx(xmlStream: string, manifestReference: string): Promise<{ success: boolean; response?: string; error?: string }> {
     // For full manifest XML uploads, MAX_RETRIES must be 1 to prevent duplicate manifest creation on GETonline
     const MAX_RETRIES = 1;
@@ -519,7 +521,7 @@ async function postToFfdx(xmlStream: string, manifestReference: string): Promise
                 method: 'POST',
                 headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
                 body: formData.toString(),
-                signal: AbortSignal.timeout(120_000), // 2 minutes timeout for large manifests
+                signal: AbortSignal.timeout(FFDX_TIMEOUT_MS), // 5 minutes timeout for large manifests
             });
             const text = await res.text();
             if (!res.ok) {
@@ -534,7 +536,12 @@ async function postToFfdx(xmlStream: string, manifestReference: string): Promise
             }
             return { success: true, response: text };
         } catch (err: any) {
-            lastError = err?.message || String(err);
+            const isTimeout = err?.name === 'TimeoutError' || (err?.message && err.message.toLowerCase().includes('timeout')) || String(err).toLowerCase().includes('aborted');
+            if (isTimeout) {
+                lastError = `The GETonline (FFDX) server did not respond within ${Math.round(FFDX_TIMEOUT_MS / 1000)}s (Request timed out). The manifest is saved in database and can be retried.`;
+            } else {
+                lastError = err?.message || String(err);
+            }
         }
     }
     return { success: false, error: `FFDX upload failed: ${lastError}` };

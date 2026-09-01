@@ -452,13 +452,15 @@ ${shipmentsContent}
 const activeFfdxUploads = new Set<string>();
 
 // ─── POST XML to FFDX WSDataTransfer API ──────────────────────────────────────
+const FFDX_TIMEOUT_MS = Number(process.env.FFDX_TIMEOUT_MS) || 300_000; // 5 minutes default timeout for large manifest payloads
+
 async function postToFfdx(xmlStream: string, manifestReference: string): Promise<{ success: boolean; response?: string; error?: string }> {
     const MAX_RETRIES = 1;
     let lastError = '';
 
     for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
         try {
-            console.log(`[ffdx-upload] [${manifestReference}] Sending WSGET XML to FFDX...`);
+            console.log(`[ffdx-upload] [${manifestReference}] Sending WSGET XML to FFDX (Timeout: ${FFDX_TIMEOUT_MS / 1000}s)...`);
 
             const formData = new URLSearchParams();
             formData.append('Username', FFDX_USERNAME);
@@ -470,7 +472,7 @@ async function postToFfdx(xmlStream: string, manifestReference: string): Promise
                 method: 'POST',
                 headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
                 body: formData.toString(),
-                signal: AbortSignal.timeout(120_000),
+                signal: AbortSignal.timeout(FFDX_TIMEOUT_MS),
             });
 
             const text = await res.text();
@@ -494,7 +496,12 @@ async function postToFfdx(xmlStream: string, manifestReference: string): Promise
 
             return { success: true, response: text };
         } catch (err: any) {
-            lastError = err?.message || String(err);
+            const isTimeout = err?.name === 'TimeoutError' || (err?.message && err.message.toLowerCase().includes('timeout')) || String(err).toLowerCase().includes('aborted');
+            if (isTimeout) {
+                lastError = `The GETonline (FFDX) server did not respond within ${Math.round(FFDX_TIMEOUT_MS / 1000)}s (Request timed out). The manifest is saved in database and can be retried.`;
+            } else {
+                lastError = err?.message || String(err);
+            }
             console.error(`[ffdx-upload] [${manifestReference}] Upload failed:`, lastError);
         }
     }
@@ -538,7 +545,7 @@ export async function POST(request: Request) {
             manifestReference: string;
             manifestId?: number | null;
             serviceProviderName?: string;
-            bags: Array<{
+            bags?: Array<{
                 bagNumber: string;
                 parcels: Array<{
                     trackingNumber?: string;
@@ -631,6 +638,30 @@ export async function POST(request: Request) {
         let allBags = Array.isArray(bags) ? bags : [];
         let firstShipmentDetail: any = null;
         let totalCalculatedWeightKg = 0;
+
+        // Fallback: If allBags is empty and Supabase is configured, fetch bags from DB
+        if (allBags.length === 0 && sb) {
+            try {
+                let mId = manifestId;
+                if (!mId) {
+                    const mRes = await fetch(`${sb.url}/rest/v1/outbound_manifests?manifest_reference=eq.${encodeURIComponent(manifestReference)}&select=id`, { headers: sb.headers, cache: 'no-store' });
+                    const mData = await mRes.json();
+                    if (Array.isArray(mData) && mData.length > 0) mId = mData[0].id;
+                }
+                const bRes = mId
+                    ? await fetch(`${sb.url}/rest/v1/outbound_lmd_bags?new_manifest_reference=eq.${mId}&select=bag_number,parcels`, { headers: sb.headers, cache: 'no-store' })
+                    : await fetch(`${sb.url}/rest/v1/outbound_lmd_bags?mawb_ref=eq.${encodeURIComponent(manifestReference)}&select=bag_number,parcels`, { headers: sb.headers, cache: 'no-store' });
+                const bData = await bRes.json();
+                if (Array.isArray(bData)) {
+                    allBags = bData.map((b: any) => ({
+                        bagNumber: b.bag_number,
+                        parcels: Array.isArray(b.parcels) ? b.parcels : (typeof b.parcels === 'string' ? JSON.parse(b.parcels || '[]') : [])
+                    }));
+                }
+            } catch (e) {
+                console.error('[ffdx-upload] Error fetching bags for retry:', e);
+            }
+        }
 
         // If any bag has no parcels and we have Supabase, enrich from outbound_lmd_bag_items
         if (sb) {

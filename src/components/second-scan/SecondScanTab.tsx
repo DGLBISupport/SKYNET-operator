@@ -70,7 +70,9 @@ export default function SecondScanTab({
                                                 style={{ ...inputStyle, width: '100%', backgroundColor: '#ffffff', color: '#111827', fontWeight: '600' }}
                                             >
                                                 <option value="">-- Select an Outbound Manifest --</option>
-                                                {outboundManifestsList.map(m => (
+                                                {outboundManifestsList
+                                                    .filter((m: any) => (m.status || 'OPEN').toUpperCase() !== 'CLOSED')
+                                                    .map((m: any) => (
                                                     <option key={m.manifest_reference} value={m.manifest_reference}>
                                                         {m.manifest_reference} ({m.service_provider_name || 'Partner'} - {m.total_bags || 0} Bags, {m.total_parcels || 0} Pcs)
                                                     </option>

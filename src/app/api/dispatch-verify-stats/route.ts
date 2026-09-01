@@ -24,10 +24,10 @@ async function fetchAllSupabaseRows(table: string, selectFields: string, sb: { u
     let hasMore = true;
     let attempts = 0;
 
-    while (hasMore && attempts < 10) {
+    while (hasMore && attempts < 100) {
         attempts++;
         try {
-            const res = await fetch(`${sb.url}/rest/v1/${table}?select=${selectFields}&order=id.asc&limit=${limit}&offset=${offset}`, {
+            const res = await fetch(`${sb.url}/rest/v1/${table}?select=${selectFields}&limit=${limit}&offset=${offset}`, {
                 headers: sb.headers,
                 cache: 'no-store'
             });
@@ -44,6 +44,7 @@ async function fetchAllSupabaseRows(table: string, selectFields: string, sb: { u
                     hasMore = false;
                 }
             } else {
+                console.error(`Error fetching table ${table}:`, res.status);
                 hasMore = false;
             }
         } catch (e) {
@@ -184,6 +185,14 @@ export async function GET(request: Request) {
             return 'Other';
         };
 
+        // Build Map for fast SPA lookup by shipment reference
+        const spaMap = new Map<string, any>();
+        spaData.forEach((alloc: any) => {
+            if (alloc.shipment_ref) {
+                spaMap.set(String(alloc.shipment_ref).trim().toLowerCase(), alloc);
+            }
+        });
+
         // Build Outbound Manifest ID -> Reference string map
         const omIdMap: Record<number, string> = {};
         outboundManifestData.forEach((om: any) => {
@@ -248,8 +257,8 @@ export async function GET(request: Request) {
         });
 
         // Maps for scan timestamps & operators
-        const firstScanMap = new Map<string, { time: string; operator: string }>();
-        const secondScanMap = new Map<string, { time: string; operator: string; bagNumber?: string }>();
+        const firstScanMap = new Map<string, { time: string; operator: string; bagNumber?: string; rawDate?: string }>();
+        const secondScanMap = new Map<string, { time: string; operator: string; bagNumber?: string; rawDate?: string }>();
 
         // 1. Populate firstScanMap from bag_unsealing
         unsealData.forEach((u: any) => {
@@ -288,7 +297,7 @@ export async function GET(request: Request) {
                     const finalOp = pOp || uOp;
                     const finalTime = pTime || uTime;
 
-                    const entry = { time: finalTime, operator: finalOp };
+                    const entry = { time: finalTime, operator: finalOp, bagNumber: u.bag_number, rawDate: uTime };
                     firstScanMap.set(canonical.toLowerCase(), entry);
                     if (temu) firstScanMap.set(temu.toLowerCase(), entry);
                     if (rawTrk) firstScanMap.set(rawTrk.toLowerCase(), entry);
@@ -300,11 +309,11 @@ export async function GET(request: Request) {
         shipData.forEach((s: any) => {
             const bagNum = (s.bag_number || '').trim();
             if (!bagNum) return;
-            const matchingUnseal = unsealData.find(u => (u.bag_number || '').trim().toLowerCase() === bagNum.toLowerCase());
+            const matchingUnseal = unsealData.find((u: any) => (u.bag_number || '').trim().toLowerCase() === bagNum.toLowerCase());
             if (matchingUnseal) {
                 const canonical = getCanonicalTracking((s.reference_number || '').trim());
                 const temu = getTemuBarcode(canonical, s.sender_reference);
-                const entry = { time: matchingUnseal.created_at, operator: resolveUserName(matchingUnseal.unsealed_by) || 'Staff' };
+                const entry = { time: matchingUnseal.created_at, operator: resolveUserName(matchingUnseal.unsealed_by) || 'Staff', bagNumber: bagNum, rawDate: matchingUnseal.created_at };
                 if (canonical && !firstScanMap.has(canonical.toLowerCase())) firstScanMap.set(canonical.toLowerCase(), entry);
                 if (temu && !firstScanMap.has(temu.toLowerCase())) firstScanMap.set(temu.toLowerCase(), entry);
             }
@@ -318,7 +327,7 @@ export async function GET(request: Request) {
             const temu = getTemuBarcode(canonical, rawTrk);
             const itOp = resolveUserName(it.scanned_by) || 'Staff';
             const itTime = it.created_at;
-            const entry = { time: itTime, operator: itOp, bagNumber: it.bag_number };
+            const entry = { time: itTime, operator: itOp, bagNumber: it.bag_number, rawDate: itTime };
             secondScanMap.set(canonical.toLowerCase(), entry);
             if (temu) secondScanMap.set(temu.toLowerCase(), entry);
             if (rawTrk) secondScanMap.set(rawTrk.toLowerCase(), entry);
@@ -345,7 +354,7 @@ export async function GET(request: Request) {
                     const temu = getTemuBarcode(canonical, rawTrk);
                     const finalOp = pOp || bagOp;
                     const finalTime = pTime || bagTime;
-                    const entry = { time: finalTime, operator: finalOp, bagNumber: b.bag_number };
+                    const entry = { time: finalTime, operator: finalOp, bagNumber: b.bag_number, rawDate: bagTime };
 
                     if (!secondScanMap.has(canonical.toLowerCase())) secondScanMap.set(canonical.toLowerCase(), entry);
                     if (temu && !secondScanMap.has(temu.toLowerCase())) secondScanMap.set(temu.toLowerCase(), entry);
@@ -466,7 +475,7 @@ export async function GET(request: Request) {
             }
         });
 
-        // Process service_provider_allocation rows
+        // 1. Process service_provider_allocation rows
         spaData.forEach((alloc: any) => {
             const rawRef = alloc.shipment_ref || String(alloc.id);
             const canonicalRef = getCanonicalTracking(rawRef);
@@ -489,8 +498,8 @@ export async function GET(request: Request) {
 
             const isCreatedOnDate = isTargetDate(alloc.created_at);
             const isUpdatedOnDate = isTargetDate(alloc.updated_at);
-            const is1stScanOnDate = isTargetDate(firstScanTime);
-            const is2ndScanOnDate = isTargetDate(secondScanTime);
+            const is1stScanOnDate = isTargetDate(fsInfo?.rawDate || firstScanTime);
+            const is2ndScanOnDate = isTargetDate(ssInfo?.rawDate || secondScanTime);
             const hasActivityOnDate = isCreatedOnDate || isUpdatedOnDate || is1stScanOnDate || is2ndScanOnDate;
 
             if (hasActivityOnDate && (is1stScan || is2ndScan)) {
@@ -576,7 +585,7 @@ export async function GET(request: Request) {
             }
         });
 
-        // Add scanned parcels from bag_unsealing on selected date if not already counted
+        // 2. Add scanned parcels from bag_unsealing on selected date if not already counted
         unsealData.forEach((u: any) => {
             if (isTargetDate(u.created_at)) {
                 const group = getOrCreateManifestGroup(u.mawb_ref);
@@ -628,11 +637,32 @@ export async function GET(request: Request) {
                             totalScannedAll++;
                             unsealed1stScanDone++;
 
+                            // Lookup SPA record to resolve provider accurately
+                            const spaAlloc = spaMap.get(canonicalRef.toLowerCase()) || (temuCode ? spaMap.get(temuCode.toLowerCase()) : null) || (rawTrk ? spaMap.get(rawTrk.toLowerCase()) : null);
+                            let partnerName = 'Unassigned';
+                            if (spaAlloc && spaAlloc.service_provider) {
+                                partnerName = resolvePartnerName(spaAlloc.service_provider);
+                            }
+
+                            if (partnerName === 'PickMe') pickMeScanned++;
+                            else if (partnerName === 'Domex') domexScanned++;
+                            else if (partnerName === 'SITREK') sitrekScanned++;
+                            else if (partnerName === 'Pronto') prontoScanned++;
+                            else otherScanned++;
+
                             group.dailyScanned++;
                             group.unsealedCount++;
+                            if (partnerName === 'PickMe') group.pickMeScanned++;
+                            else if (partnerName === 'Domex') group.domexScanned++;
+                            else if (partnerName === 'SITREK') group.sitrekScanned++;
+                            else if (partnerName === 'Pronto') group.prontoScanned++;
 
                             const outboundBag = ssInfo?.bagNumber || shipmentToBagMap.get(canonicalRef) || shipmentToBagMap.get(rawTrk) || 'Pending Bag';
-                            const outboundManifest = shipmentToOmMap.get(canonicalRef) || shipmentToOmMap.get(rawTrk) || 'Pending Manifest';
+                            let outboundManifest = shipmentToOmMap.get(canonicalRef) || shipmentToOmMap.get(rawTrk) || '';
+                            if (!outboundManifest && mawbPartnerToManifestMap.has(`${inboundMawb}_${partnerName}`)) {
+                                outboundManifest = mawbPartnerToManifestMap.get(`${inboundMawb}_${partnerName}`)!;
+                            }
+                            if (!outboundManifest) outboundManifest = 'Pending Manifest';
 
                             scannedParcels.push({
                                 id: `unseal-${u.id}-${rawTrk}`,
@@ -650,7 +680,7 @@ export async function GET(request: Request) {
                                 secondScannedBy,
                                 scannedBy: secondScannedBy || firstScannedBy || 'Staff',
                                 scanStatus: secondScanTime ? '2ND_SCAN_DONE' : '1ST_SCAN_DONE',
-                                serviceProvider: 'Unassigned',
+                                serviceProvider: partnerName,
                                 scannedAt: secondScanTime || firstScanTime || u.created_at
                             });
                         } else {
@@ -664,6 +694,12 @@ export async function GET(request: Request) {
                                     existing.senderReference = temuCode;
                                     existing.temuBarcode = temuCode;
                                 }
+                                if ((existing.serviceProvider === 'Other' || existing.serviceProvider === 'Unassigned')) {
+                                    const spaAlloc = spaMap.get(canonicalRef.toLowerCase()) || (temuCode ? spaMap.get(temuCode.toLowerCase()) : null) || (rawTrk ? spaMap.get(rawTrk.toLowerCase()) : null);
+                                    if (spaAlloc && spaAlloc.service_provider) {
+                                        existing.serviceProvider = resolvePartnerName(spaAlloc.service_provider);
+                                    }
+                                }
                             }
                         }
                     });
@@ -671,7 +707,7 @@ export async function GET(request: Request) {
             }
         });
 
-        // Add scanned parcels from outbound_lmd_bag_items on selected date if not already counted
+        // 3. Add scanned parcels from outbound_lmd_bag_items on selected date if not already counted
         bagItemsData.forEach((it: any) => {
             if (isTargetDate(it.created_at)) {
                 const rawTrk = (it.shipment_ref || '').trim();
@@ -689,12 +725,30 @@ export async function GET(request: Request) {
                     const fsInfo = firstScanMap.get(canonicalRef.toLowerCase()) || firstScanMap.get(rawTrk.toLowerCase()) || (temuCode ? firstScanMap.get(temuCode.toLowerCase()) : null);
                     const itOp = resolveUserName(it.scanned_by) || 'Staff';
 
+                    // Resolve partner from SPA or from the bag
+                    const spaAlloc = spaMap.get(canonicalRef.toLowerCase()) || (temuCode ? spaMap.get(temuCode.toLowerCase()) : null) || (rawTrk ? spaMap.get(rawTrk.toLowerCase()) : null);
+                    let partnerName = 'Other';
+                    if (spaAlloc && spaAlloc.service_provider) {
+                        partnerName = resolvePartnerName(spaAlloc.service_provider);
+                    } else if (bNum) {
+                        const matchingBag = outboundData.find((b: any) => (b.bag_number || '').trim().toLowerCase() === bNum.toLowerCase());
+                        if (matchingBag && matchingBag.target_partner) {
+                            partnerName = resolvePartnerName(matchingBag.target_partner);
+                        }
+                    }
+
+                    if (partnerName === 'PickMe') pickMeScanned++;
+                    else if (partnerName === 'Domex') domexScanned++;
+                    else if (partnerName === 'SITREK') sitrekScanned++;
+                    else if (partnerName === 'Pronto') prontoScanned++;
+                    else otherScanned++;
+
                     scannedParcels.push({
                         id: `item-${it.id}-${rawTrk}`,
                         trackingNumber: canonicalRef,
                         senderReference: temuCode || undefined,
                         temuBarcode: temuCode || undefined,
-                        inboundMawb: 'UNASSIGNED',
+                        inboundMawb: spaAlloc?.mawb_ref || 'UNASSIGNED',
                         outboundBag: bNum || 'Pending Bag',
                         outboundManifest,
                         unsealed: Boolean(fsInfo?.time),
@@ -705,7 +759,7 @@ export async function GET(request: Request) {
                         secondScannedBy: itOp,
                         scannedBy: itOp,
                         scanStatus: '2ND_SCAN_DONE',
-                        serviceProvider: 'Other',
+                        serviceProvider: partnerName,
                         scannedAt: it.created_at
                     });
                 }

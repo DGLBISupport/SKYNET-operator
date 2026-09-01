@@ -30,6 +30,7 @@ export default function FirstScanTab({
     isBagsLoading,
     label,
     lastTemuSticker,
+    mawbDateFilter,
     mawbsList,
     setBagBarcodeInput,
     setConfirmFinishModal,
@@ -49,11 +50,66 @@ export default function FirstScanTab({
     setFirstScanSelectedBag,
     setInvalidBagParcelModal,
     setLastTemuSticker,
+    setMawbDateFilter,
     status,
     unsealedBoxes
 }: any) {
     return (
                         <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+                            {/* ── DATE FILTER BAR ── */}
+                            <div style={{
+                                display: 'flex',
+                                alignItems: 'center',
+                                gap: '12px',
+                                backgroundColor: '#ffffff',
+                                border: '1px solid #e5e7eb',
+                                borderRadius: '8px',
+                                padding: '10px 16px',
+                                boxShadow: '0 1px 3px rgba(0,0,0,0.04)'
+                            }}>
+                                <span style={{ fontSize: '12px', fontWeight: '700', color: '#374151', whiteSpace: 'nowrap' }}>
+                                    📅 Showing MAWBs for:
+                                </span>
+                                <input
+                                    type="date"
+                                    value={mawbDateFilter || ''}
+                                    onChange={(e) => {
+                                        setMawbDateFilter(e.target.value);
+                                        setFirstScanMawb('');
+                                    }}
+                                    style={{
+                                        ...inputStyle,
+                                        width: '160px',
+                                        fontWeight: '600',
+                                        fontSize: '13px',
+                                        padding: '6px 10px'
+                                    }}
+                                />
+                                <button
+                                    onClick={() => {
+                                        const today = new Date().toISOString().slice(0, 10);
+                                        setMawbDateFilter(today);
+                                        setFirstScanMawb('');
+                                    }}
+                                    style={{
+                                        backgroundColor: '#f3f4f6',
+                                        border: '1px solid #d1d5db',
+                                        borderRadius: '6px',
+                                        padding: '6px 12px',
+                                        fontSize: '12px',
+                                        fontWeight: '600',
+                                        color: '#374151',
+                                        cursor: 'pointer',
+                                        whiteSpace: 'nowrap'
+                                    }}
+                                >
+                                    Today
+                                </button>
+                                <span style={{ fontSize: '12px', color: '#6b7280' }}>
+                                    {mawbsList.length} MAWB{mawbsList.length !== 1 ? 's' : ''} found
+                                </span>
+                            </div>
+
                             {/* Setup & Scan Box Card */}
                             <div style={card}>
                                 <div style={label}>Box Setup & Unsealing</div>

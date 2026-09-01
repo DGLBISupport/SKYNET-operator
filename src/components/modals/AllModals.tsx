@@ -1,5 +1,5 @@
 'use client';
-import React from 'react';
+import React, { useState } from 'react';
 import PaginationControl from '@/app/components/PaginationControl';
 import { formatGramsToKg, normalizeWeightToGrams } from '@/lib/weightUtils';
 
@@ -128,6 +128,55 @@ export default function AllModals({
     verifyInputRef,
     viewingUnsealedParcelsModal
 }: any) {
+    const [isRetryingFfdx, setIsRetryingFfdx] = useState(false);
+
+    const handleRetryFfdxUpload = async (targetMawb: string, providerName?: string) => {
+        if (isRetryingFfdx || !targetMawb) return;
+        setIsRetryingFfdx(true);
+        if (setManifestProgressModal) {
+            setManifestProgressModal((prev: any) => prev ? ({ ...prev, status: 'ffdx_uploading', error: undefined }) : null);
+        }
+        try {
+            const res = await fetch('/api/ffdx-upload', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    manifestReference: targetMawb,
+                    serviceProviderName: providerName || 'All Partners'
+                })
+            });
+            const data = await res.json();
+            if (data.success) {
+                if (setManifestProgressModal) {
+                    setManifestProgressModal((prev: any) => prev ? ({
+                        ...prev,
+                        status: 'completed',
+                        error: undefined,
+                        summary: { ...prev.summary, ffdxSuccess: true, ffdxError: undefined }
+                    }) : null);
+                }
+            } else {
+                if (setManifestProgressModal) {
+                    setManifestProgressModal((prev: any) => prev ? ({
+                        ...prev,
+                        status: 'error',
+                        error: data.error || 'Retry upload failed.'
+                    }) : null);
+                }
+            }
+        } catch (e: any) {
+            if (setManifestProgressModal) {
+                setManifestProgressModal((prev: any) => prev ? ({
+                    ...prev,
+                    status: 'error',
+                    error: e?.message || 'Network error during retry.'
+                }) : null);
+            }
+        } finally {
+            setIsRetryingFfdx(false);
+        }
+    };
+
     return (
         <>
             {/* ── DEVICE MANAGER MODAL ── */}
@@ -502,9 +551,10 @@ export default function AllModals({
                     const { mawbRef, closedBy, closedAt, provider, totalBags, totalParcels, processedParcels, status, bags, expandedBags, error, summary } = manifestProgressModal;
                     const percent = totalParcels > 0 ? Math.min(100, Math.round((processedParcels / totalParcels) * 100)) : 100;
                     const isFinished = status === 'completed' || status === 'error';
+                    const isUploading = status === 'ffdx_uploading' || isRetryingFfdx;
 
                     const toggleBag = (bagNumber: string) => {
-                        setManifestProgressModal(prev => {
+                        setManifestProgressModal((prev: any) => {
                             if (!prev) return null;
                             return {
                                 ...prev,
@@ -523,19 +573,30 @@ export default function AllModals({
                             zIndex: 4500,
                             animation: 'fadeIn 0.2s ease-out'
                         }}>
+                            <style>{`
+                                @keyframes spin {
+                                    0% { transform: rotate(0deg); }
+                                    100% { transform: rotate(360deg); }
+                                }
+                                @keyframes pulseGlow {
+                                    0%, 100% { box-shadow: 0 0 15px rgba(37, 99, 235, 0.25); }
+                                    50% { box-shadow: 0 0 25px rgba(37, 99, 235, 0.50); }
+                                }
+                            `}</style>
                             <div style={{
                                 backgroundColor: '#ffffff',
-                                border: '2px solid #111827',
+                                border: isUploading ? '2px solid #2563eb' : status === 'completed' ? '2px solid #16a34a' : status === 'error' ? '2px solid #dc2626' : '2px solid #111827',
                                 borderRadius: '14px',
                                 padding: '24px',
-                                width: '580px',
-                                maxWidth: '94%',
+                                width: '600px',
+                                maxWidth: '95%',
                                 maxHeight: '90vh',
                                 display: 'flex',
                                 flexDirection: 'column',
                                 gap: '16px',
-                                boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.35)',
-                                overflow: 'hidden'
+                                boxShadow: isUploading ? '0 25px 50px -12px rgba(37, 99, 235, 0.35)' : '0 25px 50px -12px rgba(0, 0, 0, 0.35)',
+                                overflow: 'hidden',
+                                transition: 'border-color 0.3s ease'
                             }}>
                                 {/* Modal Header */}
                                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid #e5e7eb', paddingBottom: '12px' }}>
@@ -548,11 +609,14 @@ export default function AllModals({
                                         </div>
                                     </div>
                                     <span style={{
-                                        backgroundColor: isFinished ? (status === 'completed' ? '#dcfce7' : '#fee2e2') : '#fef3c7',
-                                        color: isFinished ? (status === 'completed' ? '#166534' : '#991b1b') : '#92400e',
-                                        fontSize: '11px', fontWeight: '800', padding: '4px 10px', borderRadius: '12px', textTransform: 'uppercase'
+                                        backgroundColor: isUploading ? '#dbeafe' : isFinished ? (status === 'completed' && !error && !summary?.ffdxError ? '#dcfce7' : '#fee2e2') : '#fef3c7',
+                                        color: isUploading ? '#1e40af' : isFinished ? (status === 'completed' && !error && !summary?.ffdxError ? '#166534' : '#991b1b') : '#92400e',
+                                        border: isUploading ? '1px solid #93c5fd' : 'none',
+                                        fontSize: '11px', fontWeight: '800', padding: '5px 12px', borderRadius: '12px', textTransform: 'uppercase',
+                                        display: 'inline-flex', alignItems: 'center', gap: '5px'
                                     }}>
-                                        {status === 'initializing' ? 'Initializing...' : status === 'enriching' ? 'Updating Parcels...' : status === 'ffdx_uploading' ? 'Uploading GETonline...' : status === 'completed' ? 'Completed ✅' : 'Error ❌'}
+                                        {isUploading && <span style={{ width: '8px', height: '8px', borderRadius: '50%', backgroundColor: '#2563eb', display: 'inline-block', animation: 'spin 1s linear infinite' }} />}
+                                        {status === 'initializing' ? 'Initializing...' : status === 'enriching' ? 'Updating Parcels...' : isUploading ? '📡 Transmitting to GETonline...' : status === 'completed' && !error && !summary?.ffdxError ? 'Completed ✅' : 'Notice / Error ⚠️'}
                                     </span>
                                 </div>
 
@@ -572,11 +636,44 @@ export default function AllModals({
                                     </div>
                                 </div>
 
-                                {/* Main Completing Bar / Progress Bar */}
+                                {/* ── DEDICATED MANIFEST UPLOADING POPUP / BANNER ── */}
+                                {isUploading && (
+                                    <div style={{
+                                        backgroundColor: '#eff6ff',
+                                        border: '2px solid #2563eb',
+                                        borderRadius: '10px',
+                                        padding: '16px 18px',
+                                        display: 'flex',
+                                        alignItems: 'center',
+                                        gap: '16px',
+                                        boxShadow: '0 4px 14px rgba(37, 99, 235, 0.18)',
+                                        animation: 'pulseGlow 2s infinite'
+                                    }}>
+                                        <div style={{
+                                            width: '38px',
+                                            height: '38px',
+                                            borderRadius: '50%',
+                                            border: '4px solid #bfdbfe',
+                                            borderTopColor: '#2563eb',
+                                            animation: 'spin 0.85s linear infinite',
+                                            flexShrink: 0
+                                        }} />
+                                        <div style={{ flex: 1 }}>
+                                            <div style={{ fontSize: '14px', fontWeight: '800', color: '#1e40af', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                                <span>Transmitting Manifest XML to SkyNet GETonline...</span>
+                                            </div>
+                                            <div style={{ fontSize: '12px', color: '#1d4ed8', marginTop: '4px', lineHeight: '1.4' }}>
+                                                Bundling and transmitting all {totalBags} bags ({totalParcels} parcels) to SkyNet GETonline web service. <strong>Please wait, do not close or reload this window.</strong>
+                                            </div>
+                                        </div>
+                                    </div>
+                                )}
+
+                                {/* Main Progress Bar */}
                                 <div style={{ backgroundColor: '#f1f5f9', borderRadius: '10px', padding: '14px', border: '1px solid #e2e8f0' }}>
                                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px', fontSize: '12px', fontWeight: '700' }}>
                                         <span style={{ color: '#334155' }}>
-                                            {status === 'ffdx_uploading' ? 'Transmitting XML to GETonline API...' : status === 'completed' ? ' All Parcels & Bags Successfully Processed' : status === 'error' ? '❌ Error Occurred' : '📦 Processing Bags & Parcels...'}
+                                            {isUploading ? 'Transmitting XML to GETonline API...' : status === 'completed' ? ' All Parcels & Bags Successfully Processed' : status === 'error' ? '❌ Error Occurred' : '📦 Processing Bags & Parcels...'}
                                         </span>
                                         <span style={{ color: '#0f172a', fontWeight: '900', fontSize: '14px' }}>
                                             {processedParcels} / {totalParcels} ({percent}%)
@@ -595,18 +692,79 @@ export default function AllModals({
                                     </div>
                                 </div>
 
-                                {/* Error Banner if any */}
+                                {/* Success Confirmation Banner */}
+                                {status === 'completed' && !error && !summary?.ffdxError && (
+                                    <div style={{ backgroundColor: '#f0fdf4', border: '1px solid #86efac', borderRadius: '10px', padding: '12px 16px', display: 'flex', alignItems: 'center', gap: '12px' }}>
+                                        <div style={{ fontSize: '22px' }}>✅</div>
+                                        <div>
+                                            <div style={{ fontSize: '13px', fontWeight: '800', color: '#166534' }}>
+                                                Manifest Closed & Synced Successfully
+                                            </div>
+                                            <div style={{ fontSize: '11px', color: '#15803d', marginTop: '2px' }}>
+                                                All {totalBags} bags and {totalParcels} parcels have been sealed, recorded, and confirmed on GETonline (FFDX).
+                                            </div>
+                                        </div>
+                                    </div>
+                                )}
+
+                                {/* Error / Notice Banner with Instant Retry Option */}
                                 {(error || summary?.ffdxError) && (
-                                    <div style={{ backgroundColor: '#fef2f2', border: '1px solid #fca5a5', borderRadius: '8px', padding: '10px 14px', fontSize: '12px', color: '#991b1b' }}>
-                                        <strong>GETonline Upload Notice:</strong> {error || summary?.ffdxError}
+                                    <div style={{ backgroundColor: '#fef2f2', border: '1px solid #fca5a5', borderRadius: '10px', padding: '14px 16px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                                        <div style={{ display: 'flex', alignItems: 'flex-start', gap: '10px' }}>
+                                            <div style={{ fontSize: '20px', flexShrink: 0 }}>⚠️</div>
+                                            <div>
+                                                <div style={{ fontSize: '13px', fontWeight: '800', color: '#991b1b' }}>
+                                                    GETonline Upload Notice
+                                                </div>
+                                                <div style={{ fontSize: '12px', color: '#7f1d1d', marginTop: '3px', lineHeight: '1.4' }}>
+                                                    {error || summary?.ffdxError}
+                                                </div>
+                                            </div>
+                                        </div>
+                                        <div style={{
+                                            backgroundColor: '#ffffff',
+                                            border: '1px solid #fecaca',
+                                            borderRadius: '8px',
+                                            padding: '10px 14px',
+                                            display: 'flex',
+                                            alignItems: 'center',
+                                            justifyContent: 'space-between',
+                                            flexWrap: 'wrap',
+                                            gap: '10px'
+                                        }}>
+                                            <div style={{ fontSize: '11px', color: '#6b7280', flex: 1, minWidth: '220px' }}>
+                                                The manifest is safely closed and saved in the database. You can retry the GETonline upload directly:
+                                            </div>
+                                            <button
+                                                type="button"
+                                                disabled={isRetryingFfdx}
+                                                onClick={() => handleRetryFfdxUpload(mawbRef, provider)}
+                                                style={{
+                                                    backgroundColor: isRetryingFfdx ? '#9ca3af' : '#dc2626',
+                                                    color: '#ffffff',
+                                                    border: 'none',
+                                                    borderRadius: '6px',
+                                                    padding: '8px 16px',
+                                                    fontSize: '12px',
+                                                    fontWeight: '700',
+                                                    cursor: isRetryingFfdx ? 'not-allowed' : 'pointer',
+                                                    display: 'inline-flex',
+                                                    alignItems: 'center',
+                                                    gap: '6px',
+                                                    boxShadow: '0 1px 3px rgba(0,0,0,0.1)'
+                                                }}
+                                            >
+                                                {isRetryingFfdx ? '🔄 Retrying Upload...' : '🔄 Retry Upload to GETonline'}
+                                            </button>
+                                        </div>
                                     </div>
                                 )}
 
                                 {/* Dropdown Lists for Each Bag & Each Parcel */}
-                                <div style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '8px', maxHeight: '280px', paddingRight: '4px' }}>
-                                    {bags.map((bag, bIdx) => {
+                                <div style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '8px', maxHeight: '250px', paddingRight: '4px' }}>
+                                    {bags.map((bag: any, bIdx: number) => {
                                         const isExpanded = !!expandedBags[bag.bagNumber];
-                                        const bagOkCount = bag.parcels.filter(p => p.status === 'ok').length;
+                                        const bagOkCount = (bag.parcels || []).filter((p: any) => p.status === 'ok').length;
 
                                         return (
                                             <div key={bag.bagNumber || bIdx} style={{ border: '1px solid #e2e8f0', borderRadius: '8px', overflow: 'hidden', backgroundColor: '#ffffff' }}>
@@ -642,9 +800,9 @@ export default function AllModals({
                                                 {isExpanded && (
                                                     <div style={{ backgroundColor: '#fafafa', padding: '8px 12px', display: 'flex', flexDirection: 'column', gap: '6px' }}>
                                                         {bag.parcels.length === 0 ? (
-                                                            <div style={{ fontSize: '11px', color: '#94a3b8', fontStyle: 'italic', padding: '4px' }}>Reading parcel items...</div>
+                                                             <div style={{ fontSize: '11px', color: '#94a3b8', fontStyle: 'italic', padding: '4px' }}>Reading parcel items...</div>
                                                         ) : (
-                                                            bag.parcels.map((p, pIdx) => (
+                                                            bag.parcels.map((p: any, pIdx: number) => (
                                                                 <div key={p.trackingNumber || pIdx} style={{
                                                                     display: 'flex',
                                                                     justifyContent: 'space-between',

@@ -973,7 +973,25 @@ export async function GET(request: Request) {
         };
 
         if (getMawbs) {
-            const res = await fetch(`${supabaseUrl}/rest/v1/mawb?has_service_providers_allocated=eq.true&select=mawb_reference,carrier,declared_bags,has_service_providers_allocated`, { headers, cache: 'no-store' });
+            // Determine the target date: use ?date=YYYY-MM-DD query param if provided, otherwise today
+            const dateParam = urlObj.searchParams.get('date');
+            let targetDate: Date;
+            if (dateParam && /^\d{4}-\d{2}-\d{2}$/.test(dateParam)) {
+                targetDate = new Date(dateParam + 'T00:00:00');
+            } else {
+                targetDate = new Date();
+            }
+            const dayStart = new Date(targetDate);
+            dayStart.setHours(0, 0, 0, 0);
+            const dayEnd = new Date(targetDate);
+            dayEnd.setHours(23, 59, 59, 999);
+            const dayStartISO = dayStart.toISOString();
+            const dayEndISO = dayEnd.toISOString();
+
+            const res = await fetch(
+                `${supabaseUrl}/rest/v1/mawb?has_service_providers_allocated=eq.true&fetched_at=gte.${encodeURIComponent(dayStartISO)}&fetched_at=lte.${encodeURIComponent(dayEndISO)}&select=mawb_reference,carrier,declared_bags,has_service_providers_allocated,fetched_at&order=fetched_at.desc`,
+                { headers, cache: 'no-store' }
+            );
             if (!res.ok) {
                 const errText = await res.text();
                 return NextResponse.json({ success: false, error: errText }, { status: 500 });
