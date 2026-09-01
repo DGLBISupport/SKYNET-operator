@@ -907,24 +907,7 @@ export default function WorkstationDashboard() {
 
                     if (Array.isArray(data.scannedParcels) && data.scannedParcels.length > 0) {
                         setFirstScanHistory(data.scannedParcels);
-                        const last = data.scannedParcels[0];
-                        setFirstScanCurrentScan({
-                            assignedPartner: last.assignedPartner,
-                            assignedZone: last.assignedZone,
-                            parcel: {
-                                trackingNumber: last.skynetTrackingNumber || last.trackingNumber,
-                                recipientName: last.recipientName,
-                                city: last.city,
-                                province: '',
-                                district: '',
-                                weight: last.weight || 0.1,
-                                mawbRef: firstScanMawb,
-                                senderReference: last.senderReference,
-                                _scannedVia: last.isTemuScan ? 'TEMU' : 'SKYNET',
-                                isTemuScan: last.isTemuScan,
-                                scannedMethod: last.isTemuScan ? 'TEMU' : 'SKYNET'
-                            }
-                        });
+                        setFirstScanCurrentScan(null);
                         setFirstScanStatus('READY');
                     } else {
                         setFirstScanHistory([]);
@@ -1716,6 +1699,33 @@ export default function WorkstationDashboard() {
         setFirstScanStatus('FETCHING');
         setFirstScanError('');
         setFirstScanLastScanned(barcode);
+
+        // Method 3: Instant Client-Side Pre-Match (<5ms) from pre-loaded in-memory bag parcels
+        const matchedLocal = firstScanBagParcels.find((p: any) =>
+            (p.trackingNumber && p.trackingNumber.toString().trim().toLowerCase() === cleanInput) ||
+            (p.skynetTrackingNumber && p.skynetTrackingNumber.toString().trim().toLowerCase() === cleanInput) ||
+            (p.senderReference && p.senderReference.toString().trim().toLowerCase() === cleanInput)
+        );
+
+        if (matchedLocal && matchedLocal.assignedPartner && matchedLocal.assignedPartner !== 'Unknown') {
+            const isTemu = Boolean(matchedLocal.senderReference && cleanInput === matchedLocal.senderReference.toLowerCase());
+            setFirstScanCurrentScan({
+                assignedPartner: matchedLocal.assignedPartner,
+                assignedZone: matchedLocal.assignedZone || 'Default-Zone',
+                parcel: {
+                    trackingNumber: matchedLocal.skynetTrackingNumber || matchedLocal.trackingNumber,
+                    recipientName: matchedLocal.recipientName,
+                    city: matchedLocal.city,
+                    province: '',
+                    district: '',
+                    weight: matchedLocal.weight || 0.1,
+                    mawbRef: firstScanMawb,
+                    senderReference: matchedLocal.senderReference,
+                    _scannedVia: isTemu ? 'TEMU' : 'SKYNET',
+                    isTemuScan: isTemu
+                }
+            });
+        }
 
         try {
             const response = await fetch('/api/allocate', {

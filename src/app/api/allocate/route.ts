@@ -7,13 +7,63 @@ import { normalizeWeightToGrams } from '@/lib/weightUtils';
 
 export const dynamic = 'force-dynamic';
 
-// In-memory cache for static/semi-static configuration lookups to avoid redundant database calls
+// Dynamic in-memory caches to avoid redundant database calls while reflecting database changes
 const cache = {
     providers: new Map<number, string>(),
-    cities: new Map<number, any>(),
+    cities: new Map<string, any>(),
     zones: new Map<number, string>(),
     mawbs: new Map<string, any>()
 };
+
+async function getZoneName(supabaseUrl: string, headers: any, zoneId: number): Promise<string> {
+    const numId = Number(zoneId);
+    if (cache.zones.has(numId)) {
+        return cache.zones.get(numId) || "Default-Zone";
+    }
+
+    try {
+        const zoneRes = await fetch(`${supabaseUrl}/rest/v1/zones?select=id,zone_name`, { headers });
+        if (zoneRes.ok) {
+            const zones = await zoneRes.json();
+            if (Array.isArray(zones)) {
+                zones.forEach((z: any) => {
+                    if (z.id && z.zone_name) {
+                        cache.zones.set(Number(z.id), z.zone_name);
+                    }
+                });
+            }
+        }
+    } catch (e) {
+        console.error("Failed to dynamically fetch zones from database:", e);
+    }
+
+    return cache.zones.get(numId) || "Default-Zone";
+}
+
+async function getProviderName(supabaseUrl: string, headers: any, spId: number): Promise<string> {
+    const numId = Number(spId);
+    if (cache.providers.has(numId)) {
+        return cache.providers.get(numId) || "Unknown";
+    }
+
+    try {
+        const spRes = await fetch(`${supabaseUrl}/rest/v1/service_providers?select=id,name`, { headers });
+        if (spRes.ok) {
+            const providers = await spRes.json();
+            if (Array.isArray(providers)) {
+                providers.forEach((p: any) => {
+                    if (p.id && p.name) {
+                        cache.providers.set(Number(p.id), p.name);
+                    }
+                });
+            }
+        }
+    } catch (e) {
+        console.error("Failed to dynamically fetch service providers from database:", e);
+    }
+
+    return cache.providers.get(numId) || "Unknown";
+}
 
 const cleanAddress = (...parts: (string | null | undefined)[]) => {
     return parts.filter(p => p && p.trim() !== "").map(p => p.trim()).join(", ");
@@ -29,78 +79,58 @@ async function resolveZoneAndPartner(
     const mappedCityId = allocation?.mapped_city;
     let cityName = shipment.consignee_location_name || "";
     let districtName = shipment.consignee_address_3 || "";
-    const shipmentRef = shipment.reference_number;
 
-    const cityPromise = mappedCityId
-        ? (cache.cities.has(mappedCityId)
-            ? Promise.resolve(cache.cities.get(mappedCityId))
-            : fetch(`${supabaseUrl}/rest/v1/district_city_mapping?id=eq.${mappedCityId}`, { headers })
-                .then(res => res.json())
-                .then(data => {
-                    const val = data && data[0];
-                    if (val) cache.cities.set(mappedCityId, val);
-                    return val;
-                }))
-        : (cityName
-            ? fetch(`${supabaseUrl}/rest/v1/district_city_mapping?city=ilike.${cityName}`, { headers })
-                .then(res => res.json())
-                .then(data => {
-                    const val = data && data[0];
-                    return val;
-                })
-            : Promise.resolve(null));
-
-    const mappedCity = await cityPromise;
+    let mappedCity: any = null;
+    if (mappedCityId) {
+        const cityKey = `id:${mappedCityId}`;
+        if (cache.cities.has(cityKey)) {
+            mappedCity = cache.cities.get(cityKey);
+        } else {
+            try {
+                const res = await fetch(`${supabaseUrl}/rest/v1/district_city_mapping?id=eq.${mappedCityId}`, { headers });
+                const data = await res.json();
+                mappedCity = data && data[0];
+                if (mappedCity) cache.cities.set(cityKey, mappedCity);
+            } catch (e) {}
+        }
+    } else if (cityName) {
+        const cityKey = `name:${cityName.toLowerCase().trim()}`;
+        if (cache.cities.has(cityKey)) {
+            mappedCity = cache.cities.get(cityKey);
+        } else {
+            try {
+                const res = await fetch(`${supabaseUrl}/rest/v1/district_city_mapping?city=ilike.${encodeURIComponent(cityName)}`, { headers });
+                const data = await res.json();
+                mappedCity = data && data[0];
+                if (mappedCity) cache.cities.set(cityKey, mappedCity);
+            } catch (e) {}
+        }
+    }
 
     if (mappedCity) {
         cityName = mappedCity.city || cityName;
         districtName = mappedCity.area_name || districtName;
     }
 
-    // Resolve zone using cache fallback
+    // Resolve zone dynamically from database (cached dynamically in memory)
     let assignedZone = "Default-Zone";
     if (mappedCity && mappedCity.zone) {
-        const zoneId = mappedCity.zone;
-        if (cache.zones.has(zoneId)) {
-            assignedZone = cache.zones.get(zoneId)!;
-        } else {
-            const zoneRes = await fetch(`${supabaseUrl}/rest/v1/zones?id=eq.${zoneId}`, { headers });
-            const zones = await zoneRes.json();
-            if (zones && zones[0]) {
-                assignedZone = zones[0].zone_name || "Default-Zone";
-                cache.zones.set(zoneId, assignedZone);
-            }
-        }
+        assignedZone = await getZoneName(supabaseUrl, headers, Number(mappedCity.zone));
     }
 
     if (assignedZone === 'Zone-E02') {
         assignedZone = 'Zone C';
     }
 
-    // Resolve partner
+    // Resolve partner dynamically from database (cached dynamically in memory)
     let assignedPartner = "Unknown";
     if (spId) {
-        const numId = Number(spId);
-        if (numId === 1) {
-            assignedPartner = 'PickMe';
-        } else if (numId === 2) {
-            assignedPartner = 'Domex';
-        } else if (numId === 3) {
-            assignedPartner = 'SITREK';
-        } else if (cache.providers.has(numId)) {
-            assignedPartner = cache.providers.get(numId)!;
-        } else {
-            const spRes = await fetch(`${supabaseUrl}/rest/v1/service_providers?id=eq.${spId}`, { headers });
-            const providers = await spRes.json();
-            if (providers && providers[0]) {
-                assignedPartner = providers[0].name || "Unknown";
-                cache.providers.set(numId, assignedPartner);
-            }
-        }
-        if (assignedPartner.toLowerCase().includes('pickme')) assignedPartner = 'PickMe';
-        else if (assignedPartner.toLowerCase().includes('domex')) assignedPartner = 'Domex';
-        else if (assignedPartner.toLowerCase().includes('sitrek')) assignedPartner = 'SITREK';
-        else if (assignedPartner.toLowerCase().includes('pronto')) assignedPartner = 'Pronto';
+        const rawName = await getProviderName(supabaseUrl, headers, Number(spId));
+        assignedPartner = rawName;
+        if (rawName.toLowerCase().includes('pickme')) assignedPartner = 'PickMe';
+        else if (rawName.toLowerCase().includes('domex')) assignedPartner = 'Domex';
+        else if (rawName.toLowerCase().includes('sitrek')) assignedPartner = 'SITREK';
+        else if (rawName.toLowerCase().includes('pronto')) assignedPartner = 'Pronto';
     }
 
     return { assignedZone, assignedPartner, mappedCity };
@@ -340,53 +370,31 @@ export async function POST(request: Request) {
         let shipmentRef: string = cleanBar;
         const isNumeric = /^\d+$/.test(cleanBar);
         const activeMawb = mawbRef || targetMawb || '';
+        const encodedBar = encodeURIComponent(cleanBar);
 
-        if (isNumeric) {
-            // First try matching in activeMawb if provided
-            if (activeMawb) {
-                const mawbSearchRes = await fetch(`${supabaseUrl}/rest/v1/shipments?mawb_reference=ilike.${encodeURIComponent(activeMawb.trim())}&or=(reference_number.eq.${encodeURIComponent(cleanBar)},sender_reference.eq.${encodeURIComponent(cleanBar)})`, { headers });
-                if (mawbSearchRes.ok) {
-                    const shipments = await mawbSearchRes.json();
-                    if (shipments && shipments[0]) {
-                        resolvedShipment = shipments[0];
-                        shipmentRef = String(resolvedShipment.reference_number);
-                    }
-                }
-            }
-            if (!resolvedShipment) {
-                // Search across all MAWBs
-                const searchRes = await fetch(`${supabaseUrl}/rest/v1/shipments?or=(reference_number.eq.${encodeURIComponent(cleanBar)},sender_reference.eq.${encodeURIComponent(cleanBar)})`, { headers });
-                if (searchRes.ok) {
-                    const shipments = await searchRes.json();
-                    if (shipments && shipments[0]) {
-                        resolvedShipment = shipments[0];
-                        shipmentRef = String(resolvedShipment.reference_number);
-                    }
-                }
-            }
+        // Concurrently query shipments and service_provider_allocation in 1 parallel network roundtrip
+        const [shipRes, initialSpaRes] = await Promise.all([
+            fetch(`${supabaseUrl}/rest/v1/shipments?or=(reference_number.eq.${encodedBar},sender_reference.eq.${encodedBar})&limit=5`, { headers }),
+            fetch(`${supabaseUrl}/rest/v1/service_provider_allocation?shipment_ref=eq.${encodedBar}&limit=1`, { headers })
+        ]);
+
+        let initialAllocation: any = null;
+        if (initialSpaRes.ok) {
+            const allocs = await initialSpaRes.json();
+            initialAllocation = allocs && allocs[0];
         }
 
-        if (!resolvedShipment) {
-            // Find by sender_reference (Temu barcode)
-            if (activeMawb) {
-                const mawbTemuRes = await fetch(`${supabaseUrl}/rest/v1/shipments?mawb_reference=ilike.${encodeURIComponent(activeMawb.trim())}&sender_reference=eq.${encodeURIComponent(cleanBar)}`, { headers });
-                if (mawbTemuRes.ok) {
-                    const shipments = await mawbTemuRes.json();
-                    if (shipments && shipments[0]) {
-                        resolvedShipment = shipments[0];
-                        shipmentRef = String(resolvedShipment.reference_number);
-                    }
+        if (shipRes.ok) {
+            const shipments = await shipRes.json();
+            if (Array.isArray(shipments) && shipments.length > 0) {
+                if (activeMawb) {
+                    resolvedShipment = shipments.find((s: any) =>
+                        (s.mawb_reference || s.mawb_ref || '').trim().toLowerCase() === activeMawb.trim().toLowerCase()
+                    ) || shipments[0];
+                } else {
+                    resolvedShipment = shipments[0];
                 }
-            }
-            if (!resolvedShipment) {
-                const temuRes = await fetch(`${supabaseUrl}/rest/v1/shipments?sender_reference=eq.${encodeURIComponent(cleanBar)}`, { headers });
-                if (temuRes.ok) {
-                    const shipments = await temuRes.json();
-                    if (shipments && shipments[0]) {
-                        resolvedShipment = shipments[0];
-                        shipmentRef = String(resolvedShipment.reference_number);
-                    }
-                }
+                shipmentRef = String(resolvedShipment.reference_number);
             }
         }
 
@@ -419,11 +427,13 @@ export async function POST(request: Request) {
             }
 
             // Read-only allocation record lookup
-            const spaRes = await fetch(`${supabaseUrl}/rest/v1/service_provider_allocation?shipment_ref=eq.${encodeURIComponent(shipmentRef)}`, { headers });
-            let allocation = null;
-            if (spaRes.ok) {
-                const allocations = await spaRes.json();
-                allocation = allocations && allocations[0];
+            let allocation = initialAllocation;
+            if (!allocation) {
+                const spaRes = await fetch(`${supabaseUrl}/rest/v1/service_provider_allocation?shipment_ref=eq.${encodeURIComponent(shipmentRef)}`, { headers });
+                if (spaRes.ok) {
+                    const allocations = await spaRes.json();
+                    allocation = allocations && allocations[0];
+                }
             }
 
             // Check if 1st scan was performed (informational only, does NOT mutate DB)
@@ -489,13 +499,7 @@ export async function POST(request: Request) {
         // STAGE 1 — BOX UNSEALING (FIRST SCAN)
         // ═══════════════════════════════════════════════════════
         if (stage === 'first') {
-            // 1. Fetch shipment details to check if barcode is valid
             let shipment = resolvedShipment;
-            if (!shipment) {
-                const shipRes = await fetch(`${supabaseUrl}/rest/v1/shipments?reference_number=eq.${shipmentRef}`, { headers });
-                const shipments = await shipRes.json();
-                shipment = shipments && shipments[0];
-            }
 
             // Handle registerExtra if shipment is NOT found
             let isNewShipment = false;
@@ -561,7 +565,7 @@ export async function POST(request: Request) {
                 // Quick guard: if this bag has already been unsealed, block further first-scan attempts
                 try {
                     const mawbFilter = mawbRef ? `mawb_ref=eq.${encodeURIComponent(mawbRef)}&` : '';
-                    const checkUnsealRes = await fetch(`${supabaseUrl}/rest/v1/bag_unsealing?${mawbFilter}bag_number=eq.${encodeURIComponent(bagNumber)}`, { headers });
+                    const checkUnsealRes = await fetch(`${supabaseUrl}/rest/v1/bag_unsealing?${mawbFilter}bag_number=eq.${encodeURIComponent(bagNumber)}&select=unsealed,scanned_parcels&limit=1`, { headers });
                     if (checkUnsealRes.ok) {
                         const unsealList = await checkUnsealRes.json();
                         const unsealRec = unsealList && unsealList[0];
@@ -625,16 +629,18 @@ export async function POST(request: Request) {
                 }
             }
 
-            // Scan status is tracked entirely in service_provider_allocation — no shipments write needed here.
-
-            // 2. Fetch allocation record if present (Read-only lookup from service_provider_allocation)
-            const spaRes = await fetch(`${supabaseUrl}/rest/v1/service_provider_allocation?shipment_ref=eq.${shipmentRef}`, { headers });
-            let finalAllocation = null;
-            if (spaRes.ok) {
-                const allocations = await spaRes.json();
-                finalAllocation = allocations && allocations[0];
+            // Allocation lookup: reuse initialAllocation if available, else fetch by canonical shipmentRef
+            let finalAllocation = initialAllocation;
+            if (!finalAllocation) {
+                try {
+                    const spaRes = await fetch(`${supabaseUrl}/rest/v1/service_provider_allocation?shipment_ref=eq.${encodeURIComponent(shipmentRef)}&limit=1`, { headers });
+                    if (spaRes.ok) {
+                        const allocations = await spaRes.json();
+                        finalAllocation = allocations && allocations[0];
+                    }
+                } catch (e) {}
             }
-            
+
             const finalMawb = mawbRef || shipment.mawb_ref || '';
 
             // Mark 1st scan done on service_provider_allocation (source of truth for scan status)
@@ -668,7 +674,7 @@ export async function POST(request: Request) {
                 uploadToFfdx(shipmentRef, supabaseUrl, headers, null, eventIdToSend, remarksToSend);
             }
 
-            // Resolve zone and partner using helper
+            // Resolve zone and partner using helper (sub-millisecond lookup from cache)
             const { assignedZone, assignedPartner } = await resolveZoneAndPartner(supabaseUrl, headers, shipment, finalAllocation);
 
             const skynetData: SkyNetParcelData = {
@@ -696,20 +702,31 @@ export async function POST(request: Request) {
         // ═══════════════════════════════════════════════════════
         // STAGE 2 — LMD ALLOCATION (SECOND SCAN)
         // ═══════════════════════════════════════════════════════
-        // Always fetch FRESH shipment data from DB for Stage 2 — do NOT reuse
-        // resolvedShipment which was fetched before any Stage 1 update ran.
-        const [spaRes, freshShipRes, lmdBagItemRes] = await Promise.all([
-            fetch(`${supabaseUrl}/rest/v1/service_provider_allocation?shipment_ref=eq.${shipmentRef}`, { headers }),
-            fetch(`${supabaseUrl}/rest/v1/shipments?reference_number=eq.${encodeURIComponent(shipmentRef)}`, { headers }),
-            fetch(`${supabaseUrl}/rest/v1/outbound_lmd_bag_items?shipment_ref=eq.${encodeURIComponent(shipmentRef)}`, { headers })
+        let shipment = resolvedShipment;
+        let allocation = initialAllocation;
+
+        // Parallelize missing lookups if needed
+        const [freshShipRes, freshSpaRes, lmdBagItemRes] = await Promise.all([
+            !shipment ? fetch(`${supabaseUrl}/rest/v1/shipments?reference_number=eq.${encodeURIComponent(shipmentRef)}`, { headers }) : Promise.resolve(null),
+            !allocation ? fetch(`${supabaseUrl}/rest/v1/service_provider_allocation?shipment_ref=eq.${encodeURIComponent(shipmentRef)}`, { headers }) : Promise.resolve(null),
+            fetch(`${supabaseUrl}/rest/v1/outbound_lmd_bag_items?shipment_ref=eq.${encodeURIComponent(shipmentRef)}&select=bag_number&limit=1`, { headers })
         ]);
 
-        const allocations = await spaRes.json();
-        const freshShipData = await freshShipRes.json();
-        const lmdBagItems = await lmdBagItemRes.json();
-        // Use fresh DB row for shipment details (scan status is checked via allocation below)
-        const shipment = (freshShipData && freshShipData[0]) || resolvedShipment;
-        const existingLmdBag = Array.isArray(lmdBagItems) && lmdBagItems.length > 0 ? lmdBagItems[0].bag_number : null;
+        if (!shipment && freshShipRes) {
+            const freshShipData = await freshShipRes.json();
+            shipment = freshShipData && freshShipData[0];
+        }
+
+        if (!allocation && freshSpaRes) {
+            const freshSpaData = await freshSpaRes.json();
+            allocation = freshSpaData && freshSpaData[0];
+        }
+
+        let existingLmdBag: string | null = null;
+        if (lmdBagItemRes) {
+            const lmdBagItems = await lmdBagItemRes.json();
+            existingLmdBag = Array.isArray(lmdBagItems) && lmdBagItems.length > 0 ? lmdBagItems[0].bag_number : null;
+        }
 
         if (!shipment) {
             return NextResponse.json({
@@ -718,12 +735,10 @@ export async function POST(request: Request) {
             }, { status: 404 });
         }
 
-        let allocation = allocations && allocations[0];
         let missedFirstScan = false;
         let firstScanConfirmed = false;
 
         // Parcel-level 1st scan check — read from service_provider_allocation (source of truth).
-        // allocation.unsealed is set to true during Stage 1 (Box Unsealing).
         firstScanConfirmed = Boolean(
             allocation?.unsealed === true ||
             allocation?.scan_status === '1ST_SCAN_DONE' ||
@@ -733,100 +748,11 @@ export async function POST(request: Request) {
         // Flag parcels that bypassed 1st scan
         missedFirstScan = !firstScanConfirmed;
 
-        // 2. Concurrently resolve details (parallelized step 2 with cache fallbacks)
-        const spId = allocation?.service_provider;
-        const mappedCityId = allocation?.mapped_city;
-        let cityName = shipment.consignee_location_name || "";
-        let districtName = shipment.consignee_address_3 || "";
+        // Fast Zone & Partner resolution (sub-millisecond via dynamic memory cache)
+        const { assignedZone, assignedPartner, mappedCity } = await resolveZoneAndPartner(supabaseUrl, headers, shipment, allocation);
+        const cityName = mappedCity?.city || shipment.consignee_location_name || "";
+        const districtName = mappedCity?.area_name || shipment.consignee_address_3 || "";
         const mawbRefVal = allocation?.mawb_ref || shipment.mawb_reference || shipment.mawb_ref;
-
-        const cityPromise = mappedCityId
-            ? (cache.cities.has(mappedCityId)
-                ? Promise.resolve(cache.cities.get(mappedCityId))
-                : fetch(`${supabaseUrl}/rest/v1/district_city_mapping?id=eq.${mappedCityId}`, { headers })
-                    .then(res => res.json())
-                    .then(data => {
-                        const val = data && data[0];
-                        if (val) cache.cities.set(mappedCityId, val);
-                        return val;
-                    }))
-            : (cityName
-                ? fetch(`${supabaseUrl}/rest/v1/district_city_mapping?city=ilike.${cityName}`, { headers })
-                    .then(res => res.json())
-                    .then(data => {
-                        const val = data && data[0];
-                        return val;
-                    })
-                : Promise.resolve(null));
-
-        const mawbPromise = mawbRefVal
-            ? (cache.mawbs.has(mawbRefVal)
-                ? Promise.resolve(cache.mawbs.get(mawbRefVal))
-                : fetch(`${supabaseUrl}/rest/v1/mawb?mawb_reference=eq.${mawbRefVal}`, { headers })
-                    .then(res => res.json())
-                    .then(data => {
-                        const val = data && data[0];
-                        if (val) cache.mawbs.set(mawbRefVal, val);
-                        return val;
-                    }))
-            : Promise.resolve(null);
-
-        const [mappedCity, mawbDetails] = await Promise.all([
-            cityPromise,
-            mawbPromise
-        ]);
-
-        if (mappedCity) {
-            cityName = mappedCity.city || cityName;
-            districtName = mappedCity.area_name || districtName;
-        }
-
-        // 3. Resolve zone using cache fallback (parallelized step 3)
-        let assignedZone = "Default-Zone";
-        if (mappedCity && mappedCity.zone) {
-            const zoneId = mappedCity.zone;
-            if (cache.zones.has(zoneId)) {
-                assignedZone = cache.zones.get(zoneId)!;
-            } else {
-                const zoneRes = await fetch(`${supabaseUrl}/rest/v1/zones?id=eq.${zoneId}`, { headers });
-                const zones = await zoneRes.json();
-                if (zones && zones[0]) {
-                    assignedZone = zones[0].zone_name || "Default-Zone";
-                    cache.zones.set(zoneId, assignedZone);
-                }
-            }
-        }
-
-        if (assignedZone === 'Zone-E02') {
-            assignedZone = 'Zone C';
-        }
-
-        // Resolve partner strictly from service_provider_allocation table (No dynamic allocation)
-        let assignedPartner = "Unknown";
-
-        if (spId) {
-            const numId = Number(spId);
-            if (numId === 1) {
-                assignedPartner = 'PickMe';
-            } else if (numId === 2) {
-                assignedPartner = 'Domex';
-            } else if (numId === 3) {
-                assignedPartner = 'SITREK';
-            } else if (cache.providers.has(numId)) {
-                assignedPartner = cache.providers.get(numId)!;
-            } else {
-                const spRes = await fetch(`${supabaseUrl}/rest/v1/service_providers?id=eq.${spId}`, { headers });
-                const providers = await spRes.json();
-                if (providers && providers[0]) {
-                    assignedPartner = providers[0].name || "Unknown";
-                    cache.providers.set(numId, assignedPartner);
-                }
-            }
-            if (assignedPartner.toLowerCase().includes('pickme')) assignedPartner = 'PickMe';
-            else if (assignedPartner.toLowerCase().includes('domex')) assignedPartner = 'Domex';
-            else if (assignedPartner.toLowerCase().includes('sitrek')) assignedPartner = 'SITREK';
-            else if (assignedPartner.toLowerCase().includes('pronto')) assignedPartner = 'Pronto';
-        }
 
         const initialManifestRef = allocation?.mawb_ref || shipment.mawb_reference || shipment.mawb_ref || mawbRefVal || "Initial Manifest";
 
@@ -863,9 +789,9 @@ export async function POST(request: Request) {
             inboundBag: shipment.bag_number || undefined,
             initialBag: shipment.bag_number || undefined,
             bagNumber: shipment.bag_number || undefined,
-            mawbCarrier: mawbDetails ? mawbDetails.carrier : undefined,
-            mawbFlight: mawbDetails ? mawbDetails.travel_id : undefined,
-            mawbBags: mawbDetails ? mawbDetails.declared_bags : undefined,
+            mawbCarrier: shipment.carrier || undefined,
+            mawbFlight: shipment.travel_id || undefined,
+            mawbBags: shipment.declared_bags || undefined,
             serviceType: shipment.service_type || undefined,
             businessType: shipment.business_type || undefined,
             senderReference: shipment.sender_reference || undefined,

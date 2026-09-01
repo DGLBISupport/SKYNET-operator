@@ -699,39 +699,37 @@ export default function SecondScanTab({
                                                         Zone: <span style={{ fontWeight: '800', marginLeft: '4px' }}>{validationCard.assignedZone || 'Default-Zone'}</span>
                                                     </div> */}
 
-                                                    {/* Validation Result Badge */}
-                                                    <div style={{
-                                                        display: 'inline-flex',
-                                                        alignItems: 'center',
-                                                        justifyContent: 'center',
-                                                        gap: '6px',
-                                                        fontSize: '10px',
-                                                        fontWeight: '800',
-                                                        color: validationCard.assignedPartner === 'Domex' || validationCard.assignedPartner === 'SITREK' || validationCard.assignedPartner === 'Sitrek' || validationCard.assignedPartner === 'Pronto' ? '#ffffff' : '#000000',
-                                                        textAlign: 'center'
-                                                    }}>
-                                                        <span style={{
-                                                            color: validationCard.assignedPartner === 'Domex' || validationCard.assignedPartner === 'SITREK' || validationCard.assignedPartner === 'Sitrek' || validationCard.assignedPartner === 'Pronto'
-                                                                ? '#ffffff'
-                                                                : '#121414ff'
-                                                        }}></span>
-                                                        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '4px' }}>
-                                                            <div>✓ CORRECT — Allocated to Bag <strong>{validationCard.bagNumber}</strong></div>
-                                                            {validationCard.parcel?.initialManifest && (
-                                                                <div style={{
-                                                                    fontSize: '11px',
-                                                                    fontWeight: '600',
-                                                                    backgroundColor: 'rgba(255,255,255,0.2)',
-                                                                    padding: '3px 10px',
-                                                                    borderRadius: '4px',
-                                                                    marginTop: '4px',
-                                                                    color: validationCard.assignedPartner === 'Domex' || validationCard.assignedPartner === 'SITREK' || validationCard.assignedPartner === 'Sitrek' || validationCard.assignedPartner === 'Pronto' ? '#ffffff' : '#111827'
-                                                                }}>
-                                                                    Initial Manifest: <strong>"{validationCard.parcel.initialManifest}"</strong> → {validationCard.bagNumber} ({selectedSecondScanMawb})
-                                                                </div>
-                                                            )}
-                                                        </div>
-                                                    </div>
+                                                    {/* Large Shipment Number (no background) */}
+                                                    {(() => {
+                                                        const isDarkPartner = validationCard.assignedPartner === 'Domex' ||
+                                                            validationCard.assignedPartner === 'SITREK' ||
+                                                            validationCard.assignedPartner === 'Sitrek' ||
+                                                            validationCard.assignedPartner === 'Pronto';
+
+                                                        const shipmentNumber = validationCard.trackingNumber ||
+                                                            validationCard.parcel?.trackingNumber ||
+                                                            validationCard.parcel?.skynetTrackingNumber ||
+                                                            validationCard.parcel?.reference_number ||
+                                                            validationCard.parcel?.senderReference || '';
+
+                                                        if (!shipmentNumber) return null;
+
+                                                        return (
+                                                            <div style={{
+                                                                fontSize: '30px',
+                                                                fontWeight: '900',
+                                                                letterSpacing: '1.5px',
+                                                                color: isDarkPartner ? '#ffffff' : '#000000',
+                                                                fontFamily: 'monospace, sans-serif',
+                                                                textAlign: 'center',
+                                                                wordBreak: 'break-all',
+                                                                marginTop: '4px',
+                                                                textShadow: isDarkPartner ? '0 2px 4px rgba(0,0,0,0.35)' : 'none'
+                                                            }}>
+                                                                {shipmentNumber}
+                                                            </div>
+                                                        );
+                                                    })()}
                                                 </div>
                                             </div>
                                         ) : (
@@ -777,6 +775,8 @@ export default function SecondScanTab({
                                                 <tr key={idx} style={{ borderBottom: '1px solid #f3f4f6' }}>
                                                     <td style={{ padding: '8px', fontWeight: '600', color: '#111827' }}>
                                                         {(() => {
+                                                            const refNum = (parcel.reference_number || parcel.shipment_ref || '').toString().trim();
+                                                            if (refNum) return refNum;
                                                             if (parcel.displayTrackingNumber) {
                                                                 return parcel.displayTrackingNumber.replace(/SKYT-?/gi, '').replace(/\/\s*$/, '').trim();
                                                             }

@@ -442,87 +442,119 @@ export default function FirstScanTab({
                             </div>
 
                             {/* ASSIGNED PARTNER Card (only shown after a barcode scan if allocated to a valid partner) */}
-                            {firstScanCurrentScan && firstScanCurrentScan.assignedPartner && firstScanCurrentScan.assignedPartner !== 'Unknown' && (
-                                <div style={{
-                                    backgroundColor: firstScanCurrentScan.assignedPartner === 'Domex'
-                                        ? '#7b0f1a'
-                                        : firstScanCurrentScan.assignedPartner === 'SITREK' || firstScanCurrentScan.assignedPartner === 'Sitrek'
-                                            ? '#0f2b6e'
-                                            : firstScanCurrentScan.assignedPartner === 'Pronto'
-                                                ? '#ea580c'
-                                                : '#ffcc00',
-                                    borderRadius: '16px',
-                                    padding: '24px 20px',
-                                    boxShadow: '0 4px 12px rgba(0,0,0,0.06)',
-                                    display: 'flex',
-                                    flexDirection: 'column',
-                                    alignItems: 'center',
-                                    justifyContent: 'center',
-                                    transition: 'all 0.2s ease-in-out'
-                                }}>
-                                    <div style={{
-                                        fontSize: '12px',
-                                        fontWeight: '800',
-                                        color: firstScanCurrentScan.assignedPartner === 'Domex' || firstScanCurrentScan.assignedPartner === 'SITREK' || firstScanCurrentScan.assignedPartner === 'Sitrek' || firstScanCurrentScan.assignedPartner === 'Pronto' ? '#ffffff' : '#000000',
-                                        textTransform: 'uppercase',
-                                        letterSpacing: '0.8px',
-                                        marginBottom: '16px',
-                                        textAlign: 'center'
-                                    }}>
-                                        ASSIGNED PARTNER
-                                    </div>
+                            {firstScanCurrentScan && firstScanCurrentScan.assignedPartner && firstScanCurrentScan.assignedPartner !== 'Unknown' && (() => {
+                                const isDarkPartner = firstScanCurrentScan.assignedPartner === 'Domex' ||
+                                    firstScanCurrentScan.assignedPartner === 'SITREK' ||
+                                    firstScanCurrentScan.assignedPartner === 'Sitrek' ||
+                                    firstScanCurrentScan.assignedPartner === 'Pronto';
 
-                                    {/* Center White Card for Partner Logo */}
+                                const shipmentNumber = firstScanCurrentScan.parcel?.trackingNumber ||
+                                    firstScanCurrentScan.parcel?.skynetTrackingNumber ||
+                                    firstScanCurrentScan.parcel?.reference_number ||
+                                    firstScanCurrentScan.parcel?.tracking_number ||
+                                    firstScanCurrentScan.trackingNumber ||
+                                    (firstScanHistory && firstScanHistory.length > 0 ? (firstScanHistory[0].skynetTrackingNumber || firstScanHistory[0].trackingNumber) : '');
+
+                                return (
                                     <div style={{
-                                        backgroundColor: '#ffffff',
+                                        backgroundColor: firstScanCurrentScan.assignedPartner === 'Domex'
+                                            ? '#7b0f1a'
+                                            : firstScanCurrentScan.assignedPartner === 'SITREK' || firstScanCurrentScan.assignedPartner === 'Sitrek'
+                                                ? '#0f2b6e'
+                                                : firstScanCurrentScan.assignedPartner === 'Pronto'
+                                                    ? '#ea580c'
+                                                    : '#ffcc00',
                                         borderRadius: '16px',
-                                        padding: '16px 28px',
-                                        width: '100%',
-                                        maxWidth: '300px',
-                                        height: '130px',
+                                        padding: '24px 20px',
+                                        boxShadow: '0 4px 12px rgba(0,0,0,0.06)',
                                         display: 'flex',
+                                        flexDirection: 'column',
                                         alignItems: 'center',
                                         justifyContent: 'center',
-                                        boxShadow: '0 4px 12px rgba(0,0,0,0.08)',
-                                        marginBottom: '16px',
-                                        boxSizing: 'border-box'
+                                        transition: 'all 0.2s ease-in-out'
                                     }}>
-                                        {firstScanCurrentScan.assignedPartner === 'Domex' ? (
-                                            <picture style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: '100%', height: '100%' }}>
-                                                <source srcSet="/domex_logo.webp" type="image/webp" />
-                                                <img src="/domex_logo.png" alt="Domex" decoding="async" fetchPriority="high" style={{ maxHeight: '95px', maxWidth: '90%', objectFit: 'contain' }} />
-                                            </picture>
-                                        ) : firstScanCurrentScan.assignedPartner === 'SITREK' || firstScanCurrentScan.assignedPartner === 'Sitrek' ? (
-                                            <picture style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: '100%', height: '100%' }}>
-                                                <source srcSet="/sitrek_logo.webp" type="image/webp" />
-                                                <img src="/sitrek_logo.png" alt="SITREK" decoding="async" fetchPriority="high" style={{ maxHeight: '95px', maxWidth: '90%', objectFit: 'contain' }} />
-                                            </picture>
-                                        ) : firstScanCurrentScan.assignedPartner === 'Pronto' ? (
-                                            <span style={{ color: '#ea580c', fontWeight: '900', fontSize: '34px', letterSpacing: '1px' }}>PRONTO</span>
-                                        ) : (
-                                            <picture style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: '100%', height: '100%' }}>
-                                                <source srcSet="/pick_me_logo.webp" type="image/webp" />
-                                                <img src="/pick_me_logo.png" alt="PickMe" decoding="async" fetchPriority="high" style={{ maxHeight: '95px', maxWidth: '90%', objectFit: 'contain' }} />
-                                            </picture>
-                                        )}
-                                    </div>
+                                        <div style={{
+                                            fontSize: '12px',
+                                            fontWeight: '800',
+                                            color: isDarkPartner ? '#ffffff' : '#000000',
+                                            textTransform: 'uppercase',
+                                            letterSpacing: '0.8px',
+                                            marginBottom: '16px',
+                                            textAlign: 'center'
+                                        }}>
+                                            ASSIGNED PARTNER
+                                        </div>
 
-                                    {/* Zone Pill Badge */}
-                                    <div style={{
-                                        display: 'inline-flex',
-                                        alignItems: 'center',
-                                        justifyContent: 'center',
-                                        backgroundColor: 'rgba(0, 0, 0, 0.04)',
-                                        border: '1px solid rgba(0, 0, 0, 0.2)',
-                                        borderRadius: '20px',
-                                        padding: '6px 20px',
-                                        fontSize: '13.5px',
-                                        color: firstScanCurrentScan.assignedPartner === 'Domex' || firstScanCurrentScan.assignedPartner === 'SITREK' || firstScanCurrentScan.assignedPartner === 'Sitrek' || firstScanCurrentScan.assignedPartner === 'Pronto' ? '#ffffff' : '#000000'
-                                    }}>
-                                        Zone: <span style={{ fontWeight: '800', marginLeft: '4px' }}>{firstScanCurrentScan.assignedZone || 'Default-Zone'}</span>
+                                        {/* Center White Card for Partner Logo */}
+                                        <div style={{
+                                            backgroundColor: '#ffffff',
+                                            borderRadius: '16px',
+                                            padding: '16px 28px',
+                                            width: '100%',
+                                            maxWidth: '300px',
+                                            height: '130px',
+                                            display: 'flex',
+                                            alignItems: 'center',
+                                            justifyContent: 'center',
+                                            boxShadow: '0 4px 12px rgba(0,0,0,0.08)',
+                                            marginBottom: '14px',
+                                            boxSizing: 'border-box'
+                                        }}>
+                                            {firstScanCurrentScan.assignedPartner === 'Domex' ? (
+                                                <picture style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: '100%', height: '100%' }}>
+                                                    <source srcSet="/domex_logo.webp" type="image/webp" />
+                                                    <img src="/domex_logo.png" alt="Domex" decoding="async" fetchPriority="high" style={{ maxHeight: '95px', maxWidth: '90%', objectFit: 'contain' }} />
+                                                </picture>
+                                            ) : firstScanCurrentScan.assignedPartner === 'SITREK' || firstScanCurrentScan.assignedPartner === 'Sitrek' ? (
+                                                <picture style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: '100%', height: '100%' }}>
+                                                    <source srcSet="/sitrek_logo.webp" type="image/webp" />
+                                                    <img src="/sitrek_logo.png" alt="SITREK" decoding="async" fetchPriority="high" style={{ maxHeight: '95px', maxWidth: '90%', objectFit: 'contain' }} />
+                                                </picture>
+                                            ) : firstScanCurrentScan.assignedPartner === 'Pronto' ? (
+                                                <span style={{ color: '#ea580c', fontWeight: '900', fontSize: '34px', letterSpacing: '1px' }}>PRONTO</span>
+                                            ) : (
+                                                <picture style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: '100%', height: '100%' }}>
+                                                    <source srcSet="/pick_me_logo.webp" type="image/webp" />
+                                                    <img src="/pick_me_logo.png" alt="PickMe" decoding="async" fetchPriority="high" style={{ maxHeight: '95px', maxWidth: '90%', objectFit: 'contain' }} />
+                                                </picture>
+                                            )}
+                                        </div>
+
+                                        {/* Large Shipment Number (no background) */}
+                                        {shipmentNumber && (
+                                            <div style={{
+                                                fontSize: '30px',
+                                                fontWeight: '900',
+                                                letterSpacing: '1.5px',
+                                                color: isDarkPartner ? '#ffffff' : '#000000',
+                                                fontFamily: 'monospace, sans-serif',
+                                                textAlign: 'center',
+                                                wordBreak: 'break-all',
+                                                marginBottom: '14px',
+                                                marginTop: '2px',
+                                                textShadow: isDarkPartner ? '0 2px 4px rgba(0,0,0,0.35)' : 'none'
+                                            }}>
+                                                {shipmentNumber}
+                                            </div>
+                                        )}
+
+                                        {/* Zone Pill Badge */}
+                                        <div style={{
+                                            display: 'inline-flex',
+                                            alignItems: 'center',
+                                            justifyContent: 'center',
+                                            backgroundColor: isDarkPartner ? 'rgba(255, 255, 255, 0.15)' : 'rgba(0, 0, 0, 0.08)',
+                                            border: isDarkPartner ? '1px solid rgba(255, 255, 255, 0.25)' : '1px solid rgba(0, 0, 0, 0.15)',
+                                            borderRadius: '20px',
+                                            padding: '6px 20px',
+                                            fontSize: '14px',
+                                            color: isDarkPartner ? '#ffffff' : '#000000'
+                                        }}>
+                                            Zone: <span style={{ fontWeight: '800', marginLeft: '6px', fontSize: '16px' }}>{firstScanCurrentScan.assignedZone || 'Default-Zone'}</span>
+                                        </div>
                                     </div>
-                                </div>
-                            )}
+                                );
+                            })()}
 
                             {/* 2 Column Grid: Scanned Parcels Table (Left) and MAWB Bags Progress Overview (Right) */}
                             <div style={{
@@ -553,7 +585,17 @@ export default function FirstScanTab({
                                                 {firstScanHistory.slice((firstScanHistoryPage - 1) * firstScanHistoryRowsPerPage, firstScanHistoryPage * firstScanHistoryRowsPerPage).map((item, idx) => (
                                                     <tr key={`first-${idx}`} style={{ borderBottom: '1px solid #f3f4f6' }}>
                                                         <td style={{ padding: '8px', color: '#6b7280', fontSize: '12px', whiteSpace: 'nowrap' }}>{item.timestamp || '—'}</td>
-                                                        <td style={{ padding: '8px', fontWeight: '600', color: '#111827' }}>{item.trackingNumber}</td>
+                                                        <td style={{ padding: '8px', fontWeight: '600', color: '#111827' }}>
+                                                            {(() => {
+                                                                const skynet = (item.skynetTrackingNumber || item.trackingNumber || '').toString().replace(/SKYT-?/gi, '').trim();
+                                                                const senderRef = (item.senderReference || '').toString().replace(/SKYT-?/gi, '').trim();
+                                                                // Only show senderRef / skynet when the scan was done via Temu barcode
+                                                                if (item.isTemuScan && senderRef && senderRef.toLowerCase() !== skynet.toLowerCase()) {
+                                                                    return `${senderRef} / ${skynet}`;
+                                                                }
+                                                                return skynet || '-';
+                                                            })()}
+                                                        </td>
                                                         <td style={{ padding: '8px' }}>
                                                             {item.assignedPartner ? (
                                                                 <span style={{
