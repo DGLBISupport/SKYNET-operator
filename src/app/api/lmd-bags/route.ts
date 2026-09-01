@@ -537,8 +537,10 @@ export async function POST(request: Request) {
         if (action === 'create') {
             const existingBags = Array.from(outboundBagsMap.values()).filter(b => (b.mawbRef || 'GENERAL').toLowerCase() === effectiveMawbRef.toLowerCase());
             const nextIndex = existingBags.length + 1;
-            const partnerCode = partner && partner !== 'ALL' ? `-${partner.toUpperCase()}` : '';
-            const defaultBagNumber = `${mawbRef ? mawbRef : 'LMD'}${partnerCode}-BAG-${String(nextIndex).padStart(2, '0')}`;
+            const mawbPrefix = mawbRef ? mawbRef : (partner && partner !== 'ALL' ? `LMD-${partner.toUpperCase()}` : 'LMD');
+            const includesPartner = partner && partner !== 'ALL' && mawbPrefix.toUpperCase().includes(partner.toUpperCase());
+            const partnerCode = (partner && partner !== 'ALL' && !includesPartner) ? `-${partner.toUpperCase()}` : '';
+            const defaultBagNumber = `${mawbPrefix}${partnerCode}-BAG-${String(nextIndex).padStart(2, '0')}`;
             const newBagNumber = (body.customBagNumber || body.bagNumber || defaultBagNumber).trim();
 
             // Prevent duplicate creation if bag already exists in memory

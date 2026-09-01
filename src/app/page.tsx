@@ -2249,7 +2249,11 @@ export default function WorkstationDashboard() {
             return;
         }
 
-        const defaultCalculatedBagNumber = `${selectedSecondScanMawb}-${newBagPartner.toUpperCase()}-BAG-${String((outboundBags?.length || 0) + 1).padStart(2, '0')}`;
+        const mawbPrefix = selectedSecondScanMawb || `LMD-${newBagPartner.toUpperCase()}`;
+        const nextSeq = String((outboundBags?.length || 0) + 1).padStart(2, '0');
+        const defaultCalculatedBagNumber = mawbPrefix.toUpperCase().includes(newBagPartner.toUpperCase())
+            ? `${mawbPrefix}-BAG-${nextSeq}`
+            : `${mawbPrefix}-${newBagPartner.toUpperCase()}-BAG-${nextSeq}`;
         const finalBagNumber = customBagNumber.trim() || defaultCalculatedBagNumber;
 
         // ── Duplicate Bag Check ──

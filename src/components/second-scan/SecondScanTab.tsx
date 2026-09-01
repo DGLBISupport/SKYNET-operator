@@ -257,8 +257,12 @@ export default function SecondScanTab({
                                                     const prov = getManifestProviderName(selectedSecondScanMawb);
                                                     const initialPartner: 'PickMe' | 'Domex' | 'SITREK' | 'Pronto' = (prov === 'Domex' || prov === 'SITREK' || prov === 'Pronto' || prov === 'PickMe') ? prov : 'PickMe';
                                                     setNewBagPartner(initialPartner);
-                                                    const partnerCode = `-${initialPartner.toUpperCase()}`;
-                                                    setCustomBagNumber(`${selectedSecondScanMawb}${partnerCode}-BAG-${String((outboundBags?.length || 0) + 1).padStart(2, '0')}`);
+                                                    const mawbPrefix = selectedSecondScanMawb || `LMD-${initialPartner.toUpperCase()}`;
+                                                    const nextSeq = String((outboundBags?.length || 0) + 1).padStart(2, '0');
+                                                    const defaultBag = mawbPrefix.toUpperCase().includes(initialPartner.toUpperCase())
+                                                        ? `${mawbPrefix}-BAG-${nextSeq}`
+                                                        : `${mawbPrefix}-${initialPartner.toUpperCase()}-BAG-${nextSeq}`;
+                                                    setCustomBagNumber(defaultBag);
                                                     setCreateBagModalOpen(true);
                                                 }}
                                                 disabled={Boolean(!selectedSecondScanMawb || secondScanManifestStatus === 'CLOSED' || isCreatingBag)}

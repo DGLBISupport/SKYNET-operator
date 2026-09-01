@@ -2957,9 +2957,12 @@ export default function AllModals({
                                         onChange={(e: any) => {
                                             const p = e.target.value as 'PickMe' | 'Domex' | 'SITREK' | 'Pronto';
                                             setNewBagPartner(p);
-                                            const mawbPrefix = selectedSecondScanMawb ? selectedSecondScanMawb : 'LMD';
-                                            const partnerCode = `-${p.toUpperCase()}`;
-                                            setCustomBagNumber(`${mawbPrefix}${partnerCode}-BAG-${String((outboundBags?.length || 0) + 1).padStart(2, '0')}`);
+                                            const mawbPrefix = selectedSecondScanMawb ? selectedSecondScanMawb : `LMD-${p.toUpperCase()}`;
+                                            const nextSeq = String((outboundBags?.length || 0) + 1).padStart(2, '0');
+                                            const defaultBag = mawbPrefix.toUpperCase().includes(p.toUpperCase())
+                                                ? `${mawbPrefix}-BAG-${nextSeq}`
+                                                : `${mawbPrefix}-${p.toUpperCase()}-BAG-${nextSeq}`;
+                                            setCustomBagNumber(defaultBag);
                                             if (duplicateBagError) setDuplicateBagError('');
                                         }}
                                         style={{ ...inputStyle, width: '100%', fontWeight: '700', padding: '10px', opacity: isCreatingBag ? 0.7 : 1 }}
@@ -2978,7 +2981,13 @@ export default function AllModals({
                                     <input
                                         disabled={Boolean(isCreatingBag)}
                                         type="text"
-                                        value={customBagNumber !== '' ? customBagNumber : `${selectedSecondScanMawb ? selectedSecondScanMawb : 'LMD'}-${newBagPartner.toUpperCase()}-BAG-${String((outboundBags?.length || 0) + 1).padStart(2, '0')}`}
+                                        value={customBagNumber !== '' ? customBagNumber : (() => {
+                                            const mawbPrefix = selectedSecondScanMawb ? selectedSecondScanMawb : `LMD-${newBagPartner.toUpperCase()}`;
+                                            const nextSeq = String((outboundBags?.length || 0) + 1).padStart(2, '0');
+                                            return mawbPrefix.toUpperCase().includes(newBagPartner.toUpperCase())
+                                                ? `${mawbPrefix}-BAG-${nextSeq}`
+                                                : `${mawbPrefix}-${newBagPartner.toUpperCase()}-BAG-${nextSeq}`;
+                                        })()}
                                         onChange={(e) => {
                                             setCustomBagNumber(e.target.value);
                                             if (duplicateBagError) setDuplicateBagError('');
