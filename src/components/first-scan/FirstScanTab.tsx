@@ -54,8 +54,30 @@ export default function FirstScanTab({
     status,
     unsealedBoxes
 }: any) {
+    const [bagHighlight, setBagHighlight] = React.useState(false);
+    const highlightTimerRef = React.useRef<any>(null);
+
+    const triggerHighlight = React.useCallback(() => {
+        if (highlightTimerRef.current) clearTimeout(highlightTimerRef.current);
+        setBagHighlight(true);
+        highlightTimerRef.current = setTimeout(() => {
+            setBagHighlight(false);
+        }, 1200);
+    }, []);
+
+    React.useEffect(() => {
+        if (firstScanSelectedBag) {
+            triggerHighlight();
+        } else {
+            setBagHighlight(false);
+        }
+        return () => {
+            if (highlightTimerRef.current) clearTimeout(highlightTimerRef.current);
+        };
+    }, [firstScanSelectedBag, triggerHighlight]);
+
     return (
-                        <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
                             {/* ── DATE FILTER BAR ── */}
                             <div style={{
                                 display: 'flex',
@@ -182,6 +204,7 @@ export default function FirstScanTab({
                                                     setFirstScanError('');
                                                     setFirstScanHistory([]);
                                                     setBagBarcodeInput(matchedBag.bagNumber);
+                                                    triggerHighlight();
                                                     setTimeout(() => {
                                                         if (firstScanInputRef.current) {
                                                             firstScanInputRef.current.focus();
@@ -207,7 +230,20 @@ export default function FirstScanTab({
                                                     onFocus={(e) => e.target.select()}
                                                     disabled={!firstScanMawb || isBagsLoading}
                                                     placeholder={isBagsLoading ? "Loading bags..." : "Scan bag barcode..."}
-                                                    style={{ ...inputStyle, width: '100%', backgroundColor: (!firstScanMawb || isBagsLoading) ? '#f3f4f6' : '#ffffff' }}
+                                                    style={{
+                                                        ...inputStyle,
+                                                        width: '100%',
+                                                        backgroundColor: bagHighlight
+                                                            ? '#dcfce7'
+                                                            : (!firstScanMawb || isBagsLoading)
+                                                                ? '#f3f4f6'
+                                                                : '#ffffff',
+                                                        border: bagHighlight ? '2px solid #16a34a' : '1px solid #d1d5db',
+                                                        boxShadow: bagHighlight ? '0 0 0 4px rgba(22, 163, 74, 0.35)' : 'none',
+                                                        color: '#111827',
+                                                        fontWeight: 'normal',
+                                                        transition: 'all 0.25s ease'
+                                                    }}
                                                 />
                                             </form>
                                         </div>
@@ -237,6 +273,7 @@ export default function FirstScanTab({
                                                         setFirstScanError('');
                                                         setFirstScanHistory([]);
                                                         setBagBarcodeInput(matchedBag.bagNumber);
+                                                        triggerHighlight();
                                                         setTimeout(() => {
                                                             if (firstScanInputRef.current) {
                                                                 firstScanInputRef.current.focus();
@@ -249,7 +286,20 @@ export default function FirstScanTab({
                                                     }
                                                 }}
                                                 disabled={!firstScanMawb || isBagsLoading}
-                                                style={{ ...inputStyle, width: '100%', backgroundColor: (!firstScanMawb || isBagsLoading) ? '#f3f4f6' : '#ffffff' }}
+                                                style={{
+                                                    ...inputStyle,
+                                                    width: '100%',
+                                                    backgroundColor: bagHighlight
+                                                        ? '#dcfce7'
+                                                        : (!firstScanMawb || isBagsLoading)
+                                                            ? '#f3f4f6'
+                                                            : '#ffffff',
+                                                    border: bagHighlight ? '2px solid #16a34a' : '1px solid #d1d5db',
+                                                    boxShadow: bagHighlight ? '0 0 0 4px rgba(22, 163, 74, 0.35)' : 'none',
+                                                    color: '#111827',
+                                                    fontWeight: 'normal',
+                                                    transition: 'all 0.25s ease'
+                                                }}
                                             >
                                                 <option value="">{isBagsLoading ? "-- Loading bags... --" : "-- Choose bag --"}</option>
                                                 {firstScanBags.map((b: any) => {
@@ -306,7 +356,7 @@ export default function FirstScanTab({
 
                                             <div style={{ display: 'flex', alignItems: 'center', gap: '8px', backgroundColor: '#ffffff', border: '1px solid #d1d5db', borderRadius: '6px', padding: '5px 12px' }}>
                                                 <span style={{ fontSize: '12px', fontWeight: '600', color: '#374151', display: 'block' }}>Expected</span>
-                                                <span style={{ fontSize: '16px', fontWeight: '800', color: '#111827' }}>{firstScanExpected === '' ? '0' : firstScanExpected}</span>
+                                                <span style={{ fontSize: '20px', fontWeight: '800', color: '#111827' }}>{firstScanExpected === '' ? '0' : firstScanExpected}</span>
                                             </div>
 
                                             <div style={{ display: 'flex', alignItems: 'center', gap: '8px', backgroundColor: '#ffffff', border: '1px solid #d1d5db', borderRadius: '6px', padding: '5px 12px' }}>
@@ -376,7 +426,7 @@ export default function FirstScanTab({
                                                 }
                                             </button>
 
-                                            <button
+                                            {/* <button
                                                 onClick={() => {
                                                     setCustomConfirmModal({
                                                         title: 'Clear Scanned Records?',
@@ -396,7 +446,7 @@ export default function FirstScanTab({
                                                 }}
                                             >
                                                 Reset
-                                            </button>
+                                            </button> */}
                                         </div>
                                     </div>
                                 </div>
