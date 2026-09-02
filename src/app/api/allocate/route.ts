@@ -69,6 +69,97 @@ const cleanAddress = (...parts: (string | null | undefined)[]) => {
     return parts.filter(p => p && p.trim() !== "").map(p => p.trim()).join(", ");
 };
 
+const cleanRecipientAddressLines = (shipment: any) => {
+    const rawParts = [
+        shipment.consignee_address_1,
+        shipment.consignee_address_2,
+        shipment.consignee_address_3,
+        shipment.consignee_address_4,
+        shipment.consignee_address_5
+    ].filter(p => p && typeof p === 'string' && p.trim() !== '').map(p => p.trim());
+
+    const city = (shipment.consignee_location_name || '').trim().toLowerCase();
+    const state = (shipment.consignee_state || '').trim().toLowerCase();
+    const country = (shipment.consignee_country_name || 'sri lanka').trim().toLowerCase();
+    const countryCode = (shipment.consignee_country_code || 'lk').trim().toLowerCase();
+
+    const filteredLines: string[] = [];
+    for (const part of rawParts) {
+        const lower = part.toLowerCase();
+        if (
+            (city && lower === city) ||
+            (state && lower === state) ||
+            (country && lower === country) ||
+            (countryCode && lower === countryCode) ||
+            lower === 'sri lanka' ||
+            lower === 'srilanka'
+        ) {
+            continue;
+        }
+        if (!filteredLines.some(l => l.toLowerCase() === lower)) {
+            filteredLines.push(part);
+        }
+    }
+
+    return filteredLines.length > 0 ? filteredLines.join('\n') : (shipment.consignee_address_1 || '');
+};
+
+const cleanSenderAddressLines = (shipment: any) => {
+    const city = (shipment.consignor_location_name || '').trim();
+    const state = (shipment.consignor_state || '').trim();
+    const postcode = (shipment.consignor_postcode || '').trim();
+    const country = (shipment.consignor_country_name || 'CHINA').trim();
+
+    const rawParts = [
+        shipment.consignor_address_1,
+        shipment.consignor_address_2,
+        shipment.consignor_address_3,
+        shipment.consignor_address_4,
+        shipment.consignor_address_5
+    ].filter(p => p && typeof p === 'string' && p.trim() !== '').map(p => p.trim());
+
+    const streetLines: string[] = [];
+
+    for (const part of rawParts) {
+        const chunks = part.split(',').map(c => c.trim()).filter(Boolean);
+        const filteredChunks = chunks.filter(c => {
+            const lower = c.toLowerCase();
+            if (city && lower === city.toLowerCase()) return false;
+            if (state && lower === state.toLowerCase()) return false;
+            if (postcode && lower === postcode.toLowerCase()) return false;
+            if (country && lower === country.toLowerCase()) return false;
+            if (lower === 'china' || lower === 'cn') return false;
+            return true;
+        });
+
+        if (filteredChunks.length > 0) {
+            const cleanStreet = filteredChunks.join(', ');
+            if (!streetLines.some(l => l.toLowerCase() === cleanStreet.toLowerCase())) {
+                streetLines.push(cleanStreet);
+            }
+        }
+    }
+
+    const resultLines: string[] = [];
+    if (streetLines.length > 0) {
+        resultLines.push(...streetLines);
+    } else {
+        resultLines.push('Machong Logistics Park');
+    }
+
+    const cityState = [city, state].filter(Boolean).join(' ');
+    if (cityState) {
+        resultLines.push(cityState);
+    }
+
+    const postCountry = [postcode, country].filter(Boolean).join(' ');
+    if (postCountry) {
+        resultLines.push(postCountry);
+    }
+
+    return resultLines.join('\n');
+};
+
 async function resolveZoneAndPartner(
     supabaseUrl: string,
     headers: any,
@@ -453,29 +544,22 @@ export async function POST(request: Request) {
                 trackingNumber: shipment.reference_number.toString(),
                 recipientName: shipment.consignee_name || "Unknown Recipient",
                 recipientPhone: shipment.consignee_phone || "No Phone",
-                recipientAddress: cleanAddress(
-                    shipment.consignee_address_1,
-                    shipment.consignee_address_2,
-                    shipment.consignee_address_3,
-                    shipment.consignee_address_4,
-                    shipment.consignee_address_5
-                ),
+                recipientAddress: cleanRecipientAddressLines(shipment),
                 senderName: shipment.consignor_name || "Unknown Sender",
-                senderAddress: cleanAddress(
-                    shipment.consignor_address_1,
-                    shipment.consignor_address_2,
-                    shipment.consignor_address_3,
-                    shipment.consignor_address_4,
-                    shipment.consignor_address_5
-                ),
+                senderAddress: cleanSenderAddressLines(shipment),
                 province: shipment.consignee_state || "Unknown Province",
                 district: shipment.consignee_address_3 || "Unknown District",
                 city: shipment.consignee_location_name || "Unknown City",
+                country: shipment.consignee_country_name || "SRI LANKA",
                 weight: normalizeWeightToGrams(shipment.weight, shipment.weight_measure),
+                weightMeasure: shipment.weight_measure || undefined,
                 value: shipment.customs_value ? `${shipment.customs_currency_code || 'LKR'} ${shipment.customs_value.toFixed(2)}` : undefined,
                 account: shipment.shipper_code || undefined,
+                destLocationCode: shipment.dest_location_code || undefined,
                 apiSync: allocation?.validated ? "Validated" : "Pending",
                 goodsDesc: shipment.goods_desc || undefined,
+                deliveryInstructions: shipment.delivery_instructions || shipment.goods_desc || undefined,
+                numOfItems: shipment.num_of_items || 1,
                 mawbRef: initialManifestRef,
                 serviceType: shipment.service_type || undefined,
                 businessType: shipment.business_type || undefined,
@@ -680,10 +764,23 @@ export async function POST(request: Request) {
             const skynetData: SkyNetParcelData = {
                 trackingNumber: shipment.reference_number.toString(),
                 recipientName: shipment.consignee_name || "Unknown Recipient",
+                recipientPhone: shipment.consignee_phone || "No Phone",
+                recipientAddress: cleanRecipientAddressLines(shipment),
+                senderName: shipment.consignor_name || "Unknown Sender",
+                senderAddress: cleanSenderAddressLines(shipment),
                 city: shipment.consignee_location_name || "Unknown City",
                 province: shipment.consignee_state || "Unknown Province",
                 district: shipment.consignee_address_3 || "Unknown District",
-                weight: shipment.weight || 0,
+                country: shipment.consignee_country_name || "SRI LANKA",
+                weight: normalizeWeightToGrams(shipment.weight, shipment.weight_measure),
+                weightMeasure: shipment.weight_measure || undefined,
+                value: shipment.customs_value ? `${shipment.customs_currency_code || 'LKR'} ${shipment.customs_value.toFixed(2)}` : undefined,
+                account: shipment.shipper_code || undefined,
+                destLocationCode: shipment.dest_location_code || undefined,
+                goodsDesc: shipment.goods_desc || undefined,
+                deliveryInstructions: shipment.delivery_instructions || shipment.goods_desc || undefined,
+                numOfItems: shipment.num_of_items || 1,
+                serviceType: shipment.service_type || undefined,
                 mawbRef: finalMawb,
                 senderReference: shipment.sender_reference || undefined,
                 _scannedVia: isTemuScan ? 'TEMU' : 'SKYNET',
@@ -760,29 +857,22 @@ export async function POST(request: Request) {
             trackingNumber: shipment.reference_number.toString(),
             recipientName: shipment.consignee_name || "Unknown Recipient",
             recipientPhone: shipment.consignee_phone || "No Phone",
-            recipientAddress: cleanAddress(
-                shipment.consignee_address_1,
-                shipment.consignee_address_2,
-                shipment.consignee_address_3,
-                shipment.consignee_address_4,
-                shipment.consignee_address_5
-            ),
+            recipientAddress: cleanRecipientAddressLines(shipment),
             senderName: shipment.consignor_name || "Unknown Sender",
-            senderAddress: cleanAddress(
-                shipment.consignor_address_1,
-                shipment.consignor_address_2,
-                shipment.consignor_address_3,
-                shipment.consignor_address_4,
-                shipment.consignor_address_5
-            ),
+            senderAddress: cleanSenderAddressLines(shipment),
             province: shipment.consignee_state || "Unknown Province",
             district: districtName || "Unknown District",
             city: cityName || "Unknown City",
+            country: shipment.consignee_country_name || "SRI LANKA",
             weight: normalizeWeightToGrams(shipment.weight, shipment.weight_measure),
+            weightMeasure: shipment.weight_measure || undefined,
             value: shipment.customs_value ? `${shipment.customs_currency_code || 'LKR'} ${shipment.customs_value.toFixed(2)}` : undefined,
             account: shipment.shipper_code || undefined,
+            destLocationCode: shipment.dest_location_code || undefined,
             apiSync: allocation?.validated ? "Validated" : "Pending",
             goodsDesc: shipment.goods_desc || undefined,
+            deliveryInstructions: shipment.delivery_instructions || shipment.goods_desc || undefined,
+            numOfItems: shipment.num_of_items || 1,
             mawbRef: initialManifestRef,
             initialManifest: initialManifestRef,
             inboundManifest: initialManifestRef,

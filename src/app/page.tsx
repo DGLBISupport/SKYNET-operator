@@ -451,10 +451,23 @@ export default function WorkstationDashboard() {
         trackingNumber: string;
         senderReference?: string;
         recipientName?: string;
+        recipientPhone?: string;
+        recipientAddress?: string;
         city?: string;
         province?: string;
         district?: string;
+        country?: string;
+        senderName?: string;
+        senderAddress?: string;
+        goodsDesc?: string;
+        deliveryInstructions?: string;
+        numOfItems?: number;
+        value?: string;
+        account?: string;
+        destLocationCode?: string;
+        serviceType?: string;
         weight?: number;
+        weightMeasure?: string;
         mawbRef?: string;
         bagNumber?: string;
         assignedPartner?: string;
@@ -464,7 +477,23 @@ export default function WorkstationDashboard() {
         skynetTrackingNumber: string;
         temuBarcode: string;
         recipientName?: string;
+        recipientPhone?: string;
+        recipientAddress?: string;
         city?: string;
+        province?: string;
+        district?: string;
+        country?: string;
+        senderName?: string;
+        senderAddress?: string;
+        goodsDesc?: string;
+        deliveryInstructions?: string;
+        numOfItems?: number;
+        value?: string;
+        account?: string;
+        destLocationCode?: string;
+        serviceType?: string;
+        weight?: number;
+        weightMeasure?: string;
         mawbRef?: string;
         bagNumber?: string;
         assignedPartner?: string;
@@ -1833,12 +1862,28 @@ export default function WorkstationDashboard() {
 
                 if (isTemuScan) {
                     setLastTemuSticker({
-                        skynetTrackingNumber: data.parcel.trackingNumber,
+                        skynetTrackingNumber: (data.parcel.trackingNumber || '').toString().replace(/^skyt-?/i, '').trim(),
                         temuBarcode: data.parcel.senderReference || barcode,
                         recipientName: data.parcel?.recipientName,
+                        recipientPhone: data.parcel?.recipientPhone,
+                        recipientAddress: data.parcel?.recipientAddress,
                         city: data.parcel?.city,
-                        mawbRef: firstScanMawb,
-                        bagNumber: firstScanSelectedBag,
+                        district: data.parcel?.district,
+                        province: data.parcel?.province,
+                        country: data.parcel?.country,
+                        senderName: data.parcel?.senderName,
+                        senderAddress: data.parcel?.senderAddress,
+                        goodsDesc: data.parcel?.goodsDesc,
+                        deliveryInstructions: data.parcel?.deliveryInstructions || data.parcel?.goodsDesc,
+                        numOfItems: data.parcel?.numOfItems,
+                        value: data.parcel?.value,
+                        account: data.parcel?.account,
+                        destLocationCode: data.parcel?.destLocationCode,
+                        serviceType: data.parcel?.serviceType,
+                        weight: data.parcel?.weight,
+                        weightMeasure: data.parcel?.weightMeasure,
+                        mawbRef: firstScanMawb || data.parcel?.mawbRef,
+                        bagNumber: firstScanSelectedBag || data.parcel?.bagNumber,
                         assignedPartner: data.assignedPartner,
                         assignedZone: data.assignedZone
                     });
@@ -2025,12 +2070,28 @@ export default function WorkstationDashboard() {
 
                 if (isTemuScan) {
                     setLastTemuSticker({
-                        skynetTrackingNumber: data.parcel.trackingNumber,
+                        skynetTrackingNumber: (data.parcel.trackingNumber || '').toString().replace(/^skyt-?/i, '').trim(),
                         temuBarcode: data.parcel.senderReference || barcode,
                         recipientName: data.parcel?.recipientName,
+                        recipientPhone: data.parcel?.recipientPhone,
+                        recipientAddress: data.parcel?.recipientAddress,
                         city: data.parcel?.city,
-                        mawbRef: firstScanMawb,
-                        bagNumber: firstScanSelectedBag,
+                        district: data.parcel?.district,
+                        province: data.parcel?.province,
+                        country: data.parcel?.country,
+                        senderName: data.parcel?.senderName,
+                        senderAddress: data.parcel?.senderAddress,
+                        goodsDesc: data.parcel?.goodsDesc,
+                        deliveryInstructions: data.parcel?.deliveryInstructions || data.parcel?.goodsDesc,
+                        numOfItems: data.parcel?.numOfItems,
+                        value: data.parcel?.value,
+                        account: data.parcel?.account,
+                        destLocationCode: data.parcel?.destLocationCode,
+                        serviceType: data.parcel?.serviceType,
+                        weight: data.parcel?.weight,
+                        weightMeasure: data.parcel?.weightMeasure,
+                        mawbRef: firstScanMawb || data.parcel?.mawbRef,
+                        bagNumber: firstScanSelectedBag || data.parcel?.bagNumber,
                         assignedPartner: data.assignedPartner,
                         assignedZone: data.assignedZone
                     });

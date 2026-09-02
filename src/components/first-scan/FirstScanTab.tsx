@@ -902,86 +902,236 @@ export default function FirstScanTab({
                                                 <div style={{ width: '100%', fontSize: '11px', color: '#374151', backgroundColor: '#fee2e2', border: '1px solid #fca5a5', borderRadius: '6px', padding: '8px 10px', lineHeight: '1.4', boxSizing: 'border-box' }}>
                                                     <strong>Damaged Barcode Scanned!</strong><br />
                                                     Temu Ref: <span style={{ color: '#dc2626', fontWeight: '700' }}>{lastTemuSticker.temuBarcode}</span><br />
-                                                    Skynet ID: <span style={{ fontWeight: '700' }}>{lastTemuSticker.skynetTrackingNumber}</span>
+                                                    Skynet ID: <span style={{ fontWeight: '700' }}>{(lastTemuSticker.skynetTrackingNumber || '').toString().replace(/^skyt-?/i, '').trim()}</span>
                                                 </div>
 
-                                                {/* Thermal Label Graphic Card */}
+                                                {/* Thermal Label Graphic Card — Exact GETonline Format */}
                                                 <div
                                                     id="inline-thermal-label-print-area"
                                                     style={{
-                                                        border: '2px solid #111827',
-                                                        borderRadius: '8px',
-                                                        padding: '12px',
+                                                        border: '2px solid #000000',
+                                                        borderRadius: '2px',
+                                                        padding: '14px 16px',
                                                         backgroundColor: '#ffffff',
                                                         color: '#000000',
                                                         width: '100%',
+                                                        maxWidth: '430px',
                                                         boxSizing: 'border-box',
                                                         boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1)',
-                                                        fontFamily: "'Inter', sans-serif"
+                                                        fontFamily: "'Arial', 'Helvetica', sans-serif"
                                                     }}
                                                 >
-                                                    {/* Brand Header */}
-                                                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '2px solid #000000', paddingBottom: '6px', marginBottom: '8px' }}>
+                                                    {/* Top Header: SkyNet Logo + Web URL */}
+                                                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
                                                         <div>
-                                                            <img src="/logo.png" alt="Skynet Worldwide Express" style={{ height: '32px', maxWidth: '140px', objectFit: 'contain', display: 'block' }} />
+                                                            <img
+                                                                src="/logo.png"
+                                                                alt="SKYNET WORLDWIDE EXPRESS"
+                                                                style={{ height: '34px', maxWidth: '160px', objectFit: 'contain', display: 'block' }}
+                                                            />
                                                         </div>
-                                                        <div style={{ textAlign: 'right' }}>
-                                                            <span style={{ backgroundColor: '#111827', color: '#ffffff', fontSize: '8px', fontWeight: '800', padding: '2px 5px', borderRadius: '3px', textTransform: 'uppercase' }}>
-                                                                REPLACEMENT STICKER
-                                                            </span>
-                                                            {lastTemuSticker.assignedPartner && (
-                                                                <div style={{ fontSize: '9px', fontWeight: '800', color: '#111827', marginTop: '2px' }}>
-                                                                    {lastTemuSticker.assignedPartner}
+                                                        <div style={{ fontSize: '11px', fontWeight: '700', color: '#000000', letterSpacing: '-0.2px' }}>
+                                                            www.skynetexpress.com/
+                                                        </div>
+                                                    </div>
+
+                                                    {/* Section 1: DELIVER TO + ACCOUNT & Destination Code */}
+                                                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '8px' }}>
+                                                        {/* Deliver To Details */}
+                                                        <div style={{ flex: 1, minWidth: 0 }}>
+                                                            <div style={{ fontSize: '14px', fontWeight: '900', letterSpacing: '0.5px', color: '#000000', marginBottom: '2px' }}>
+                                                                DELIVER TO
+                                                            </div>
+                                                            <div style={{ fontSize: '12px', fontWeight: '800', textTransform: 'uppercase', marginBottom: '2px' }}>
+                                                                {lastTemuSticker.recipientName || '—'}
+                                                            </div>
+                                                            <div style={{ fontSize: '10.5px', lineHeight: '1.3', color: '#000000', textTransform: 'uppercase' }}>
+                                                                {(() => {
+                                                                    let rawLines: string[] = [];
+                                                                    const cityUpper = (lastTemuSticker.city || '').trim().toUpperCase();
+                                                                    const distUpper = (lastTemuSticker.district || '').trim().toUpperCase();
+                                                                    const provUpper = (lastTemuSticker.province || '').trim().toUpperCase();
+                                                                    const countryUpper = (lastTemuSticker.country || 'SRI LANKA').trim().toUpperCase();
+
+                                                                    if (lastTemuSticker.recipientAddress) {
+                                                                        const splitNewlines = lastTemuSticker.recipientAddress
+                                                                            .split(/[\r\n]+/)
+                                                                            .map(l => l.trim())
+                                                                            .filter(Boolean);
+
+                                                                        if (splitNewlines.length === 1 && splitNewlines[0].includes(',')) {
+                                                                            const parts = splitNewlines[0].split(',').map(p => p.trim()).filter(Boolean);
+                                                                            const cleanParts = parts.filter(p => {
+                                                                                const up = p.toUpperCase();
+                                                                                return up !== 'SRI LANKA' && up !== 'SRILANKA' && up !== countryUpper && up !== provUpper;
+                                                                            });
+                                                                            if (cleanParts.length >= 2) {
+                                                                                const line1 = cleanParts.slice(0, cleanParts.length - 1).join(', ');
+                                                                                const line2 = cleanParts[cleanParts.length - 1];
+                                                                                rawLines = [line1, line2];
+                                                                            } else if (cleanParts.length === 1) {
+                                                                                rawLines = cleanParts;
+                                                                            } else {
+                                                                                rawLines = splitNewlines;
+                                                                            }
+                                                                        } else {
+                                                                            rawLines = splitNewlines;
+                                                                        }
+                                                                    }
+
+                                                                    const cleanLines = rawLines.filter(line => {
+                                                                        const up = line.trim().toUpperCase();
+                                                                        if (!up) return false;
+                                                                        if (up === 'SRI LANKA' || up === 'SRILANKA' || up === countryUpper) return false;
+                                                                        if (provUpper && up === provUpper) return false;
+                                                                        return true;
+                                                                    });
+
+                                                                    return (
+                                                                        <>
+                                                                            {cleanLines.map((line, idx) => (
+                                                                                <div key={idx}>{line}</div>
+                                                                            ))}
+                                                                        </>
+                                                                    );
+                                                                })()}
+                                                                <div style={{ marginTop: '1px' }}>
+                                                                    {lastTemuSticker.province ? `${lastTemuSticker.province.toUpperCase()} ` : ''}
+                                                                    <strong style={{ fontWeight: '900' }}>
+                                                                        {lastTemuSticker.city ? lastTemuSticker.city.toUpperCase() : (lastTemuSticker.district ? lastTemuSticker.district.toUpperCase() : '')}
+                                                                    </strong>
                                                                 </div>
-                                                            )}
+                                                                <div>{lastTemuSticker.country ? lastTemuSticker.country.toUpperCase() : 'SRI LANKA'}</div>
+                                                            </div>
+                                                        </div>
+
+                                                        {/* Account + Destination Zone (LK1 / CMB from shipments.dest_location_code) */}
+                                                        <div style={{ width: '150px', textAlign: 'right', display: 'flex', flexDirection: 'column', alignItems: 'flex-end', justifyContent: 'space-between', minHeight: '85px' }}>
+                                                            <div style={{ fontSize: '12px', fontWeight: '700', whiteSpace: 'nowrap', color: '#000000' }}>
+                                                                ACCOUNT : <span style={{ fontWeight: '800' }}>{lastTemuSticker.account || '—'}</span>
+                                                            </div>
+
+                                                            <div style={{ fontSize: '24px', fontWeight: '900', letterSpacing: '1px', lineHeight: '1', color: '#000000', marginTop: 'auto' }}>
+                                                                {lastTemuSticker.destLocationCode ? lastTemuSticker.destLocationCode.toUpperCase() : (lastTemuSticker.assignedZone ? lastTemuSticker.assignedZone.toUpperCase() : '—')}
+                                                            </div>
                                                         </div>
                                                     </div>
 
-                                                    {/* SVG Barcode */}
-                                                    <div
-                                                        style={{ margin: '6px 0', textAlign: 'center' }}
-                                                        dangerouslySetInnerHTML={{ __html: generateCode128SVG(lastTemuSticker.skynetTrackingNumber) }}
-                                                    />
+                                                    {/* Dividing Line */}
+                                                    <div style={{ borderTop: '2px solid #000000', margin: '6px 0' }} />
 
-                                                    {/* Tracking Number */}
-                                                    <div style={{ textAlign: 'center', fontSize: '16px', fontWeight: '900', letterSpacing: '1.5px', color: '#000000', marginBottom: '6px' }}>
-                                                        SKYT-{lastTemuSticker.skynetTrackingNumber}
+                                                    {/* Section 2: DELIVERY INSTRUCTIONS / Piece Count / Weight & Value & Service */}
+                                                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', fontSize: '9.5px' }}>
+                                                        {/* Left: Delivery Instructions */}
+                                                        <div style={{ flex: 1.2, minWidth: 0 }}>
+                                                            <div style={{ fontSize: '9px', fontWeight: '900', letterSpacing: '0.3px', textTransform: 'uppercase', color: '#000000' }}>
+                                                                DELIVERY INSTRUCTIONS
+                                                            </div>
+                                                            <div style={{ fontSize: '9.5px', marginTop: '2px', color: '#000000', wordBreak: 'break-word', lineHeight: '1.25' }}>
+                                                                {lastTemuSticker.deliveryInstructions || lastTemuSticker.goodsDesc || '—'}
+                                                            </div>
+                                                        </div>
+
+                                                        {/* Center: Piece Count */}
+                                                        <div style={{ flex: 0.8, textAlign: 'center', fontSize: '15px', fontWeight: '900', color: '#000000', paddingTop: '1px' }}>
+                                                            {lastTemuSticker.numOfItems ? `${lastTemuSticker.numOfItems} Pc` : '1 Pc'}
+                                                        </div>
+
+                                                        {/* Right: Weight, Customs Value, Service EN from shipments */}
+                                                        <div style={{ flex: 1.2, textAlign: 'right' }}>
+                                                            <div style={{ fontSize: '12px', fontWeight: '900', color: '#000000' }}>
+                                                                ({lastTemuSticker.numOfItems || 1}) {(() => {
+                                                                    const raw = Number(lastTemuSticker.weight) || 0;
+                                                                    const kg = raw >= 10 ? raw / 1000 : raw;
+                                                                    return `${kg.toFixed(2)} KG`;
+                                                                })()}
+                                                            </div>
+                                                            <div style={{ fontSize: '10.5px', fontWeight: '700', color: '#000000', marginTop: '1px' }}>
+                                                                {(() => {
+                                                                    const valStr = (lastTemuSticker.value || '').toString().trim();
+                                                                    if (!valStr) return '—';
+                                                                    const num = parseFloat(valStr.replace(/[^0-9.]/g, ''));
+                                                                    return isNaN(num) ? valStr : `${num.toFixed(2)} LKR`;
+                                                                })()}
+                                                            </div>
+                                                            <div style={{ fontSize: '24px', fontWeight: '900', lineHeight: '1', marginTop: '2px', color: '#000000' }}>
+                                                                {lastTemuSticker.serviceType || 'EN'}
+                                                            </div>
+                                                        </div>
                                                     </div>
 
-                                                    {/* Temu Sender Reference */}
-                                                    <div style={{ backgroundColor: '#f3f4f6', border: '1px solid #d1d5db', borderRadius: '4px', padding: '3px 6px', fontSize: '10px', fontWeight: '700', textAlign: 'center', marginBottom: '8px' }}>
-                                                        TEMU REF: {lastTemuSticker.temuBarcode}
+                                                    {/* Dividing Line */}
+                                                    <div style={{ borderTop: '2px solid #000000', margin: '6px 0' }} />
+
+                                                    {/* Section 3: Barcode + Customs Notice */}
+                                                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '8px', margin: '4px 0' }}>
+                                                        {/* Barcode SVG + Barcode Number */}
+                                                        <div style={{ flex: 1, minWidth: 0, textAlign: 'center' }}>
+                                                            <div
+                                                                style={{ width: '100%', overflow: 'hidden' }}
+                                                                dangerouslySetInnerHTML={{ __html: generateCode128SVG((lastTemuSticker.skynetTrackingNumber || '').toString().replace(/^skyt-?/i, '').trim()) }}
+                                                            />
+                                                            <div style={{ fontSize: '15px', fontWeight: '900', letterSpacing: '1.2px', marginTop: '2px', color: '#000000' }}>
+                                                                {(lastTemuSticker.skynetTrackingNumber || '').toString().replace(/^skyt-?/i, '').trim()}
+                                                            </div>
+                                                        </div>
+
+                                                        {/* Customs Duties Notice Box */}
+                                                        <div style={{ width: '100px', textAlign: 'left', fontSize: '8.5px', fontWeight: '800', lineHeight: '1.2', color: '#000000' }}>
+                                                            <div>****************</div>
+                                                            <div style={{ margin: '1px 0' }}>
+                                                                Customs<br />
+                                                                Duties/Taxes<br />
+                                                                Paid by<br />
+                                                                Consignor
+                                                            </div>
+                                                            <div>****************</div>
+                                                        </div>
                                                     </div>
 
-                                                    {/* Label Information Grid */}
-                                                    <div style={{ borderTop: '1px dashed #000000', paddingTop: '6px', fontSize: '10px', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '4px' }}>
-                                                        <div>
-                                                            <span style={{ color: '#6b7280', fontSize: '8px', textTransform: 'uppercase', display: 'block' }}>CONSIGNEE</span>
-                                                            <strong style={{ fontSize: '10px' }}>{lastTemuSticker.recipientName || 'Consignee'}</strong>
+                                                    {/* Section 4: SENDER + Legal Clause */}
+                                                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '8px', marginTop: '4px' }}>
+                                                        {/* Sender Details from shipments consignor fields */}
+                                                        <div style={{ flex: 1.3, minWidth: 0, fontSize: '9px', lineHeight: '1.3', color: '#000000' }}>
+                                                            <div style={{ fontSize: '9.5px', fontWeight: '900', textTransform: 'uppercase', marginBottom: '1px' }}>
+                                                                SENDER
+                                                            </div>
+                                                            <div>{lastTemuSticker.senderName || '—'}</div>
+                                                            {(() => {
+                                                                if (lastTemuSticker.senderAddress) {
+                                                                    const lines = lastTemuSticker.senderAddress
+                                                                        .split(/[\r\n]+/)
+                                                                        .map(l => l.trim())
+                                                                        .filter(Boolean);
+                                                                    return (
+                                                                        <>
+                                                                            {lines.map((line, idx) => (
+                                                                                <div key={idx}>{line}</div>
+                                                                            ))}
+                                                                        </>
+                                                                    );
+                                                                }
+                                                                return (
+                                                                    <>
+                                                                        <div>Machong Logistics Park</div>
+                                                                        <div>Dongguan Guangdong</div>
+                                                                        <div>523040 CHINA</div>
+                                                                    </>
+                                                                );
+                                                            })()}
+                                                            <div style={{ marginTop: '2px', fontSize: '9.5px' }}>
+                                                                Sender Ref: {lastTemuSticker.temuBarcode || lastTemuSticker.senderReference || '—'}
+                                                            </div>
                                                         </div>
-                                                        <div>
-                                                            <span style={{ color: '#6b7280', fontSize: '8px', textTransform: 'uppercase', display: 'block' }}>DESTINATION</span>
-                                                            <strong style={{ fontSize: '10px' }}>{lastTemuSticker.city || '—'}</strong>
-                                                        </div>
-                                                        <div>
-                                                            <span style={{ color: '#6b7280', fontSize: '8px', textTransform: 'uppercase', display: 'block' }}>MAWB REF</span>
-                                                            <strong>{lastTemuSticker.mawbRef || '—'}</strong>
-                                                        </div>
-                                                        <div>
-                                                            <span style={{ color: '#6b7280', fontSize: '8px', textTransform: 'uppercase', display: 'block' }}>BAG NUMBER</span>
-                                                            <strong>{lastTemuSticker.bagNumber || '—'}</strong>
+
+                                                        {/* Disclaimer */}
+                                                        <div style={{ flex: 0.9, textAlign: 'left', fontSize: '7.5px', fontWeight: '700', lineHeight: '1.25', color: '#000000', textTransform: 'uppercase', paddingTop: '2px' }}>
+                                                            I/WE AGREE THAT<br />
+                                                            CARRIER'S STD. T&C APPLY TO<br />
+                                                            THIS SHIPMENT & LIMIT THE<br />
+                                                            CARRIER'S LIABILITY
                                                         </div>
                                                     </div>
-
-                                                    {/* Zone Footer Badge */}
-                                                    {lastTemuSticker.assignedZone && (
-                                                        <div style={{ marginTop: '8px', borderTop: '1px solid #000000', paddingTop: '4px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                                                            <span style={{ fontSize: '9px', fontWeight: '700' }}>DESTINATION ZONE:</span>
-                                                            <span style={{ fontSize: '12px', fontWeight: '900', backgroundColor: '#111827', color: '#ffffff', padding: '1px 6px', borderRadius: '4px' }}>
-                                                                {lastTemuSticker.assignedZone}
-                                                            </span>
-                                                        </div>
-                                                    )}
                                                 </div>
 
                                                 {/* Print Action Button */}
@@ -994,11 +1144,14 @@ export default function FirstScanTab({
                                                             win.document.write(`
                                                                     <html>
                                                                         <head>
-                                                                            <title>Print Skynet Label - ${lastTemuSticker.skynetTrackingNumber}</title>
+                                                                            <title>Print Skynet Label - ${(lastTemuSticker.skynetTrackingNumber || '').toString().replace(/^skyt-?/i, '').trim()}</title>
                                                                             <style>
-                                                                                @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&display=swap');
-                                                                                body { font-family: 'Inter', system-ui, -apple-system, sans-serif; margin: 0; padding: 20px; display: flex; justify-content: center; }
-                                                                                @media print { body { padding: 0; } }
+                                                                                @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800;900&display=swap');
+                                                                                body { font-family: 'Inter', 'Arial', system-ui, -apple-system, sans-serif; margin: 0; padding: 10px; display: flex; justify-content: center; background-color: #fff; }
+                                                                                @media print {
+                                                                                    body { padding: 0; margin: 0; }
+                                                                                    @page { size: auto; margin: 2mm; }
+                                                                                }
                                                                             </style>
                                                                         </head>
                                                                         <body>

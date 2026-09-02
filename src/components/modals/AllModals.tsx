@@ -2407,82 +2407,229 @@ export default function AllModals({
                                 </button>
                             </div>
 
-                            {/* Printable Thermal Shipping Label Card Area */}
+                            {/* Printable Thermal Shipping Label Card Area — Exact GETonline Format */}
                             <div
                                 id="thermal-label-print-area"
                                 style={{
-                                    border: '2px solid #111827',
-                                    borderRadius: '8px',
-                                    padding: '16px',
+                                    border: '2px solid #000000',
+                                    borderRadius: '2px',
+                                    padding: '14px 16px',
                                     backgroundColor: '#ffffff',
                                     color: '#000000',
-                                    fontFamily: "'Inter', sans-serif"
+                                    fontFamily: "'Arial', 'Helvetica', sans-serif"
                                 }}
                             >
-                                {/* Brand Header */}
-                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '2px solid #000000', paddingBottom: '8px', marginBottom: '10px' }}>
+                                {/* Top Header: SkyNet Logo + Web URL */}
+                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
                                     <div>
-                                        <img src="/logo.png" alt="Skynet Worldwide Express" style={{ height: '38px', maxWidth: '170px', objectFit: 'contain', display: 'block' }} />
+                                        <img
+                                            src="/logo.png"
+                                            alt="SKYNET WORLDWIDE EXPRESS"
+                                            style={{ height: '36px', maxWidth: '170px', objectFit: 'contain', display: 'block' }}
+                                        />
                                     </div>
-                                    <div style={{ textAlign: 'right' }}>
-                                        <span style={{ backgroundColor: '#111827', color: '#ffffff', fontSize: '9px', fontWeight: '800', padding: '2px 6px', borderRadius: '3px', textTransform: 'uppercase' }}>
-                                            REPLACEMENT STICKER
-                                        </span>
-                                        {printLabelModal.assignedPartner && (
-                                            <div style={{ fontSize: '10px', fontWeight: '800', color: '#111827', marginTop: '2px' }}>
-                                                {printLabelModal.assignedPartner}
+                                    <div style={{ fontSize: '11px', fontWeight: '700', color: '#000000', letterSpacing: '-0.2px' }}>
+                                        www.skynetexpress.com/
+                                    </div>
+                                </div>
+
+                                {/* Section 1: DELIVER TO + ACCOUNT & Destination Code */}
+                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '8px' }}>
+                                    {/* Deliver To Details */}
+                                    <div style={{ flex: 1, minWidth: 0 }}>
+                                        <div style={{ fontSize: '14px', fontWeight: '900', letterSpacing: '0.5px', color: '#000000', marginBottom: '2px' }}>
+                                            DELIVER TO
+                                        </div>
+                                        <div style={{ fontSize: '12px', fontWeight: '800', textTransform: 'uppercase', marginBottom: '2px' }}>
+                                            {printLabelModal.recipientName || '—'}
+                                        </div>
+                                        <div style={{ fontSize: '10.5px', lineHeight: '1.3', color: '#000000', textTransform: 'uppercase' }}>
+                                            {(() => {
+                                                let rawLines: string[] = [];
+                                                const cityUpper = (printLabelModal.city || '').trim().toUpperCase();
+                                                const distUpper = (printLabelModal.district || '').trim().toUpperCase();
+                                                const provUpper = (printLabelModal.province || '').trim().toUpperCase();
+                                                const countryUpper = (printLabelModal.country || 'SRI LANKA').trim().toUpperCase();
+
+                                                if (printLabelModal.recipientAddress) {
+                                                    const splitNewlines = printLabelModal.recipientAddress
+                                                        .split(/[\r\n]+/)
+                                                        .map(l => l.trim())
+                                                        .filter(Boolean);
+
+                                                    if (splitNewlines.length === 1 && splitNewlines[0].includes(',')) {
+                                                        const parts = splitNewlines[0].split(',').map(p => p.trim()).filter(Boolean);
+                                                        const cleanParts = parts.filter(p => {
+                                                            const up = p.toUpperCase();
+                                                            return up !== 'SRI LANKA' && up !== 'SRILANKA' && up !== countryUpper && up !== provUpper;
+                                                        });
+                                                        if (cleanParts.length >= 2) {
+                                                            const line1 = cleanParts.slice(0, cleanParts.length - 1).join(', ');
+                                                            const line2 = cleanParts[cleanParts.length - 1];
+                                                            rawLines = [line1, line2];
+                                                        } else if (cleanParts.length === 1) {
+                                                            rawLines = cleanParts;
+                                                        } else {
+                                                            rawLines = splitNewlines;
+                                                        }
+                                                    } else {
+                                                        rawLines = splitNewlines;
+                                                    }
+                                                }
+
+                                                const cleanLines = rawLines.filter(line => {
+                                                    const up = line.trim().toUpperCase();
+                                                    if (!up) return false;
+                                                    if (up === 'SRI LANKA' || up === 'SRILANKA' || up === countryUpper) return false;
+                                                    if (provUpper && up === provUpper) return false;
+                                                    return true;
+                                                });
+
+                                                return (
+                                                    <>
+                                                        {cleanLines.map((line, idx) => (
+                                                            <div key={idx}>{line}</div>
+                                                        ))}
+                                                    </>
+                                                );
+                                            })()}
+                                            <div style={{ marginTop: '1px' }}>
+                                                {printLabelModal.province ? `${printLabelModal.province.toUpperCase()} ` : ''}
+                                                <strong style={{ fontWeight: '900' }}>
+                                                    {printLabelModal.city ? printLabelModal.city.toUpperCase() : (printLabelModal.district ? printLabelModal.district.toUpperCase() : '')}
+                                                </strong>
                                             </div>
-                                        )}
+                                            <div>{printLabelModal.country ? printLabelModal.country.toUpperCase() : 'SRI LANKA'}</div>
+                                        </div>
+                                    </div>
+
+                                    {/* Account + Destination Zone (LK1 / CMB from shipments.dest_location_code) */}
+                                    <div style={{ width: '150px', textAlign: 'right', display: 'flex', flexDirection: 'column', alignItems: 'flex-end', justifyContent: 'space-between', minHeight: '85px' }}>
+                                        <div style={{ fontSize: '12px', fontWeight: '700', whiteSpace: 'nowrap', color: '#000000' }}>
+                                            ACCOUNT : <span style={{ fontWeight: '800' }}>{printLabelModal.account || '—'}</span>
+                                        </div>
+
+                                        <div style={{ fontSize: '24px', fontWeight: '900', letterSpacing: '1px', lineHeight: '1', color: '#000000', marginTop: 'auto' }}>
+                                            {printLabelModal.destLocationCode ? printLabelModal.destLocationCode.toUpperCase() : (printLabelModal.assignedZone ? printLabelModal.assignedZone.toUpperCase() : '—')}
+                                        </div>
                                     </div>
                                 </div>
 
-                                {/* SVG Barcode */}
-                                <div
-                                    style={{ margin: '8px 0', textAlign: 'center' }}
-                                    dangerouslySetInnerHTML={{ __html: generateCode128SVG(printLabelModal.trackingNumber) }}
-                                />
+                                {/* Dividing Line */}
+                                <div style={{ borderTop: '2px solid #000000', margin: '6px 0' }} />
 
-                                {/* Tracking Number */}
-                                <div style={{ textAlign: 'center', fontSize: '20px', fontWeight: '900', letterSpacing: '2px', color: '#000000', marginBottom: '8px' }}>
-                                    {printLabelModal.trackingNumber}
+                                {/* Section 2: DELIVERY INSTRUCTIONS / Piece Count / Weight & Value & Service */}
+                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', fontSize: '9.5px' }}>
+                                    {/* Left: Delivery Instructions */}
+                                    <div style={{ flex: 1.2, minWidth: 0 }}>
+                                        <div style={{ fontSize: '9px', fontWeight: '900', letterSpacing: '0.3px', textTransform: 'uppercase', color: '#000000' }}>
+                                            DELIVERY INSTRUCTIONS
+                                        </div>
+                                        <div style={{ fontSize: '9.5px', marginTop: '2px', color: '#000000', wordBreak: 'break-word', lineHeight: '1.25' }}>
+                                            {printLabelModal.deliveryInstructions || printLabelModal.goodsDesc || '—'}
+                                        </div>
+                                    </div>
+
+                                    {/* Center: Piece Count */}
+                                    <div style={{ flex: 0.8, textAlign: 'center', fontSize: '15px', fontWeight: '900', color: '#000000', paddingTop: '1px' }}>
+                                        {printLabelModal.numOfItems ? `${printLabelModal.numOfItems} Pc` : '1 Pc'}
+                                    </div>
+
+                                    {/* Right: Weight, Customs Value, Service EN from shipments */}
+                                    <div style={{ flex: 1.2, textAlign: 'right' }}>
+                                        <div style={{ fontSize: '12px', fontWeight: '900', color: '#000000' }}>
+                                            ({printLabelModal.numOfItems || 1}) {(() => {
+                                                const raw = Number(printLabelModal.weight) || 0;
+                                                const kg = raw >= 10 ? raw / 1000 : raw;
+                                                return `${kg.toFixed(2)} KG`;
+                                            })()}
+                                        </div>
+                                        <div style={{ fontSize: '10.5px', fontWeight: '700', color: '#000000', marginTop: '1px' }}>
+                                            {(() => {
+                                                const valStr = (printLabelModal.value || '').toString().trim();
+                                                if (!valStr) return '—';
+                                                const num = parseFloat(valStr.replace(/[^0-9.]/g, ''));
+                                                return isNaN(num) ? valStr : `${num.toFixed(2)} LKR`;
+                                            })()}
+                                        </div>
+                                        <div style={{ fontSize: '24px', fontWeight: '900', lineHeight: '1', marginTop: '2px', color: '#000000' }}>
+                                            {printLabelModal.serviceType || 'EN'}
+                                        </div>
+                                    </div>
                                 </div>
 
-                                {/* Temu Sender Reference if present */}
-                                {printLabelModal.senderReference && (
-                                    <div style={{ backgroundColor: '#f3f4f6', border: '1px solid #d1d5db', borderRadius: '4px', padding: '4px 8px', fontSize: '11px', fontWeight: '700', textAlign: 'center', marginBottom: '10px' }}>
-                                        TEMU REF: {printLabelModal.senderReference}
-                                    </div>
-                                )}
+                                {/* Dividing Line */}
+                                <div style={{ borderTop: '2px solid #000000', margin: '6px 0' }} />
 
-                                {/* Label Information Grid */}
-                                <div style={{ borderTop: '1px dashed #000000', paddingTop: '8px', fontSize: '11px', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '6px' }}>
-                                    <div>
-                                        <span style={{ color: '#6b7280', fontSize: '9px', textTransform: 'uppercase', display: 'block' }}>CONSIGNEE</span>
-                                        <strong style={{ fontSize: '12px' }}>{printLabelModal.recipientName || 'Consignee'}</strong>
+                                {/* Section 3: Barcode + Customs Notice */}
+                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '8px', margin: '4px 0' }}>
+                                    {/* Barcode SVG + Barcode Number */}
+                                    <div style={{ flex: 1, minWidth: 0, textAlign: 'center' }}>
+                                        <div
+                                            style={{ width: '100%', overflow: 'hidden' }}
+                                            dangerouslySetInnerHTML={{ __html: generateCode128SVG((printLabelModal.trackingNumber || '').toString().replace(/^skyt-?/i, '').trim()) }}
+                                        />
+                                        <div style={{ fontSize: '15px', fontWeight: '900', letterSpacing: '1.2px', marginTop: '2px', color: '#000000' }}>
+                                            {(printLabelModal.trackingNumber || '').toString().replace(/^skyt-?/i, '').trim()}
+                                        </div>
                                     </div>
-                                    <div>
-                                        <span style={{ color: '#6b7280', fontSize: '9px', textTransform: 'uppercase', display: 'block' }}>DESTINATION</span>
-                                        <strong style={{ fontSize: '12px' }}>{printLabelModal.city || '—'}</strong>
-                                    </div>
-                                    <div>
-                                        <span style={{ color: '#6b7280', fontSize: '9px', textTransform: 'uppercase', display: 'block' }}>MAWB REF</span>
-                                        <strong>{printLabelModal.mawbRef || '—'}</strong>
-                                    </div>
-                                    <div>
-                                        <span style={{ color: '#6b7280', fontSize: '9px', textTransform: 'uppercase', display: 'block' }}>BAG NUMBER</span>
-                                        <strong>{printLabelModal.bagNumber || '—'}</strong>
+
+                                    {/* Customs Duties Notice Box */}
+                                    <div style={{ width: '100px', textAlign: 'left', fontSize: '8.5px', fontWeight: '800', lineHeight: '1.2', color: '#000000' }}>
+                                        <div>****************</div>
+                                        <div style={{ margin: '1px 0' }}>
+                                            Customs<br />
+                                            Duties/Taxes<br />
+                                            Paid by<br />
+                                            Consignor
+                                        </div>
+                                        <div>****************</div>
                                     </div>
                                 </div>
 
-                                {/* Zone Footer Badge */}
-                                {printLabelModal.assignedZone && (
-                                    <div style={{ marginTop: '10px', borderTop: '1px solid #000000', paddingTop: '6px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                                        <span style={{ fontSize: '10px', fontWeight: '700' }}>DESTINATION ZONE:</span>
-                                        <span style={{ fontSize: '14px', fontWeight: '900', backgroundColor: '#111827', color: '#ffffff', padding: '2px 8px', borderRadius: '4px' }}>
-                                            {printLabelModal.assignedZone}
-                                        </span>
+                                {/* Section 4: SENDER + Legal Clause */}
+                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '8px', marginTop: '4px' }}>
+                                    {/* Sender Details from shipments consignor fields */}
+                                    <div style={{ flex: 1.3, minWidth: 0, fontSize: '9px', lineHeight: '1.3', color: '#000000' }}>
+                                        <div style={{ fontSize: '9.5px', fontWeight: '900', textTransform: 'uppercase', marginBottom: '1px' }}>
+                                            SENDER
+                                        </div>
+                                        <div>{printLabelModal.senderName || '—'}</div>
+                                        {(() => {
+                                            if (printLabelModal.senderAddress) {
+                                                const lines = printLabelModal.senderAddress
+                                                    .split(/[\r\n]+/)
+                                                    .map(l => l.trim())
+                                                    .filter(Boolean);
+                                                return (
+                                                    <>
+                                                        {lines.map((line, idx) => (
+                                                            <div key={idx}>{line}</div>
+                                                        ))}
+                                                    </>
+                                                );
+                                            }
+                                            return (
+                                                <>
+                                                    <div>Machong Logistics Park</div>
+                                                    <div>Dongguan Guangdong</div>
+                                                    <div>523040 CHINA</div>
+                                                </>
+                                            );
+                                        })()}
+                                        <div style={{ marginTop: '2px', fontSize: '9.5px' }}>
+                                            Sender Ref: {printLabelModal.senderReference || '—'}
+                                        </div>
                                     </div>
-                                )}
+
+                                    {/* Disclaimer */}
+                                    <div style={{ flex: 0.9, textAlign: 'left', fontSize: '7.5px', fontWeight: '700', lineHeight: '1.25', color: '#000000', textTransform: 'uppercase', paddingTop: '2px' }}>
+                                        I/WE AGREE THAT<br />
+                                        CARRIER'S STD. T&C APPLY TO<br />
+                                        THIS SHIPMENT & LIMIT THE<br />
+                                        CARRIER'S LIABILITY
+                                    </div>
+                                </div>
                             </div>
 
                             {/* Modal Actions */}
@@ -2496,11 +2643,14 @@ export default function AllModals({
                                             win.document.write(`
                                             <html>
                                                 <head>
-                                                    <title>Print Skynet Label - ${printLabelModal.trackingNumber}</title>
+                                                    <title>Print Skynet Label - ${(printLabelModal.trackingNumber || '').toString().replace(/^skyt-?/i, '').trim()}</title>
                                                     <style>
-                                                        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&display=swap');
-                                                        body { font-family: 'Inter', system-ui, -apple-system, sans-serif; margin: 0; padding: 20px; display: flex; justify-content: center; }
-                                                        @media print { body { padding: 0; } }
+                                                        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800;900&display=swap');
+                                                        body { font-family: 'Inter', 'Arial', system-ui, -apple-system, sans-serif; margin: 0; padding: 10px; display: flex; justify-content: center; background-color: #fff; }
+                                                        @media print {
+                                                            body { padding: 0; margin: 0; }
+                                                            @page { size: auto; margin: 2mm; }
+                                                        }
                                                     </style>
                                                 </head>
                                                 <body>

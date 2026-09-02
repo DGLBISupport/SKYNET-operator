@@ -296,13 +296,26 @@ export default function DamagedBarcodeTab({
                                                         onClick={() => {
                                                             if (damagedCurrentScan?.parcel) {
                                                                 setPrintLabelModal({
-                                                                    trackingNumber: damagedCurrentScan.parcel.trackingNumber,
+                                                                    trackingNumber: (damagedCurrentScan.parcel.trackingNumber || '').toString().replace(/^skyt-?/i, '').trim(),
                                                                     senderReference: damagedCurrentScan.parcel.senderReference,
                                                                     recipientName: damagedCurrentScan.parcel.recipientName,
+                                                                    recipientPhone: damagedCurrentScan.parcel.recipientPhone,
+                                                                    recipientAddress: damagedCurrentScan.parcel.recipientAddress,
                                                                     city: damagedCurrentScan.parcel.city,
                                                                     province: damagedCurrentScan.parcel.province,
                                                                     district: damagedCurrentScan.parcel.district,
+                                                                    country: damagedCurrentScan.parcel.country,
+                                                                    senderName: damagedCurrentScan.parcel.senderName,
+                                                                    senderAddress: damagedCurrentScan.parcel.senderAddress,
+                                                                    goodsDesc: damagedCurrentScan.parcel.goodsDesc,
+                                                                    deliveryInstructions: damagedCurrentScan.parcel.deliveryInstructions || damagedCurrentScan.parcel.goodsDesc,
+                                                                    numOfItems: damagedCurrentScan.parcel.numOfItems,
+                                                                    value: damagedCurrentScan.parcel.value,
+                                                                    account: damagedCurrentScan.parcel.account,
+                                                                    destLocationCode: damagedCurrentScan.parcel.destLocationCode,
+                                                                    serviceType: damagedCurrentScan.parcel.serviceType,
                                                                     weight: damagedCurrentScan.parcel.weight,
+                                                                    weightMeasure: damagedCurrentScan.parcel.weightMeasure,
                                                                     mawbRef: damagedCurrentScan.parcel.mawbRef,
                                                                     assignedPartner: damagedCurrentScan.assignedPartner,
                                                                     assignedZone: damagedCurrentScan.assignedZone

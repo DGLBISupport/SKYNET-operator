@@ -8,11 +8,16 @@ export interface SkyNetParcelData {
     province: string;
     district: string;
     city: string;
+    country?: string;
     weight: number;
+    weightMeasure?: string;
     value?: string;
     account?: string;
+    destLocationCode?: string;
     apiSync?: string;
     goodsDesc?: string;
+    deliveryInstructions?: string;
+    numOfItems?: number;
     mawbRef?: string;
     initialManifest?: string;
     inboundManifest?: string;
