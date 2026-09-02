@@ -66,6 +66,56 @@ const cleanAddress = (...parts: (string | null | undefined)[]) => {
     return parts.filter(p => p && p.trim() !== "").map(p => p.trim()).join(", ");
 };
 
+const cleanRecipientAddressLines = (shipment: any) => {
+    const rawParts = [
+        shipment?.consignee_address_1,
+        shipment?.consignee_address_2,
+        shipment?.consignee_address_3,
+        shipment?.consignee_address_4,
+        shipment?.consignee_address_5
+    ].filter(p => p && typeof p === 'string' && p.trim() !== '').map(p => p.trim());
+
+    const city = (shipment?.consignee_location_name || '').trim().toLowerCase();
+    const state = (shipment?.consignee_state || '').trim().toLowerCase();
+    const country = (shipment?.consignee_country_name || 'sri lanka').trim().toLowerCase();
+    const countryCode = (shipment?.consignee_country_code || 'lk').trim().toLowerCase();
+    const stateBase = state.replace(/\s*province\s*$/i, '').trim();
+
+    const isAdministrativeToken = (t: string) => {
+        const lower = t.trim().toLowerCase();
+        if (!lower) return true;
+        if (countryCode && lower === countryCode) return true;
+        if (country && (lower === country || lower === country.replace(/\s+/g, ''))) return true;
+        if (state && (lower === state || lower === state.replace(/\s+/g, ''))) return true;
+        if (stateBase && (lower === stateBase || lower === `${stateBase} province` || lower === `${stateBase}province`)) return true;
+        if (city && (lower === city || lower === city.replace(/\s+/g, ''))) return true;
+        return false;
+    };
+
+    const filteredLines: string[] = [];
+    for (const part of rawParts) {
+        const subParts = part.split(',').map(p => p.trim()).filter(Boolean);
+        if (subParts.length > 0 && subParts.every(p => isAdministrativeToken(p))) {
+            continue;
+        }
+
+        let cleanParts = [...subParts];
+        while (cleanParts.length > 1 && isAdministrativeToken(cleanParts[cleanParts.length - 1])) {
+            cleanParts.pop();
+        }
+
+        const cleanLine = cleanParts.join(', ').trim();
+        if (cleanLine && !isAdministrativeToken(cleanLine)) {
+            const lowerClean = cleanLine.toLowerCase();
+            if (!filteredLines.some(l => l.toLowerCase() === lowerClean)) {
+                filteredLines.push(cleanLine);
+            }
+        }
+    }
+
+    return filteredLines.length > 0 ? filteredLines.join('\n') : (shipment?.consignee_address_1 || '');
+};
+
 async function resolveZoneAndPartner(
     supabaseUrl: string,
     headers: any,
@@ -178,7 +228,7 @@ async function uploadToFfdx(
             Username: username,
             Password: password,
             xmlStream: xmlStream,
-            LevelConfirm: '0'
+            LevelConfirm: 'summary'
         });
 
         console.log(`[FFDX] [Missed Parcel Recovery] Uploading tracking event (EventID ${eventId} - ${remarks}) for parcel: ${referenceNumber}`);
@@ -190,7 +240,10 @@ async function uploadToFfdx(
         });
 
         const rawText = (await res.text()).trim();
-        const success = res.ok && rawText.includes('<Status>1</Status>');
+        const cleanContent = rawText.replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/<[^>]+>/g, '').trim();
+        const isSuccessStatus = rawText.includes('StatusCode>0') || rawText.toLowerCase().includes('transmitted successfully') || rawText.includes('<Status>1</Status>');
+        const isExplicitFailure = rawText.includes('Invalid') || rawText.includes('denied') || rawText.includes('StatusCode>-1') || cleanContent.includes('|-1|');
+        const success = res.ok && isSuccessStatus && !isExplicitFailure;
         const trackStatus = success ? 'UPLOADED' : 'FAILED';
 
         if (allocationId) {
@@ -260,7 +313,7 @@ export async function GET(request: Request) {
         const [spaRes, buRes, mawbRes] = await Promise.all([
             fetch(spaQuery, { headers: sb.headers, cache: 'no-store' }),
             fetch(`${sb.url}/rest/v1/bag_unsealing?select=bag_number,mawb_ref,scanned_parcels&order=created_at.desc&limit=200`, { headers: sb.headers, cache: 'no-store' }).catch(() => null),
-            fetch(`${sb.url}/rest/v1/mawb?select=mawb_reference&order=mawb_created.desc.nullslast&limit=100`, { headers: sb.headers, cache: 'no-store' }).catch(() => null)
+            fetch(`${sb.url}/rest/v1/mawb?select=mawb_reference,fetched_at&order=fetched_at.desc.nullslast,mawb_created.desc.nullslast&limit=100`, { headers: sb.headers, cache: 'no-store' }).catch(() => null)
         ]);
 
         if (!spaRes.ok) {
@@ -291,8 +344,15 @@ export async function GET(request: Request) {
             } catch (e) {}
         }
 
-        // Build list of all available MAWBs from mawb table
+        // Build list of all available MAWBs from mawb table (with fetched_at for today-detection)
         const allMawbSet = new Set<string>();
+        // Map of mawb_reference -> fetched_at date string
+        const mawbFetchedAtMap: Record<string, string> = {};
+
+        // Compute today's date in local timezone (Asia/Colombo)
+        const tz = process.env.TZ || 'Asia/Colombo';
+        const todayStr = new Intl.DateTimeFormat('en-CA', { timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
+
         if (mawbRes && mawbRes.ok) {
             try {
                 const mawbData = await mawbRes.json();
@@ -300,6 +360,9 @@ export async function GET(request: Request) {
                     mawbData.forEach((m: any) => {
                         if (m.mawb_reference && m.mawb_reference.trim()) {
                             allMawbSet.add(m.mawb_reference.trim());
+                            if (m.fetched_at) {
+                                mawbFetchedAtMap[m.mawb_reference.trim()] = m.fetched_at;
+                            }
                         }
                     });
                 }
@@ -313,6 +376,17 @@ export async function GET(request: Request) {
         });
 
         if (relevantAllocs.length === 0) {
+            const allMawbRefs0 = Array.from(allMawbSet);
+            const mawbListWithDates0 = allMawbRefs0.map(ref => ({
+                mawb: ref,
+                fetchedAt: mawbFetchedAtMap[ref] || null
+            }));
+            const todayMawbs0 = allMawbRefs0.filter(ref => {
+                const fa = mawbFetchedAtMap[ref];
+                if (!fa) return false;
+                const dayPart = new Intl.DateTimeFormat('en-CA', { timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date(fa));
+                return dayPart === todayStr;
+            });
             return NextResponse.json({
                 success: true,
                 parcels: [],
@@ -327,7 +401,9 @@ export async function GET(request: Request) {
                     pronto: 0,
                     other: 0
                 },
-                mawbList: Array.from(allMawbSet)
+                mawbList: allMawbRefs0,
+                mawbListWithDates: mawbListWithDates0,
+                todayMawbs: todayMawbs0
             });
         }
 
@@ -477,6 +553,21 @@ export async function GET(request: Request) {
 
         const totalManifestCount = pendingCount + shortlandedCount + recoveredCount;
 
+        // Build final mawb list with fetched_at metadata
+        const allMawbRefs = Array.from(new Set([...allMawbSet, ...mawbSet]));
+        const mawbListWithDates = allMawbRefs.map(ref => ({
+            mawb: ref,
+            fetchedAt: mawbFetchedAtMap[ref] || null
+        }));
+
+        // Determine which MAWBs were fetched today (for auto-select on client)
+        const todayMawbs = allMawbRefs.filter(ref => {
+            const fa = mawbFetchedAtMap[ref];
+            if (!fa) return false;
+            const dayPart = new Intl.DateTimeFormat('en-CA', { timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date(fa));
+            return dayPart === todayStr;
+        });
+
         return NextResponse.json({
             success: true,
             parcels: mappedParcels,
@@ -491,7 +582,9 @@ export async function GET(request: Request) {
                 pronto: partnerCounts['Pronto'],
                 other: partnerCounts['Other']
             },
-            mawbList: Array.from(new Set([...allMawbSet, ...mawbSet]))
+            mawbList: allMawbRefs,
+            mawbListWithDates,
+            todayMawbs
         });
 
     } catch (err: any) {
@@ -633,13 +726,7 @@ export async function POST(request: Request) {
             trackingNumber: canonicalRef,
             recipientName: shipment?.consignee_name || "Unknown Recipient",
             recipientPhone: shipment?.consignee_phone || "No Phone",
-            recipientAddress: cleanAddress(
-                shipment?.consignee_address_1,
-                shipment?.consignee_address_2,
-                shipment?.consignee_address_3,
-                shipment?.consignee_address_4,
-                shipment?.consignee_address_5
-            ),
+            recipientAddress: cleanRecipientAddressLines(shipment),
             senderName: shipment?.consignor_name || "Unknown Sender",
             province: shipment?.consignee_state || "Unknown Province",
             district: districtName || shipment?.consignee_address_3 || "Unknown District",

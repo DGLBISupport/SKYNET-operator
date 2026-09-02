@@ -82,22 +82,37 @@ const cleanRecipientAddressLines = (shipment: any) => {
     const state = (shipment.consignee_state || '').trim().toLowerCase();
     const country = (shipment.consignee_country_name || 'sri lanka').trim().toLowerCase();
     const countryCode = (shipment.consignee_country_code || 'lk').trim().toLowerCase();
+    const stateBase = state.replace(/\s*province\s*$/i, '').trim();
+
+    const isAdministrativeToken = (t: string) => {
+        const lower = t.trim().toLowerCase();
+        if (!lower) return true;
+        if (countryCode && lower === countryCode) return true;
+        if (country && (lower === country || lower === country.replace(/\s+/g, ''))) return true;
+        if (state && (lower === state || lower === state.replace(/\s+/g, ''))) return true;
+        if (stateBase && (lower === stateBase || lower === `${stateBase} province` || lower === `${stateBase}province`)) return true;
+        if (city && (lower === city || lower === city.replace(/\s+/g, ''))) return true;
+        return false;
+    };
 
     const filteredLines: string[] = [];
     for (const part of rawParts) {
-        const lower = part.toLowerCase();
-        if (
-            (city && lower === city) ||
-            (state && lower === state) ||
-            (country && lower === country) ||
-            (countryCode && lower === countryCode) ||
-            lower === 'sri lanka' ||
-            lower === 'srilanka'
-        ) {
+        const subParts = part.split(',').map(p => p.trim()).filter(Boolean);
+        if (subParts.length > 0 && subParts.every(p => isAdministrativeToken(p))) {
             continue;
         }
-        if (!filteredLines.some(l => l.toLowerCase() === lower)) {
-            filteredLines.push(part);
+
+        let cleanParts = [...subParts];
+        while (cleanParts.length > 1 && isAdministrativeToken(cleanParts[cleanParts.length - 1])) {
+            cleanParts.pop();
+        }
+
+        const cleanLine = cleanParts.join(', ').trim();
+        if (cleanLine && !isAdministrativeToken(cleanLine)) {
+            const lowerClean = cleanLine.toLowerCase();
+            if (!filteredLines.some(l => l.toLowerCase() === lowerClean)) {
+                filteredLines.push(cleanLine);
+            }
         }
     }
 
@@ -280,7 +295,7 @@ async function uploadToFfdx(
             Username:     username,
             Password:     password,
             xmlStream:    xmlStream,
-            LevelConfirm: '0'
+            LevelConfirm: 'summary'
         });
 
         console.log(`[FFDX] Uploading tracking event (EventID ${eventId} - ${remarks}) for parcel: ${referenceNumber}`);
@@ -294,8 +309,11 @@ async function uploadToFfdx(
         const rawText = (await res.text()).trim();
         console.log(`[FFDX] HTTP ${res.status} for ${referenceNumber} (EventID ${eventId}): ${rawText.slice(0, 200)}`);
 
-        // Determine success: FFDX returns XML; a successful upload contains <Status>1</Status>
-        const success = res.ok && rawText.includes('<Status>1</Status>');
+        // Determine success: FFDX returns XML. For tracking events, successful upload contains StatusCode 0 or transmitted successfully.
+        const cleanContent = rawText.replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/<[^>]+>/g, '').trim();
+        const isSuccessStatus = rawText.includes('StatusCode>0') || rawText.toLowerCase().includes('transmitted successfully') || rawText.includes('<Status>1</Status>');
+        const isExplicitFailure = rawText.includes('Invalid') || rawText.includes('denied') || rawText.includes('StatusCode>-1') || cleanContent.includes('|-1|');
+        const success = res.ok && isSuccessStatus && !isExplicitFailure;
         const trackStatus = success ? 'UPLOADED' : 'FAILED';
 
         // Update track_status in Supabase (best-effort)
@@ -645,16 +663,43 @@ export async function POST(request: Request) {
             const isMawbMismatch = Boolean(mawbRef && shipmentMawb && shipmentMawb.trim().toLowerCase() !== mawbRef.trim().toLowerCase());
             const isBagMismatch = Boolean(bagNumber && shipmentBag.trim().toLowerCase() !== bagNumber.trim().toLowerCase());
 
-            if (bagNumber || mawbRef) {
+            // If no bagNumber was provided, verify shipment has an assigned bag and matches MAWB
+            if (!bagNumber) {
+                if (isMawbMismatch) {
+                    return NextResponse.json({
+                        success: false,
+                        error: 'NOT_IN_BAG',
+                        message: `This parcel belongs to MAWB "${shipmentMawb}" (Bag "${shipmentBag || 'Unknown'}"), not the currently selected MAWB "${mawbRef}".`,
+                        actualBag: shipmentBag || null,
+                        actualMawb: shipmentMawb || null,
+                        expectedBag: null,
+                        expectedMawb: mawbRef
+                    }, { status: 400 });
+                }
+
+                if (!shipmentBag) {
+                    return NextResponse.json({
+                        success: false,
+                        error: 'UNASSIGNED',
+                        message: `Parcel "${shipmentRef}" is in the database but not assigned to any bag.`,
+                        actualBag: null,
+                        actualMawb: shipmentMawb || null
+                    }, { status: 400 });
+                }
+            }
+
+            const targetBag = bagNumber || shipmentBag;
+
+            if (targetBag || mawbRef) {
                 // Quick guard: if this bag has already been unsealed, block further first-scan attempts
                 try {
                     const mawbFilter = mawbRef ? `mawb_ref=eq.${encodeURIComponent(mawbRef)}&` : '';
-                    const checkUnsealRes = await fetch(`${supabaseUrl}/rest/v1/bag_unsealing?${mawbFilter}bag_number=eq.${encodeURIComponent(bagNumber)}&select=unsealed,scanned_parcels&limit=1`, { headers });
+                    const checkUnsealRes = await fetch(`${supabaseUrl}/rest/v1/bag_unsealing?${mawbFilter}bag_number=eq.${encodeURIComponent(targetBag)}&select=unsealed,scanned_parcels&limit=1`, { headers });
                     if (checkUnsealRes.ok) {
                         const unsealList = await checkUnsealRes.json();
                         const unsealRec = unsealList && unsealList[0];
                         if (unsealRec && unsealRec.unsealed) {
-                            return NextResponse.json({ success: false, error: 'BAG_ALREADY_COMPLETED', message: `Bag "${bagNumber}" has already been unsealed.` }, { status: 409 });
+                            return NextResponse.json({ success: false, error: 'BAG_ALREADY_COMPLETED', message: `Bag "${targetBag}" has already been unsealed.` }, { status: 409 });
                         }
                         // If parcel already present in scanned_parcels, return duplicate indicator
                         if (unsealRec && Array.isArray(unsealRec.scanned_parcels)) {
@@ -662,7 +707,7 @@ export async function POST(request: Request) {
                                 (p.skynetTrackingNumber || p.trackingNumber || p.tracking_number)?.toString() === shipmentRef.toString()
                             );
                             if (found) {
-                                return NextResponse.json({ success: false, error: 'ALREADY_UNSEALED_PARCEL', message: `Parcel ${shipmentRef} already unsealed in Bag "${bagNumber}".` }, { status: 409 });
+                                return NextResponse.json({ success: false, error: 'ALREADY_UNSEALED_PARCEL', message: `Parcel ${shipmentRef} already unsealed in Bag "${targetBag}".` }, { status: 409 });
                             }
                         }
                     }
@@ -670,7 +715,7 @@ export async function POST(request: Request) {
                     console.error('Failed to check bag_unsealing before first-scan:', e);
                 }
 
-                if (isMawbMismatch || isBagMismatch) {
+                if (bagNumber && (isMawbMismatch || isBagMismatch)) {
                     if (overrideBag) {
                         // Update bag_number and mawb_reference in database
                         const patchBody: any = {
@@ -782,6 +827,7 @@ export async function POST(request: Request) {
                 numOfItems: shipment.num_of_items || 1,
                 serviceType: shipment.service_type || undefined,
                 mawbRef: finalMawb,
+                bagNumber: targetBag,
                 senderReference: shipment.sender_reference || undefined,
                 _scannedVia: isTemuScan ? 'TEMU' : 'SKYNET',
                 isTemuScan: isTemuScan,
@@ -792,7 +838,11 @@ export async function POST(request: Request) {
                 success: true,
                 parcel: skynetData,
                 assignedZone,
-                assignedPartner
+                assignedPartner,
+                bagNumber: targetBag,
+                actualBag: shipmentBag,
+                actualMawb: shipmentMawb,
+                autoSelectedBag: !bagNumber && Boolean(targetBag)
             });
         }
 

@@ -212,14 +212,59 @@ export default function FirstScanTab({
                                                         }
                                                     }, 50);
                                                 } else {
-                                                    setInvalidBagParcelModal({
-                                                        barcode: scannedVal,
-                                                        expectedBag: '',
-                                                        actualBag: null,
-                                                        reason: 'INVALID_BAG'
-                                                    });
-                                                    setFirstScanError(`Bag barcode "${scannedVal}" not found in this MAWB.`);
-                                                    setTimeout(() => bagBarcodeInputRef.current?.select(), 50);
+                                                    // Check if scanned barcode is a parcel belonging to a bag in this MAWB (Damaged Bag Barcode flow)
+                                                    const checkParcelBag = async () => {
+                                                        try {
+                                                            const res = await fetch(`/api/allocate?stage=damaged-lookup&trackingNumber=${encodeURIComponent(scannedVal)}`);
+                                                            const data = await res.json();
+                                                            if (data.success && data.parcel) {
+                                                                const identifiedBag = data.parcel.bagNumber || data.parcel.inboundBag || data.parcel.initialBag;
+                                                                const mawbOfParcel = data.parcel.mawbRef || data.parcel.initialManifest;
+                                                                const isMawbMatch = !mawbOfParcel || mawbOfParcel.toLowerCase() === firstScanMawb.toLowerCase();
+
+                                                                if (isMawbMatch && identifiedBag) {
+                                                                    const foundBag = firstScanBags.find((b: any) => b.bagNumber.toLowerCase() === identifiedBag.toLowerCase());
+                                                                    const isAlreadyUnsealed = unsealedBoxes.find((ub: any) => ub.mawb === firstScanMawb && ub.bagNumber && ub.bagNumber.toLowerCase() === identifiedBag.toLowerCase());
+                                                                    if (isAlreadyUnsealed) {
+                                                                        setInvalidBagParcelModal({
+                                                                            barcode: isAlreadyUnsealed.bagNumber,
+                                                                            expectedBag: isAlreadyUnsealed.bagNumber,
+                                                                            actualBag: null,
+                                                                            reason: 'BAG_ALREADY_COMPLETED'
+                                                                        });
+                                                                        setFirstScanError(`Bag "${identifiedBag}" has already been unsealed.`);
+                                                                        return;
+                                                                    }
+
+                                                                    setFirstScanSelectedBag(identifiedBag);
+                                                                    setBagBarcodeInput(identifiedBag);
+                                                                    if (foundBag) setFirstScanExpected(foundBag.expectedCount);
+                                                                    setFirstScanError('');
+                                                                    setFirstScanHistory([]);
+                                                                    triggerHighlight();
+                                                                    setTimeout(() => {
+                                                                        if (firstScanInputRef.current) {
+                                                                            firstScanInputRef.current.focus();
+                                                                            firstScanInputRef.current.select();
+                                                                        }
+                                                                    }, 50);
+                                                                    return;
+                                                                }
+                                                            }
+                                                        } catch (err) {
+                                                            console.error("Error identifying bag from parcel:", err);
+                                                        }
+
+                                                        setInvalidBagParcelModal({
+                                                            barcode: scannedVal,
+                                                            expectedBag: '',
+                                                            actualBag: null,
+                                                            reason: 'INVALID_BAG'
+                                                        });
+                                                        setFirstScanError(`Bag barcode "${scannedVal}" not found in this MAWB.`);
+                                                        setTimeout(() => bagBarcodeInputRef.current?.select(), 50);
+                                                    };
+                                                    checkParcelBag();
                                                 }
                                             }}>
                                                 <input
@@ -452,7 +497,7 @@ export default function FirstScanTab({
                                 </div>
 
                                 <div style={{ borderTop: '1px solid #f6f5f3ff', paddingTop: '16px' }}>
-                                    <div style={label}> Scan Barcode</div>
+                                    <div style={{ ...label, marginBottom: '8px' }}> Scan Barcode</div>
                                     <form onSubmit={handleFirstScanSubmit} style={{ display: 'flex', gap: '8px', marginBottom: '10px' }}>
                                         <input
                                             ref={firstScanInputRef}
@@ -472,7 +517,7 @@ export default function FirstScanTab({
                                             placeholder={firstScanMawb
                                                 ? (firstScanSelectedBag
                                                     ? `Scan parcel inside Bag ${firstScanSelectedBag}...`
-                                                    : "Scan Bag Barcode or select a bag first...")
+                                                    : "Scan Bag Barcode OR scan any Parcel to auto-select Damaged Bag...")
                                                 : "Select MAWB first"}
                                             className={!firstScanMawb ? '' : 'scan-input-blink'}
                                             style={{ ...inputStyle, flex: 1, backgroundColor: !firstScanMawb ? '#f3f4f6' : '#ffffff' }}
@@ -947,61 +992,80 @@ export default function FirstScanTab({
                                                             </div>
                                                             <div style={{ fontSize: '10.5px', lineHeight: '1.3', color: '#000000', textTransform: 'uppercase' }}>
                                                                 {(() => {
-                                                                    let rawLines: string[] = [];
+                                                                    const rawAddress = (lastTemuSticker.recipientAddress || '').trim();
                                                                     const cityUpper = (lastTemuSticker.city || '').trim().toUpperCase();
                                                                     const distUpper = (lastTemuSticker.district || '').trim().toUpperCase();
                                                                     const provUpper = (lastTemuSticker.province || '').trim().toUpperCase();
                                                                     const countryUpper = (lastTemuSticker.country || 'SRI LANKA').trim().toUpperCase();
 
-                                                                    if (lastTemuSticker.recipientAddress) {
-                                                                        const splitNewlines = lastTemuSticker.recipientAddress
-                                                                            .split(/[\r\n]+/)
-                                                                            .map(l => l.trim())
-                                                                            .filter(Boolean);
+                                                                    const displayedCity = (cityUpper && cityUpper !== 'UNKNOWN CITY' && cityUpper !== 'UNKNOWN')
+                                                                        ? cityUpper
+                                                                        : (distUpper && distUpper !== 'UNKNOWN DISTRICT' && distUpper !== 'UNKNOWN' ? distUpper : '');
 
-                                                                        if (splitNewlines.length === 1 && splitNewlines[0].includes(',')) {
-                                                                            const parts = splitNewlines[0].split(',').map(p => p.trim()).filter(Boolean);
-                                                                            const cleanParts = parts.filter(p => {
-                                                                                const up = p.toUpperCase();
-                                                                                return up !== 'SRI LANKA' && up !== 'SRILANKA' && up !== countryUpper && up !== provUpper;
-                                                                            });
-                                                                            if (cleanParts.length >= 2) {
-                                                                                const line1 = cleanParts.slice(0, cleanParts.length - 1).join(', ');
-                                                                                const line2 = cleanParts[cleanParts.length - 1];
-                                                                                rawLines = [line1, line2];
-                                                                            } else if (cleanParts.length === 1) {
-                                                                                rawLines = cleanParts;
-                                                                            } else {
-                                                                                rawLines = splitNewlines;
+                                                                    const provBase = provUpper.replace(/\s*PROVINCE\s*$/i, '').trim();
+
+                                                                    const isAdministrativeToken = (t: string) => {
+                                                                        const up = t.trim().toUpperCase();
+                                                                        if (!up) return true;
+                                                                        if (countryUpper && (up === countryUpper || up === countryUpper.replace(/\s+/g, ''))) return true;
+                                                                        if (provUpper && (up === provUpper || up === provUpper.replace(/\s+/g, ''))) return true;
+                                                                        if (provBase && (up === provBase || up === `${provBase} PROVINCE` || up === `${provBase}PROVINCE`)) return true;
+                                                                        if (displayedCity && (up === displayedCity || up === displayedCity.replace(/\s+/g, ''))) return true;
+                                                                        return false;
+                                                                    };
+
+                                                                    let rawLines: string[] = [];
+                                                                    if (rawAddress) {
+                                                                        const newlineLines = rawAddress.split(/[\r\n]+/).map(l => l.trim()).filter(Boolean);
+
+                                                                        for (const line of newlineLines) {
+                                                                            const subParts = line.split(',').map(p => p.trim()).filter(Boolean);
+                                                                            if (subParts.length > 0 && subParts.every(p => isAdministrativeToken(p))) {
+                                                                                continue;
                                                                             }
-                                                                        } else {
-                                                                            rawLines = splitNewlines;
+
+                                                                            let cleanParts = [...subParts];
+                                                                            while (cleanParts.length > 1 && isAdministrativeToken(cleanParts[cleanParts.length - 1])) {
+                                                                                cleanParts.pop();
+                                                                            }
+
+                                                                            const cleanLine = cleanParts.join(', ').trim();
+                                                                            if (cleanLine && !isAdministrativeToken(cleanLine)) {
+                                                                                rawLines.push(cleanLine);
+                                                                            }
                                                                         }
                                                                     }
 
-                                                                    const cleanLines = rawLines.filter(line => {
+                                                                    const cleanLines: string[] = [];
+                                                                    for (const line of rawLines) {
                                                                         const up = line.trim().toUpperCase();
-                                                                        if (!up) return false;
-                                                                        if (up === 'SRI LANKA' || up === 'SRILANKA' || up === countryUpper) return false;
-                                                                        if (provUpper && up === provUpper) return false;
-                                                                        return true;
-                                                                    });
+                                                                        if (!up) continue;
+                                                                        if (isAdministrativeToken(up)) continue;
+                                                                        if (displayedCity && up === displayedCity) continue;
+                                                                        if (!cleanLines.some(l => l.toUpperCase() === up)) {
+                                                                            cleanLines.push(line);
+                                                                        }
+                                                                    }
+
+                                                                    const validProv = provUpper && provUpper !== 'UNKNOWN PROVINCE' && provUpper !== 'UNKNOWN' && provUpper !== countryUpper;
+                                                                    const bottomLine = validProv ? `${provUpper}  ${countryUpper}` : countryUpper;
 
                                                                     return (
                                                                         <>
                                                                             {cleanLines.map((line, idx) => (
                                                                                 <div key={idx}>{line}</div>
                                                                             ))}
+                                                                            {displayedCity && (
+                                                                                <div style={{ fontWeight: '800', marginTop: cleanLines.length > 0 ? '1px' : '0' }}>
+                                                                                    {displayedCity}
+                                                                                </div>
+                                                                            )}
+                                                                            <div style={{ marginTop: '1px' }}>
+                                                                                {bottomLine}
+                                                                            </div>
                                                                         </>
                                                                     );
                                                                 })()}
-                                                                <div style={{ marginTop: '1px' }}>
-                                                                    {lastTemuSticker.province ? `${lastTemuSticker.province.toUpperCase()} ` : ''}
-                                                                    <strong style={{ fontWeight: '900' }}>
-                                                                        {lastTemuSticker.city ? lastTemuSticker.city.toUpperCase() : (lastTemuSticker.district ? lastTemuSticker.district.toUpperCase() : '')}
-                                                                    </strong>
-                                                                </div>
-                                                                <div>{lastTemuSticker.country ? lastTemuSticker.country.toUpperCase() : 'SRI LANKA'}</div>
                                                             </div>
                                                         </div>
 

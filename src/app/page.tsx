@@ -1671,90 +1671,73 @@ export default function WorkstationDashboard() {
             setFirstScanStatus('READY');
             setFirstScanHistory([]);
             return;
-        } else if (barcode.toUpperCase().startsWith('SKYT')) {
-            setInvalidBagParcelModal({
-                barcode: barcode,
-                expectedBag: '',
-                actualBag: null,
-                reason: 'INVALID_BAG'
-            });
-            setFirstScanError(`Bag barcode "${barcode}" not found in this MAWB.`);
-            setFirstScanStatus('ERROR');
-            return;
         }
 
-        // 2. Regular Parcel Barcode Scan
-        if (!firstScanSelectedBag) {
-            setInvalidBagParcelModal({
-                barcode: barcode,
-                expectedBag: '',
-                actualBag: null,
-                reason: 'NO_BAG_SELECTED'
-            });
-            setFirstScanError(`Bag barcode "${barcode}" not found in this MAWB.`);
-            setFirstScanStatus('ERROR');
-            return;
-        }
-
-        // Enhanced Pre-Check for duplicates in current session (checking against trackingNumber, skynetTrackingNumber & senderReference)
+        // 2. Regular Parcel Barcode Scan (supports auto-selecting damaged bags if none selected)
         const cleanInput = barcode.trim().toLowerCase();
-        const existingItemPre = firstScanHistory.find(item =>
-            item.trackingNumber.trim().toLowerCase() === cleanInput ||
-            (item.skynetTrackingNumber && item.skynetTrackingNumber.trim().toLowerCase() === cleanInput) ||
-            (item.senderReference && item.senderReference.trim().toLowerCase() === cleanInput)
-        );
 
-        if (existingItemPre) {
-            const isTemu = existingItemPre.isTemuScan;
-            const temuCode = existingItemPre.senderReference || existingItemPre.trackingNumber;
-            const skynetCode = existingItemPre.skynetTrackingNumber || existingItemPre.trackingNumber;
+        // Enhanced Pre-Check for duplicates in current session if bag is already selected
+        if (firstScanSelectedBag) {
+            const existingItemPre = firstScanHistory.find(item =>
+                item.trackingNumber.trim().toLowerCase() === cleanInput ||
+                (item.skynetTrackingNumber && item.skynetTrackingNumber.trim().toLowerCase() === cleanInput) ||
+                (item.senderReference && item.senderReference.trim().toLowerCase() === cleanInput)
+            );
 
-            const dupMsg = isTemu
-                ? `Already Unsealed!! Parcel (${skynetCode}) was ALREADY unsealed via Temu Barcode (${temuCode}).`
-                : `Already Unsealed!! Parcel (${skynetCode}) has ALREADY been unsealed in this box session.`;
+            if (existingItemPre) {
+                const isTemu = existingItemPre.isTemuScan;
+                const temuCode = existingItemPre.senderReference || existingItemPre.trackingNumber;
+                const skynetCode = existingItemPre.skynetTrackingNumber || existingItemPre.trackingNumber;
 
-            setFirstScanError(dupMsg);
-            setFirstScanStatus('ERROR');
-            setDuplicateModal({
-                barcode: barcode,
-                skynetTrackingNumber: skynetCode,
-                senderReference: temuCode,
-                originalMethod: isTemu ? `Temu Barcode (${temuCode})` : `Skynet Barcode (${skynetCode})`,
-                message: dupMsg,
-                type: 'allocate'
-            });
-            return;
+                const dupMsg = isTemu
+                    ? `Already Unsealed!! Parcel (${skynetCode}) was ALREADY unsealed via Temu Barcode (${temuCode}).`
+                    : `Already Unsealed!! Parcel (${skynetCode}) has ALREADY been unsealed in this box session.`;
+
+                setFirstScanError(dupMsg);
+                setFirstScanStatus('ERROR');
+                setDuplicateModal({
+                    barcode: barcode,
+                    skynetTrackingNumber: skynetCode,
+                    senderReference: temuCode,
+                    originalMethod: isTemu ? `Temu Barcode (${temuCode})` : `Skynet Barcode (${skynetCode})`,
+                    message: dupMsg,
+                    type: 'allocate'
+                });
+                return;
+            }
         }
 
         setFirstScanStatus('FETCHING');
         setFirstScanError('');
         setFirstScanLastScanned(barcode);
 
-        // Method 3: Instant Client-Side Pre-Match (<5ms) from pre-loaded in-memory bag parcels
-        const matchedLocal = firstScanBagParcels.find((p: any) =>
-            (p.trackingNumber && p.trackingNumber.toString().trim().toLowerCase() === cleanInput) ||
-            (p.skynetTrackingNumber && p.skynetTrackingNumber.toString().trim().toLowerCase() === cleanInput) ||
-            (p.senderReference && p.senderReference.toString().trim().toLowerCase() === cleanInput)
-        );
+        // Method 3: Instant Client-Side Pre-Match (<5ms) from pre-loaded in-memory bag parcels if bag is selected
+        if (firstScanSelectedBag) {
+            const matchedLocal = firstScanBagParcels.find((p: any) =>
+                (p.trackingNumber && p.trackingNumber.toString().trim().toLowerCase() === cleanInput) ||
+                (p.skynetTrackingNumber && p.skynetTrackingNumber.toString().trim().toLowerCase() === cleanInput) ||
+                (p.senderReference && p.senderReference.toString().trim().toLowerCase() === cleanInput)
+            );
 
-        if (matchedLocal && matchedLocal.assignedPartner && matchedLocal.assignedPartner !== 'Unknown') {
-            const isTemu = Boolean(matchedLocal.senderReference && cleanInput === matchedLocal.senderReference.toLowerCase());
-            setFirstScanCurrentScan({
-                assignedPartner: matchedLocal.assignedPartner,
-                assignedZone: matchedLocal.assignedZone || 'Default-Zone',
-                parcel: {
-                    trackingNumber: matchedLocal.skynetTrackingNumber || matchedLocal.trackingNumber,
-                    recipientName: matchedLocal.recipientName,
-                    city: matchedLocal.city,
-                    province: '',
-                    district: '',
-                    weight: matchedLocal.weight || 0.1,
-                    mawbRef: firstScanMawb,
-                    senderReference: matchedLocal.senderReference,
-                    _scannedVia: isTemu ? 'TEMU' : 'SKYNET',
-                    isTemuScan: isTemu
-                }
-            });
+            if (matchedLocal && matchedLocal.assignedPartner && matchedLocal.assignedPartner !== 'Unknown') {
+                const isTemu = Boolean(matchedLocal.senderReference && cleanInput === matchedLocal.senderReference.toLowerCase());
+                setFirstScanCurrentScan({
+                    assignedPartner: matchedLocal.assignedPartner,
+                    assignedZone: matchedLocal.assignedZone || 'Default-Zone',
+                    parcel: {
+                        trackingNumber: matchedLocal.skynetTrackingNumber || matchedLocal.trackingNumber,
+                        recipientName: matchedLocal.recipientName,
+                        city: matchedLocal.city,
+                        province: '',
+                        district: '',
+                        weight: matchedLocal.weight || 0.1,
+                        mawbRef: firstScanMawb,
+                        senderReference: matchedLocal.senderReference,
+                        _scannedVia: isTemu ? 'TEMU' : 'SKYNET',
+                        isTemuScan: isTemu
+                    }
+                });
+            }
         }
 
         try {
@@ -1772,6 +1755,16 @@ export default function WorkstationDashboard() {
             if (data.success && data.parcel) {
                 const returnedSkynetNo = data.parcel.trackingNumber;
                 const returnedTemuNo = data.parcel.senderReference;
+                const targetBag = data.bagNumber || data.actualBag || data.parcel?.bagNumber;
+
+                // If bag was auto-selected from parcel scan (Damaged Bag flow)
+                if (!firstScanSelectedBag && targetBag) {
+                    setFirstScanSelectedBag(targetBag);
+                    setBagBarcodeInput(targetBag);
+                    const matchedB = firstScanBags.find(b => b.bagNumber.toLowerCase() === targetBag.toLowerCase());
+                    if (matchedB) setFirstScanExpected(matchedB.expectedCount);
+                    toast.success(`✨ Damaged Bag Auto-Identified: Selected Bag "${targetBag}"!`);
+                }
 
                 // Post-check duplicate against returned canonical parcel details
                 const existingParcelItem = firstScanHistory.find(item =>
@@ -1839,9 +1832,11 @@ export default function WorkstationDashboard() {
                 setScannedToday((prev) => prev + 1);
                 setFirstScanStatus('SUCCESS');
 
+                const activeBagName = firstScanSelectedBag || targetBag;
+
                 // Update firstScanBags in real-time
                 setFirstScanBags(prev => prev.map(b => {
-                    if (b.bagNumber === firstScanSelectedBag) {
+                    if (b.bagNumber.toLowerCase() === (activeBagName || '').toLowerCase()) {
                         const scn = newHistory.length;
                         const exp = b.expectedCount;
                         return {
@@ -1858,7 +1853,6 @@ export default function WorkstationDashboard() {
                 if (!data.assignedPartner || data.assignedPartner === 'Unknown') {
                     setUnallocatedPartnerModal({ trackingNumber: displayTrackingNumber });
                 }
-
 
                 if (isTemuScan) {
                     setLastTemuSticker({
@@ -1883,7 +1877,7 @@ export default function WorkstationDashboard() {
                         weight: data.parcel?.weight,
                         weightMeasure: data.parcel?.weightMeasure,
                         mawbRef: firstScanMawb || data.parcel?.mawbRef,
-                        bagNumber: firstScanSelectedBag || data.parcel?.bagNumber,
+                        bagNumber: activeBagName || data.parcel?.bagNumber,
                         assignedPartner: data.assignedPartner,
                         assignedZone: data.assignedZone
                     });
@@ -1892,22 +1886,33 @@ export default function WorkstationDashboard() {
                 }
 
                 // Check if bag count has reached expected — show "extra parcels?" check first
-                if (newHistory.length === Number(firstScanExpected)) {
+                const activeBagObj = firstScanBags.find(b => b.bagNumber.toLowerCase() === (activeBagName || '').toLowerCase());
+                const expectedNum = Number(firstScanExpected || activeBagObj?.expectedCount);
+                if (expectedNum && newHistory.length === expectedNum) {
                     setOverageCheckModal({
-                        bagNumber: firstScanSelectedBag,
-                        expected: Number(firstScanExpected),
+                        bagNumber: activeBagName,
+                        expected: expectedNum,
                         history: newHistory
                     });
                 }
             } else {
-                if (data.error === 'NOT_IN_BAG') {
+                if (data.error === 'BAG_ALREADY_COMPLETED') {
+                    setInvalidBagParcelModal({
+                        barcode: barcode,
+                        expectedBag: data.actualBag || data.expectedBag || '',
+                        actualBag: null,
+                        reason: 'BAG_ALREADY_COMPLETED'
+                    });
+                    setFirstScanError(data.message || `Bag "${data.actualBag || ''}" has already been unsealed.`);
+                    setFirstScanStatus('ERROR');
+                } else if (data.error === 'NOT_IN_BAG') {
                     if (data.actualBag || data.actualMawb) {
                         setExtraParcelModal({
                             barcode: barcode,
                             reason: 'WRONG_BAG',
                             actualBag: data.actualBag,
                             actualMawb: data.actualMawb,
-                            expectedBag: firstScanSelectedBag
+                            expectedBag: firstScanSelectedBag || ''
                         });
                     } else {
                         setExtraParcelModal({
@@ -1915,24 +1920,34 @@ export default function WorkstationDashboard() {
                             reason: 'UNASSIGNED',
                             actualBag: null,
                             actualMawb: null,
-                            expectedBag: firstScanSelectedBag
+                            expectedBag: firstScanSelectedBag || ''
                         });
                     }
                     setFirstScanError(data.message || 'Parcel belongs to a different bag/MAWB or is unassigned.');
+                    setFirstScanStatus('ERROR');
+                } else if (data.error === 'UNASSIGNED') {
+                    setExtraParcelModal({
+                        barcode: barcode,
+                        reason: 'UNASSIGNED',
+                        actualBag: null,
+                        actualMawb: data.actualMawb || null,
+                        expectedBag: firstScanSelectedBag || ''
+                    });
+                    setFirstScanError(data.message || 'Parcel is in database but unassigned to any bag.');
                     setFirstScanStatus('ERROR');
                 } else if (data.error === 'NOT_FOUND') {
                     setExtraParcelModal({
                         barcode: barcode,
                         reason: 'NOT_FOUND',
                         actualBag: null,
-                        expectedBag: firstScanSelectedBag
+                        expectedBag: firstScanSelectedBag || ''
                     });
                     setFirstScanError(`Parcel "${barcode}" not found in database.`);
                     setFirstScanStatus('ERROR');
                 } else {
                     setInvalidBagParcelModal({
                         barcode: barcode,
-                        expectedBag: firstScanSelectedBag,
+                        expectedBag: firstScanSelectedBag || '',
                         actualBag: null,
                         reason: 'NOT_FOUND'
                     });
@@ -1943,7 +1958,7 @@ export default function WorkstationDashboard() {
         } catch (err: any) {
             setInvalidBagParcelModal({
                 barcode: barcode,
-                expectedBag: firstScanSelectedBag,
+                expectedBag: firstScanSelectedBag || '',
                 actualBag: null,
                 reason: 'NOT_FOUND'
             });
@@ -2136,6 +2151,141 @@ export default function WorkstationDashboard() {
         } finally {
             setExtraParcelModal(null);
             setExtraParcelNote('');
+        }
+    };
+
+    const handleSwitchToActualBag = async (actualBag: string, barcode: string) => {
+        setExtraParcelModal(null);
+        setExtraParcelNote('');
+        if (!actualBag) return;
+
+        // Check if actualBag is completed
+        const bagObj = firstScanBags.find(b => b.bagNumber.toLowerCase() === actualBag.toLowerCase());
+        const isCompleted = bagObj ? getBagStatus(bagObj.bagNumber, bagObj.expectedCount) === 'COMPLETED' : false;
+        if (isCompleted) {
+            setInvalidBagParcelModal({
+                barcode: actualBag,
+                expectedBag: actualBag,
+                actualBag: null,
+                reason: 'BAG_ALREADY_COMPLETED'
+            });
+            return;
+        }
+
+        setFirstScanSelectedBag(actualBag);
+        setBagBarcodeInput(actualBag);
+        if (bagObj) setFirstScanExpected(bagObj.expectedCount);
+        setFirstScanError('');
+        setFirstScanLastScanned(barcode);
+        setFirstScanHistory([]);
+
+        // Perform the scan for this parcel in the newly selected bag
+        try {
+            setFirstScanStatus('FETCHING');
+            const response = await fetch('/api/allocate', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    trackingNumber: barcode,
+                    stage: 'first',
+                    mawbRef: firstScanMawb,
+                    bagNumber: actualBag
+                }),
+            });
+            const data: any = await response.json();
+            if (data.success && data.parcel) {
+                const now = new Date();
+                const timeStr = now.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true });
+
+                const isTemuScan = Boolean(
+                    data.parcel?.senderReference && (
+                        data.parcel.senderReference.trim().toLowerCase() === barcode.trim().toLowerCase() ||
+                        barcode.trim() !== data.parcel.trackingNumber.trim()
+                    )
+                );
+                const displayTrackingNumber = isTemuScan ? (data.parcel.senderReference || barcode) : data.parcel.trackingNumber;
+
+                const newHistory = [
+                    {
+                        trackingNumber: displayTrackingNumber,
+                        skynetTrackingNumber: data.parcel.trackingNumber,
+                        senderReference: data.parcel.senderReference,
+                        isTemuScan: isTemuScan,
+                        recipientName: data.parcel?.recipientName || 'Unknown Recipient',
+                        city: data.parcel?.city || 'Unknown City',
+                        timestamp: timeStr,
+                        assignedPartner: data.assignedPartner,
+                        assignedZone: data.assignedZone
+                    }
+                ];
+
+                setFirstScanHistory(newHistory);
+                setFirstScanCurrentScan({
+                    assignedPartner: data.assignedPartner,
+                    assignedZone: data.assignedZone,
+                    parcel: data.parcel
+                });
+                setScannedToday((prev) => prev + 1);
+                setFirstScanStatus('SUCCESS');
+                toast.success(`Switched to Bag "${actualBag}" and recorded parcel "${displayTrackingNumber}".`);
+
+                // Update firstScanBags in real-time
+                setFirstScanBags(prev => prev.map(b => {
+                    if (b.bagNumber.toLowerCase() === actualBag.toLowerCase()) {
+                        const scn = newHistory.length;
+                        const exp = b.expectedCount;
+                        return {
+                            ...b,
+                            scannedCount: scn,
+                            pendingCount: Math.max(0, exp - scn),
+                            status: scn >= exp && exp > 0 ? 'COMPLETED' : 'IN_PROGRESS'
+                        };
+                    }
+                    return b;
+                }));
+
+                if (!data.assignedPartner || data.assignedPartner === 'Unknown') {
+                    setUnallocatedPartnerModal({ trackingNumber: displayTrackingNumber });
+                }
+
+                if (isTemuScan) {
+                    setLastTemuSticker({
+                        skynetTrackingNumber: (data.parcel.trackingNumber || '').toString().replace(/^skyt-?/i, '').trim(),
+                        temuBarcode: data.parcel.senderReference || barcode,
+                        recipientName: data.parcel?.recipientName,
+                        recipientPhone: data.parcel?.recipientPhone,
+                        recipientAddress: data.parcel?.recipientAddress,
+                        city: data.parcel?.city,
+                        district: data.parcel?.district,
+                        province: data.parcel?.province,
+                        country: data.parcel?.country,
+                        senderName: data.parcel?.senderName,
+                        senderAddress: data.parcel?.senderAddress,
+                        goodsDesc: data.parcel?.goodsDesc,
+                        deliveryInstructions: data.parcel?.deliveryInstructions || data.parcel?.goodsDesc,
+                        numOfItems: data.parcel?.numOfItems,
+                        value: data.parcel?.value,
+                        account: data.parcel?.account,
+                        destLocationCode: data.parcel?.destLocationCode,
+                        serviceType: data.parcel?.serviceType,
+                        weight: data.parcel?.weight,
+                        weightMeasure: data.parcel?.weightMeasure,
+                        mawbRef: firstScanMawb || data.parcel?.mawbRef,
+                        bagNumber: actualBag || data.parcel?.bagNumber,
+                        assignedPartner: data.assignedPartner,
+                        assignedZone: data.assignedZone
+                    });
+                } else {
+                    setLastTemuSticker(null);
+                }
+            }
+        } catch (err: any) {
+            setFirstScanError(err.message || "Failed to switch bag session");
+            setFirstScanStatus('ERROR');
+        } finally {
+            setTimeout(() => {
+                firstScanInputRef.current?.focus();
+            }, 50);
         }
     };
 
@@ -3507,6 +3657,7 @@ export default function WorkstationDashboard() {
         handleDeleteOutboundBag,
         handleFirstScanSubmit,
         handleFirstScanSubmitOverride,
+        handleSwitchToActualBag,
         handleForceUnsealWithNote,
         handleLogout,
         handleRenewPinSubmit,

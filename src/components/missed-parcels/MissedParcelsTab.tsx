@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { toast } from 'sonner';
 import PaginationControl from '@/app/components/PaginationControl';
 
@@ -78,6 +78,9 @@ export default function MissedParcelsTab({
     const [currentPage, setCurrentPage] = useState<number>(1);
     const [rowsPerPage, setRowsPerPage] = useState<number>(10);
 
+    // Track whether we've already done the initial auto-select
+    const hasAutoSelected = useRef(false);
+
     // Fetch Missed Parcels from API (Manifest-wise)
     const fetchMissedParcels = async () => {
         try {
@@ -103,6 +106,13 @@ export default function MissedParcelsTab({
                 setParcels(data.parcels || []);
                 if (data.stats) setStats(data.stats);
                 if (Array.isArray(data.mawbList)) setMawbList(data.mawbList);
+
+                // Auto-select the first today's MAWB only on the very first load
+                if (!hasAutoSelected.current && Array.isArray(data.todayMawbs) && data.todayMawbs.length > 0) {
+                    hasAutoSelected.current = true;
+                    setSelectedMawb(data.todayMawbs[0]);
+                    return; // state change will re-trigger fetchMissedParcels via useEffect
+                }
             } else {
                 toast.error(data.error || 'Failed to fetch missed parcels.');
             }

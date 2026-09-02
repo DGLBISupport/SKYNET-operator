@@ -107,7 +107,7 @@ def upload_tracking(reference_number, dry_run=False, event_id="1558", remarks="S
         'Username':     FFDX_USERNAME,
         'Password':     FFDX_PASSWORD,
         'xmlStream':    xml_data,
-        'LevelConfirm': '0'
+        'LevelConfirm': 'summary'
     }
 
     try:
@@ -119,7 +119,10 @@ def upload_tracking(reference_number, dry_run=False, event_id="1558", remarks="S
             timeout=15
         )
         raw     = resp.text.strip()
-        success = resp.ok and '<Status>1</Status>' in raw
+        clean   = raw.replace('&lt;', '<').replace('&gt;', '>').strip()
+        is_success = 'StatusCode>0' in raw or 'transmitted successfully' in raw.lower() or '<Status>1</Status>' in raw
+        is_failure = 'Invalid' in raw or 'denied' in raw or 'StatusCode>-1' in raw or '|-1|' in clean
+        success = resp.ok and is_success and not is_failure
         if success:
             print(f"OK  HTTP {resp.status_code}")
         else:

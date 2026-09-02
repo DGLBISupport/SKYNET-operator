@@ -39,6 +39,7 @@ export default function AllModals({
     handleCreateOutboundBag,
     handleCreateOutboundManifest,
     handleFirstScanSubmitOverride,
+    handleSwitchToActualBag,
     handleForceUnsealWithNote,
     handleRenewPinSubmit,
     handleSwitchUserSubmit,
@@ -1649,31 +1650,54 @@ export default function AllModals({
                                 </div>
 
                                 {/* Actions */}
-                                <div style={{ display: 'flex', gap: '10px' }}>
-                                    <button
-                                        onClick={() => {
-                                            handleFirstScanSubmitOverride(extraParcelModal.barcode, {
-                                                overrideBag: isWrongBag || isUnassigned,
-                                                registerExtra: isNotFound,
-                                                note: extraParcelNote
-                                            });
-                                        }}
-                                        disabled={!canSubmit}
-                                        style={{
-                                            flex: 1,
-                                            backgroundColor: canSubmit ? themeColor : '#9ca3af',
-                                            color: '#ffffff',
-                                            border: 'none',
-                                            borderRadius: '8px',
-                                            padding: '12px 16px',
-                                            fontSize: '13px',
-                                            fontWeight: '600',
-                                            cursor: canSubmit ? 'pointer' : 'not-allowed',
-                                            transition: 'all 0.15s ease'
-                                        }}
-                                    >
-                                        {actionText}
-                                    </button>
+                                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                                    <div style={{ display: 'flex', gap: '10px' }}>
+                                        {isWrongBag && extraParcelModal.actualBag && handleSwitchToActualBag && (
+                                            <button
+                                                onClick={() => {
+                                                    handleSwitchToActualBag(extraParcelModal.actualBag, extraParcelModal.barcode);
+                                                }}
+                                                style={{
+                                                    flex: 1,
+                                                    backgroundColor: '#16a34a',
+                                                    color: '#ffffff',
+                                                    border: 'none',
+                                                    borderRadius: '8px',
+                                                    padding: '12px 14px',
+                                                    fontSize: '13px',
+                                                    fontWeight: '700',
+                                                    cursor: 'pointer',
+                                                    transition: 'all 0.15s ease'
+                                                }}
+                                            >
+                                                Switch to Bag "{extraParcelModal.actualBag}" & Scan
+                                            </button>
+                                        )}
+                                        <button
+                                            onClick={() => {
+                                                handleFirstScanSubmitOverride(extraParcelModal.barcode, {
+                                                    overrideBag: isWrongBag || isUnassigned,
+                                                    registerExtra: isNotFound,
+                                                    note: extraParcelNote
+                                                });
+                                            }}
+                                            disabled={!canSubmit}
+                                            style={{
+                                                flex: 1,
+                                                backgroundColor: canSubmit ? themeColor : '#9ca3af',
+                                                color: '#ffffff',
+                                                border: 'none',
+                                                borderRadius: '8px',
+                                                padding: '12px 14px',
+                                                fontSize: '13px',
+                                                fontWeight: '600',
+                                                cursor: canSubmit ? 'pointer' : 'not-allowed',
+                                                transition: 'all 0.15s ease'
+                                            }}
+                                        >
+                                            {actionText}
+                                        </button>
+                                    </div>
                                     <button
                                         onClick={() => {
                                             setExtraParcelModal(null);
@@ -1687,12 +1711,12 @@ export default function AllModals({
                                             }, 50);
                                         }}
                                         style={{
-                                            flex: 1,
+                                            width: '100%',
                                             backgroundColor: '#ffffff',
                                             border: '1px solid #d1d5db',
                                             color: '#374151',
                                             borderRadius: '8px',
-                                            padding: '12px 16px',
+                                            padding: '10px 16px',
                                             fontSize: '13px',
                                             fontWeight: '600',
                                             cursor: 'pointer',
@@ -2445,61 +2469,80 @@ export default function AllModals({
                                         </div>
                                         <div style={{ fontSize: '10.5px', lineHeight: '1.3', color: '#000000', textTransform: 'uppercase' }}>
                                             {(() => {
-                                                let rawLines: string[] = [];
+                                                const rawAddress = (printLabelModal.recipientAddress || '').trim();
                                                 const cityUpper = (printLabelModal.city || '').trim().toUpperCase();
                                                 const distUpper = (printLabelModal.district || '').trim().toUpperCase();
                                                 const provUpper = (printLabelModal.province || '').trim().toUpperCase();
                                                 const countryUpper = (printLabelModal.country || 'SRI LANKA').trim().toUpperCase();
 
-                                                if (printLabelModal.recipientAddress) {
-                                                    const splitNewlines = printLabelModal.recipientAddress
-                                                        .split(/[\r\n]+/)
-                                                        .map(l => l.trim())
-                                                        .filter(Boolean);
+                                                const displayedCity = (cityUpper && cityUpper !== 'UNKNOWN CITY' && cityUpper !== 'UNKNOWN')
+                                                    ? cityUpper
+                                                    : (distUpper && distUpper !== 'UNKNOWN DISTRICT' && distUpper !== 'UNKNOWN' ? distUpper : '');
 
-                                                    if (splitNewlines.length === 1 && splitNewlines[0].includes(',')) {
-                                                        const parts = splitNewlines[0].split(',').map(p => p.trim()).filter(Boolean);
-                                                        const cleanParts = parts.filter(p => {
-                                                            const up = p.toUpperCase();
-                                                            return up !== 'SRI LANKA' && up !== 'SRILANKA' && up !== countryUpper && up !== provUpper;
-                                                        });
-                                                        if (cleanParts.length >= 2) {
-                                                            const line1 = cleanParts.slice(0, cleanParts.length - 1).join(', ');
-                                                            const line2 = cleanParts[cleanParts.length - 1];
-                                                            rawLines = [line1, line2];
-                                                        } else if (cleanParts.length === 1) {
-                                                            rawLines = cleanParts;
-                                                        } else {
-                                                            rawLines = splitNewlines;
+                                                const provBase = provUpper.replace(/\s*PROVINCE\s*$/i, '').trim();
+
+                                                const isAdministrativeToken = (t: string) => {
+                                                    const up = t.trim().toUpperCase();
+                                                    if (!up) return true;
+                                                    if (countryUpper && (up === countryUpper || up === countryUpper.replace(/\s+/g, ''))) return true;
+                                                    if (provUpper && (up === provUpper || up === provUpper.replace(/\s+/g, ''))) return true;
+                                                    if (provBase && (up === provBase || up === `${provBase} PROVINCE` || up === `${provBase}PROVINCE`)) return true;
+                                                    if (displayedCity && (up === displayedCity || up === displayedCity.replace(/\s+/g, ''))) return true;
+                                                    return false;
+                                                };
+
+                                                let rawLines: string[] = [];
+                                                if (rawAddress) {
+                                                    const newlineLines = rawAddress.split(/[\r\n]+/).map(l => l.trim()).filter(Boolean);
+
+                                                    for (const line of newlineLines) {
+                                                        const subParts = line.split(',').map(p => p.trim()).filter(Boolean);
+                                                        if (subParts.length > 0 && subParts.every(p => isAdministrativeToken(p))) {
+                                                            continue;
                                                         }
-                                                    } else {
-                                                        rawLines = splitNewlines;
+
+                                                        let cleanParts = [...subParts];
+                                                        while (cleanParts.length > 1 && isAdministrativeToken(cleanParts[cleanParts.length - 1])) {
+                                                            cleanParts.pop();
+                                                        }
+
+                                                        const cleanLine = cleanParts.join(', ').trim();
+                                                        if (cleanLine && !isAdministrativeToken(cleanLine)) {
+                                                            rawLines.push(cleanLine);
+                                                        }
                                                     }
                                                 }
 
-                                                const cleanLines = rawLines.filter(line => {
+                                                const cleanLines: string[] = [];
+                                                for (const line of rawLines) {
                                                     const up = line.trim().toUpperCase();
-                                                    if (!up) return false;
-                                                    if (up === 'SRI LANKA' || up === 'SRILANKA' || up === countryUpper) return false;
-                                                    if (provUpper && up === provUpper) return false;
-                                                    return true;
-                                                });
+                                                    if (!up) continue;
+                                                    if (isAdministrativeToken(up)) continue;
+                                                    if (displayedCity && up === displayedCity) continue;
+                                                    if (!cleanLines.some(l => l.toUpperCase() === up)) {
+                                                        cleanLines.push(line);
+                                                    }
+                                                }
+
+                                                const validProv = provUpper && provUpper !== 'UNKNOWN PROVINCE' && provUpper !== 'UNKNOWN' && provUpper !== countryUpper;
+                                                const bottomLine = validProv ? `${provUpper}  ${countryUpper}` : countryUpper;
 
                                                 return (
                                                     <>
                                                         {cleanLines.map((line, idx) => (
                                                             <div key={idx}>{line}</div>
                                                         ))}
+                                                        {displayedCity && (
+                                                            <div style={{ fontWeight: '800', marginTop: cleanLines.length > 0 ? '1px' : '0' }}>
+                                                                {displayedCity}
+                                                            </div>
+                                                        )}
+                                                        <div style={{ marginTop: '1px' }}>
+                                                            {bottomLine}
+                                                        </div>
                                                     </>
                                                 );
                                             })()}
-                                            <div style={{ marginTop: '1px' }}>
-                                                {printLabelModal.province ? `${printLabelModal.province.toUpperCase()} ` : ''}
-                                                <strong style={{ fontWeight: '900' }}>
-                                                    {printLabelModal.city ? printLabelModal.city.toUpperCase() : (printLabelModal.district ? printLabelModal.district.toUpperCase() : '')}
-                                                </strong>
-                                            </div>
-                                            <div>{printLabelModal.country ? printLabelModal.country.toUpperCase() : 'SRI LANKA'}</div>
                                         </div>
                                     </div>
 
