@@ -261,6 +261,7 @@ export default function WorkstationDashboard() {
     }[]>([]);
     const [isBagsLoading, setIsBagsLoading] = useState(false);
     const [firstScanSelectedBag, setFirstScanSelectedBag] = useState('');
+    const isAutoSelectingBagRef = useRef(false);
     const [bagBarcodeInput, setBagBarcodeInput] = useState('');
     const [firstScanExpected, setFirstScanExpected] = useState<number | ''>('');
     const [firstScanInput, setFirstScanInput] = useState('');
@@ -902,11 +903,16 @@ export default function WorkstationDashboard() {
             return;
         }
 
-        // Always reset scanned history so operator scans each parcel manually
-        setFirstScanHistory([]);
-        setFirstScanCurrentScan(null);
-        setFirstScanBagParcels([]);
-        setMissingParcelReasons({});
+        const isAutoSelect = isAutoSelectingBagRef.current;
+        isAutoSelectingBagRef.current = false;
+
+        if (!isAutoSelect) {
+            // Manual bag selection: reset current scan and scanned history
+            setFirstScanHistory([]);
+            setFirstScanCurrentScan(null);
+            setFirstScanBagParcels([]);
+            setMissingParcelReasons({});
+        }
 
         const selected = firstScanBags.find(b => b.bagNumber === firstScanSelectedBag);
         if (selected && selected.expectedCount > 0) {
@@ -928,21 +934,23 @@ export default function WorkstationDashboard() {
                     setFirstScanBags(prev => prev.map(b => b.bagNumber === firstScanSelectedBag ? {
                         ...b,
                         expectedCount: actualCount,
-                        scannedCount: scannedCount,
-                        pendingCount: pendingCount,
-                        status: b.status === 'COMPLETED' ? 'COMPLETED' : (scannedCount > 0 ? 'IN_PROGRESS' : 'PENDING')
+                        scannedCount: isAutoSelect ? Math.max(b.scannedCount || 0, 1) : scannedCount,
+                        pendingCount: isAutoSelect ? Math.max(0, actualCount - Math.max(b.scannedCount || 0, 1)) : pendingCount,
+                        status: b.status === 'COMPLETED' ? 'COMPLETED' : ((isAutoSelect || scannedCount > 0) ? 'IN_PROGRESS' : 'PENDING')
                     } : b));
 
                     setFirstScanBagParcels(data.parcels);
 
-                    if (Array.isArray(data.scannedParcels) && data.scannedParcels.length > 0) {
-                        setFirstScanHistory(data.scannedParcels);
-                        setFirstScanCurrentScan(null);
-                        setFirstScanStatus('READY');
-                    } else {
-                        setFirstScanHistory([]);
-                        setFirstScanCurrentScan(null);
-                        setFirstScanStatus('READY');
+                    if (!isAutoSelect) {
+                        if (Array.isArray(data.scannedParcels) && data.scannedParcels.length > 0) {
+                            setFirstScanHistory(data.scannedParcels);
+                            setFirstScanCurrentScan(null);
+                            setFirstScanStatus('READY');
+                        } else {
+                            setFirstScanHistory([]);
+                            setFirstScanCurrentScan(null);
+                            setFirstScanStatus('READY');
+                        }
                     }
                 }
             } catch (err) {
@@ -1759,11 +1767,12 @@ export default function WorkstationDashboard() {
 
                 // If bag was auto-selected from parcel scan (Damaged Bag flow)
                 if (!firstScanSelectedBag && targetBag) {
+                    isAutoSelectingBagRef.current = true;
                     setFirstScanSelectedBag(targetBag);
                     setBagBarcodeInput(targetBag);
                     const matchedB = firstScanBags.find(b => b.bagNumber.toLowerCase() === targetBag.toLowerCase());
                     if (matchedB) setFirstScanExpected(matchedB.expectedCount);
-                    toast.success(`✨ Damaged Bag Auto-Identified: Selected Bag "${targetBag}"!`);
+                    toast.success(`Damaged Bag Auto-Identified: Selected Bag "${targetBag}"!`);
                 }
 
                 // Post-check duplicate against returned canonical parcel details
@@ -2172,6 +2181,7 @@ export default function WorkstationDashboard() {
             return;
         }
 
+        isAutoSelectingBagRef.current = true;
         setFirstScanSelectedBag(actualBag);
         setBagBarcodeInput(actualBag);
         if (bagObj) setFirstScanExpected(bagObj.expectedCount);
