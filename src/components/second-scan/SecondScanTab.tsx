@@ -506,7 +506,7 @@ export default function SecondScanTab({
                                                         </button>
                                                     )}
 
-                                                    <button
+                                                    {/* <button
                                                         onClick={() => {
                                                             if (activeOutboundBag.status === 'SEALED') {
                                                                 setErrorMessage(`Cannot delete sealed bag. Outbound Bag "${activeOutboundBag.bagNumber}" is SEALED & CLOSED.`);
@@ -538,7 +538,7 @@ export default function SecondScanTab({
                                                         }}
                                                     >
                                                         🗑 Remove Bag
-                                                    </button>
+                                                    </button> */}
                                                 </div>
                                             </div>
                                         )}
