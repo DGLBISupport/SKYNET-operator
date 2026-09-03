@@ -18,7 +18,7 @@ const getSupabaseConfig = () => {
     };
 };
 
-async function fetchJson<T>(url: string, headers: Record<string, string>, fallback: T, timeoutMs = 12000): Promise<T> {
+async function fetchJson<T>(url: string, headers: Record<string, string>, fallback: T, timeoutMs = 15000): Promise<T> {
     try {
         const res = await fetch(url, {
             headers,
@@ -38,6 +38,45 @@ async function fetchJson<T>(url: string, headers: Record<string, string>, fallba
     }
 }
 
+async function fetchAllSupabaseRows(table: string, selectFields: string, sb: { url: string; headers: Record<string, string> }, maxPages = 50) {
+    let allRows: any[] = [];
+    let offset = 0;
+    const limit = 1000;
+    let hasMore = true;
+    let attempts = 0;
+
+    while (hasMore && attempts < maxPages) {
+        attempts++;
+        try {
+            const res = await fetch(`${sb.url}/rest/v1/${table}?select=${selectFields}&limit=${limit}&offset=${offset}`, {
+                headers: sb.headers,
+                cache: 'no-store',
+                signal: AbortSignal.timeout(15000)
+            });
+            if (res.ok) {
+                const data = await res.json();
+                if (Array.isArray(data) && data.length > 0) {
+                    allRows.push(...data);
+                    if (data.length < limit) {
+                        hasMore = false;
+                    } else {
+                        offset += limit;
+                    }
+                } else {
+                    hasMore = false;
+                }
+            } else {
+                console.error(`[manifest-tracking] Error fetching table ${table}:`, res.status);
+                hasMore = false;
+            }
+        } catch (e) {
+            console.error(`[manifest-tracking] Error fetching table ${table}:`, e);
+            hasMore = false;
+        }
+    }
+    return allRows;
+}
+
 export async function GET(request: Request) {
     try {
         const sb = getSupabaseConfig();
@@ -45,15 +84,20 @@ export async function GET(request: Request) {
             return NextResponse.json({ success: false, error: 'Database configuration missing.' }, { status: 500 });
         }
 
-        // 1. Fetch core datasets in parallel with explicit column projections (no implicit select=*)
-        const [rawSp, rawUsers, rawManifests, rawBags] = await Promise.all([
+        // 1. Fetch core datasets in parallel (including authoritative outbound_lmd_bag_items and shipments for parcel enrichment)
+        const [rawSp, rawUsers, rawManifests, rawBags, rawBagItems, rawShipments] = await Promise.all([
             // service_providers: small lookup table
             fetchJson<any[]>(`${sb.url}/rest/v1/service_providers?select=id,name,code`, sb.headers, [], 15000),
+            // users: lookup table for display names
             fetchJson<any[]>(`${sb.url}/rest/v1/users?select=id,username,first_name,last_name,email`, sb.headers, [], 15000),
-            // outbound_manifests: only columns that exist in the schema (no created_by on this table)
+            // outbound_manifests
             fetchJson<any[]>(`${sb.url}/rest/v1/outbound_manifests?select=id,manifest_reference,bag_numbers,status,service_provider,total_bags,total_parcels,opened_by,closed_by,closed_at,created_at,json_path,xml_path,is_uploaded&order=created_at.desc`, sb.headers, [], 20000),
-            // outbound_lmd_bags: explicit field list — parcels JSONB kept because the mapping loop actively uses it
-            fetchJson<any[]>(`${sb.url}/rest/v1/outbound_lmd_bags?select=id,bag_number,target_partner,destination_hub,status,parcel_count,total_weight,created_by,created_at,opened_by,opened_at,closed_by,closed_at,sealed_at,sealed_by,new_manifest_reference,is_bag_in_a_manifest,parcels&order=created_at.desc`, sb.headers, [], 25000)
+            // outbound_lmd_bags
+            fetchJson<any[]>(`${sb.url}/rest/v1/outbound_lmd_bags?select=id,bag_number,target_partner,destination_hub,status,parcel_count,total_weight,created_by,created_at,opened_by,opened_at,closed_by,closed_at,sealed_at,sealed_by,new_manifest_reference,is_bag_in_a_manifest,parcels&order=created_at.desc`, sb.headers, [], 25000),
+            // outbound_lmd_bag_items: authoritative scan history for all bags
+            fetchAllSupabaseRows('outbound_lmd_bag_items', 'id,bag_number,shipment_ref,weight,created_at,scanned_by', sb),
+            // shipments: metadata lookup for inbound MAWB, inbound bag, recipient, destination city
+            fetchAllSupabaseRows('shipments', 'reference_number,mawb_reference,bag_number,consignee_name,dest_location_name,weight', sb)
         ]);
 
         // Build Service Providers map
@@ -87,64 +131,120 @@ export async function GET(request: Request) {
             return strVal;
         };
 
-        // 2. Process Bags & format parcel contents
+        // Build Shipments Map (by clean reference_number lowercase)
+        const shipmentsMap = new Map<string, any>();
+        if (Array.isArray(rawShipments)) {
+            rawShipments.forEach((s: any) => {
+                if (s.reference_number) {
+                    const cleanRef = String(s.reference_number).replace(/^skyt-?/i, '').trim().toLowerCase();
+                    shipmentsMap.set(cleanRef, s);
+                    shipmentsMap.set(String(s.reference_number).trim().toLowerCase(), s);
+                }
+            });
+        }
+
+        // Group outbound_lmd_bag_items by bag_number (lowercase trimmed)
+        const bagItemsByBagMap = new Map<string, any[]>();
+        if (Array.isArray(rawBagItems)) {
+            rawBagItems.forEach((item: any) => {
+                if (item.bag_number) {
+                    const normBag = String(item.bag_number).trim().toLowerCase();
+                    if (!bagItemsByBagMap.has(normBag)) {
+                        bagItemsByBagMap.set(normBag, []);
+                    }
+                    bagItemsByBagMap.get(normBag)!.push(item);
+                }
+            });
+        }
+
+        // 2. Process Bags & format parcel contents by reconciling with outbound_lmd_bag_items (authoritative source)
         const processedBags = (Array.isArray(rawBags) ? rawBags : []).map((bag: any) => {
-            let parcelsList: any[] = [];
+            const bagNum = String(bag.bag_number || '').trim();
+            const normBagNum = bagNum.toLowerCase();
+            const bagItems = bagItemsByBagMap.get(normBagNum) || [];
             
-            // Try parsing JSONB parcels column
+            const parcelMap = new Map<string, any>();
+
+            // 2a. Primary: populate from outbound_lmd_bag_items (authoritative scan log)
+            bagItems.forEach((item: any) => {
+                const rawRef = String(item.shipment_ref || '').trim();
+                const cleanRef = rawRef.replace(/^skyt-?/i, '').trim();
+                if (!rawRef) return;
+                const shipment = shipmentsMap.get(cleanRef.toLowerCase()) || shipmentsMap.get(rawRef.toLowerCase());
+                const weight = normalizeWeightToGrams(item.weight || shipment?.weight || 0);
+                const assignedPartner = bag.target_partner && bag.target_partner !== 'ALL' ? bag.target_partner : '—';
+                
+                parcelMap.set(cleanRef.toLowerCase(), {
+                    trackingNumber: rawRef,
+                    inboundManifest: shipment?.mawb_reference || '—',
+                    inboundBag: shipment?.bag_number || '—',
+                    initialManifest: shipment?.mawb_reference || '—',
+                    initialBag: shipment?.bag_number || '—',
+                    assignedPartner,
+                    partner: assignedPartner,
+                    weight,
+                    scannedBy: resolveUserName(item.scanned_by) || 'Staff',
+                    recipientName: shipment?.consignee_name || '—',
+                    city: shipment?.dest_location_name || '—',
+                    timestamp: item.created_at || bag.created_at
+                });
+            });
+
+            // 2b. Secondary: merge from JSONB parcels column (if any additional parcels exist or to preserve extra fields)
+            let jsonbParcels: any[] = [];
             if (Array.isArray(bag.parcels) && bag.parcels.length > 0) {
-                parcelsList = bag.parcels.map((p: any) => {
-                    const ref = p.trackingNumber || p.shipment_ref || p.reference_number || p.scannedBarcode || '';
-                    const inboundManifest = p.inboundManifest || p.initialManifest || p.mawbRef || '—';
-                    const inboundBag = p.inboundBag || p.initialBag || p.bagNumber || p.bag_number || '—';
-                    const assignedPartner = p.assignedPartner || p.partner || (bag.target_partner && bag.target_partner !== 'ALL' ? bag.target_partner : '—');
-                    return {
-                        trackingNumber: ref,
+                jsonbParcels = bag.parcels;
+            } else if (typeof bag.parcels === 'string' && bag.parcels.trim() !== '' && bag.parcels !== '[]') {
+                try {
+                    const parsed = JSON.parse(bag.parcels);
+                    if (Array.isArray(parsed)) jsonbParcels = parsed;
+                } catch (e) {}
+            }
+
+            jsonbParcels.forEach((p: any) => {
+                const rawRef = String(p.trackingNumber || p.shipment_ref || p.reference_number || p.scannedBarcode || '').trim();
+                const cleanRef = rawRef.replace(/^skyt-?/i, '').trim();
+                if (!rawRef) return;
+                const shipment = shipmentsMap.get(cleanRef.toLowerCase()) || shipmentsMap.get(rawRef.toLowerCase());
+                const weight = normalizeWeightToGrams(p.weight || shipment?.weight || 0);
+                const inboundManifest = p.inboundManifest || p.initialManifest || p.mawbRef || shipment?.mawb_reference || '—';
+                const inboundBag = p.inboundBag || p.initialBag || p.bagNumber || p.bag_number || shipment?.bag_number || '—';
+                const assignedPartner = p.assignedPartner || p.partner || (bag.target_partner && bag.target_partner !== 'ALL' ? bag.target_partner : '—');
+                const existing = parcelMap.get(cleanRef.toLowerCase());
+
+                if (existing) {
+                    // Enrich existing with any non-empty metadata from JSONB
+                    if (existing.inboundManifest === '—' && inboundManifest !== '—') existing.inboundManifest = inboundManifest;
+                    if (existing.initialManifest === '—' && inboundManifest !== '—') existing.initialManifest = inboundManifest;
+                    if (existing.inboundBag === '—' && inboundBag !== '—') existing.inboundBag = inboundBag;
+                    if (existing.initialBag === '—' && inboundBag !== '—') existing.initialBag = inboundBag;
+                    if (existing.recipientName === '—' && p.recipientName) existing.recipientName = p.recipientName;
+                    if (existing.city === '—' && p.city) existing.city = p.city;
+                    if (existing.weight === 0 && weight > 0) existing.weight = weight;
+                } else {
+                    parcelMap.set(cleanRef.toLowerCase(), {
+                        trackingNumber: rawRef,
                         inboundManifest,
                         inboundBag,
                         initialManifest: inboundManifest,
                         initialBag: inboundBag,
                         assignedPartner,
                         partner: assignedPartner,
-                        weight: normalizeWeightToGrams(p.weight || 0),
+                        weight,
                         scannedBy: resolveUserName(p.scannedBy || p.scanned_by) || 'Staff',
-                        recipientName: p.recipientName || '—',
-                        city: p.city || '—',
+                        recipientName: p.recipientName || shipment?.consignee_name || '—',
+                        city: p.city || shipment?.dest_location_name || '—',
                         timestamp: p.timestamp || p.created_at || bag.created_at
-                    };
-                });
-            } else if (typeof bag.parcels === 'string' && bag.parcels.trim() !== '' && bag.parcels !== '[]') {
-                try {
-                    const parsed = JSON.parse(bag.parcels);
-                    if (Array.isArray(parsed)) {
-                        parcelsList = parsed.map((p: any) => {
-                            const ref = p.trackingNumber || p.shipment_ref || p.reference_number || p.scannedBarcode || '';
-                            const inboundManifest = p.inboundManifest || p.initialManifest || p.mawbRef || '—';
-                            const inboundBag = p.inboundBag || p.initialBag || p.bagNumber || p.bag_number || '—';
-                            const assignedPartner = p.assignedPartner || p.partner || (bag.target_partner && bag.target_partner !== 'ALL' ? bag.target_partner : '—');
-                            return {
-                                trackingNumber: ref,
-                                inboundManifest,
-                                inboundBag,
-                                initialManifest: inboundManifest,
-                                initialBag: inboundBag,
-                                assignedPartner,
-                                partner: assignedPartner,
-                                weight: normalizeWeightToGrams(p.weight || 0),
-                                scannedBy: resolveUserName(p.scannedBy || p.scanned_by) || 'Staff',
-                                recipientName: p.recipientName || '—',
-                                city: p.city || '—',
-                                timestamp: p.timestamp || p.created_at || bag.created_at
-                            };
-                        });
-                    }
-                } catch (e) {}
-            }
+                    });
+                }
+            });
 
+            const parcelsList = Array.from(parcelMap.values());
             const rawOpenedBy = bag.opened_by || bag.created_by;
             const rawClosedBy = bag.closed_by || bag.sealed_by;
             const cumulativeParcelsWeight = parcelsList.reduce((acc, p) => acc + (Number(p.weight) || 0), 0);
             const resolvedBagWeight = cumulativeParcelsWeight > 0 ? cumulativeParcelsWeight : normalizeWeightToGrams(bag.total_weight);
+            const resolvedParcelCount = parcelsList.length > 0 ? parcelsList.length : (bag.parcel_count || 0);
 
             return {
                 id: bag.id,
@@ -152,7 +252,7 @@ export async function GET(request: Request) {
                 target_partner: bag.target_partner || 'ALL',
                 destination_hub: bag.destination_hub || '—',
                 status: (bag.status as 'OPEN' | 'SEALED') || 'OPEN',
-                parcel_count: bag.parcel_count || parcelsList.length,
+                parcel_count: resolvedParcelCount,
                 total_weight: resolvedBagWeight,
                 created_by: resolveUserName(bag.created_by) || 'Staff',
                 created_at: bag.created_at,
@@ -167,6 +267,24 @@ export async function GET(request: Request) {
                 parcels: parcelsList
             };
         });
+
+        // Background auto-heal: patch any bag in Supabase where parcel_count or parcels JSON was desynchronized
+        if (sb && Array.isArray(rawBags)) {
+            processedBags.forEach((b: any) => {
+                const dbBag = rawBags.find((rb: any) => rb.id === b.id || rb.bag_number === b.bag_number);
+                if (dbBag && (dbBag.parcel_count !== b.parcel_count || (b.parcels?.length > 0 && (!dbBag.parcels || (Array.isArray(dbBag.parcels) && dbBag.parcels.length !== b.parcels.length))))) {
+                    fetch(`${sb.url}/rest/v1/outbound_lmd_bags?id=eq.${b.id}`, {
+                        method: 'PATCH',
+                        headers: sb.headers,
+                        body: JSON.stringify({
+                            parcel_count: b.parcel_count,
+                            total_weight: b.total_weight,
+                            parcels: b.parcels
+                        })
+                    }).catch(err => console.error(`[manifest-tracking] Auto-heal outbound_lmd_bags error for ${b.bag_number}:`, err));
+                }
+            });
+        }
 
         // 3. Map bags into Manifests
         const assignedBagNumbers = new Set<string>();
@@ -187,7 +305,7 @@ export async function GET(request: Request) {
                 return false;
             });
 
-            // Calculate total parcels and weight across all bags in this manifest
+            // Calculate total parcels and weight across all bags in this manifest from the reconciled bags
             const calculatedTotalParcels = manifestBags.reduce((acc, b) => acc + (b.parcel_count || 0), 0);
             const calculatedTotalWeight = manifestBags.reduce((acc, b) => {
                 const bWeight = Number(b.total_weight) || (b.parcels || []).reduce((pSum: number, p: any) => pSum + (Number(p.weight) || 0), 0);
@@ -205,8 +323,8 @@ export async function GET(request: Request) {
                 status: (manifest.status as 'OPEN' | 'CLOSED') || 'OPEN',
                 service_provider: manifest.service_provider,
                 service_provider_name: providerName,
-                total_bags: manifest.total_bags || manifestBags.length,
-                total_parcels: manifest.total_parcels || calculatedTotalParcels,
+                total_bags: manifestBags.length > 0 ? manifestBags.length : (manifest.total_bags || bagNumArray.length),
+                total_parcels: calculatedTotalParcels > 0 ? calculatedTotalParcels : (manifest.total_parcels || 0),
                 total_weight: calculatedTotalWeight,
                 created_by: resolvedOpenedBy || 'Staff', // outbound_manifests has no created_by; use opened_by
                 opened_by: resolvedOpenedBy || 'Staff',
@@ -216,7 +334,7 @@ export async function GET(request: Request) {
                 json_path: manifest.json_path,
                 xml_path: manifest.xml_path,
                 is_uploaded: Boolean(manifest.is_uploaded),
-                bag_numbers: bagNumArray,
+                bag_numbers: bagNumArray.length > 0 ? bagNumArray : manifestBags.map(b => b.bag_number),
                 bags: manifestBags
             };
         });

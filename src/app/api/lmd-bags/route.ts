@@ -153,6 +153,18 @@ async function updateOutboundManifestInDB(sb: any, manifestRef: string, serviceP
                 bagNumbers = bagsData.map((b: any) => b.bag_number).filter(Boolean);
                 totalParcels = bagsData.reduce((acc: number, b: any) => acc + (Number(b.parcel_count) || 0), 0);
             }
+            if (bagNumbers.length > 0) {
+                try {
+                    const itemsRes = await fetch(
+                        `${sb.url}/rest/v1/outbound_lmd_bag_items?bag_number=in.(${bagNumbers.map((bn: string) => `"${encodeURIComponent(bn)}"`).join(',')})&select=id`,
+                        { headers: sb.headers, cache: 'no-store' }
+                    );
+                    const itemsData = await itemsRes.json();
+                    if (Array.isArray(itemsData) && itemsData.length > 0) {
+                        totalParcels = Math.max(totalParcels, itemsData.length);
+                    }
+                } catch (e) {}
+            }
         }
 
         if (addedBagNumber && !bagNumbers.includes(addedBagNumber)) bagNumbers.push(addedBagNumber);
@@ -323,22 +335,47 @@ export async function GET(request: Request) {
                     let parcels: any[] = [];
                     if (Array.isArray(row.parcels)) parcels = row.parcels;
                     else if (typeof row.parcels === 'string') { try { parcels = JSON.parse(row.parcels); } catch (e) { parcels = []; } }
-                    else {
-                        try {
-                            const itemsRes = await fetch(`${sb.url}/rest/v1/outbound_lmd_bag_items?bag_number=eq.${encodeURIComponent(bagNumber)}`, { headers: sb.headers });
-                            const itemsData = await itemsRes.json();
-                            parcels = Array.isArray(itemsData) ? itemsData.map((it: any) => ({ trackingNumber: it.shipment_ref, weight: normalizeWeightToGrams(it.weight), scannedBy: it.scanned_by })) : [];
-                        } catch (e) { parcels = []; }
-                    }
+
+                    const parcelMap = new Map<string, any>();
+                    // 1. Existing parsed JSONB parcels
+                    parcels.forEach((p: any) => {
+                        const trk = String(p.trackingNumber || p.shipment_ref || p.reference_number || '').trim();
+                        if (trk) parcelMap.set(trk.toLowerCase(), p);
+                    });
+
+                    // 2. Authoritative items from outbound_lmd_bag_items table
+                    try {
+                        const itemsRes = await fetch(`${sb.url}/rest/v1/outbound_lmd_bag_items?bag_number=eq.${encodeURIComponent(bagNumber)}&select=shipment_ref,weight,created_at,scanned_by`, { headers: sb.headers, cache: 'no-store' });
+                        const itemsData = await itemsRes.json();
+                        if (Array.isArray(itemsData) && itemsData.length > 0) {
+                            itemsData.forEach((it: any) => {
+                                const trk = String(it.shipment_ref || '').trim();
+                                if (trk) {
+                                    const existing = parcelMap.get(trk.toLowerCase());
+                                    parcelMap.set(trk.toLowerCase(), {
+                                        trackingNumber: trk,
+                                        weight: normalizeWeightToGrams(it.weight || existing?.weight || 0),
+                                        scannedBy: it.scanned_by || existing?.scannedBy || 'Staff',
+                                        timestamp: it.created_at || existing?.timestamp || row.created_at,
+                                        ...existing
+                                    });
+                                }
+                            });
+                        }
+                    } catch (e) { console.error("Error enriching bag items on GET:", e); }
+
+                    const mergedParcels = Array.from(parcelMap.values());
                     const joinedManifest = row.outbound_manifests;
                     const resolvedMawbRef = joinedManifest?.manifest_reference || row.mawb_ref || '';
                     const resolvedManifestDbId = joinedManifest?.id || row.new_manifest_reference || null;
-                    const cumulativeWeight = parcels.reduce((acc, p) => acc + (Number(p.weight) || 0), 0);
+                    const cumulativeWeight = mergedParcels.reduce((acc, p) => acc + (Number(p.weight) || 0), 0);
+                    const finalParcelCount = mergedParcels.length > 0 ? mergedParcels.length : (row.parcel_count || 0);
+
                     const bag: OutboundBag = {
                         bagNumber: row.bag_number, mawbRef: resolvedMawbRef, manifestDbId: resolvedManifestDbId ? Number(resolvedManifestDbId) : undefined,
                         targetPartner: row.target_partner || 'ALL', destinationHub: row.destination_hub, status: row.status as 'OPEN' | 'SEALED',
-                        parcelCount: row.parcel_count || parcels.length, totalWeight: cumulativeWeight > 0 ? cumulativeWeight : normalizeWeightToGrams(row.total_weight), createdAt: row.created_at,
-                        sealedAt: row.sealed_at, sealedBy: row.sealed_by, operator: row.created_by || 'Staff', parcels
+                        parcelCount: finalParcelCount, totalWeight: cumulativeWeight > 0 ? cumulativeWeight : normalizeWeightToGrams(row.total_weight), createdAt: row.created_at,
+                        sealedAt: row.sealed_at, sealedBy: row.sealed_by, operator: row.created_by || 'Staff', parcels: mergedParcels
                     };
                     outboundBagsMap.set(bagNumber, bag);
                     return NextResponse.json({ success: true, bag });
@@ -385,18 +422,67 @@ export async function GET(request: Request) {
                 }
 
                 if (manifestExistsInDb || Array.isArray(bagsData)) {
+                    // Fetch all items from outbound_lmd_bag_items for these bags in bulk to ensure accurate counts
+                    const bagNumbersList = bagsData.map((b: any) => b.bag_number).filter(Boolean);
+                    const bagItemsMap = new Map<string, any[]>();
+                    if (bagNumbersList.length > 0) {
+                        try {
+                            const itemsRes = await fetch(
+                                `${sb.url}/rest/v1/outbound_lmd_bag_items?bag_number=in.(${bagNumbersList.map((bn: string) => `"${encodeURIComponent(bn)}"`).join(',')})&select=bag_number,shipment_ref,weight,created_at,scanned_by`,
+                                { headers: sb.headers, cache: 'no-store', signal: AbortSignal.timeout(15000) }
+                            );
+                            const itemsData = await itemsRes.json();
+                            if (Array.isArray(itemsData)) {
+                                itemsData.forEach((it: any) => {
+                                    const bn = String(it.bag_number || '').trim().toLowerCase();
+                                    if (!bagItemsMap.has(bn)) bagItemsMap.set(bn, []);
+                                    bagItemsMap.get(bn)!.push(it);
+                                });
+                            }
+                        } catch (e) {
+                            console.error("Error bulk fetching bag items for mawbRef:", e);
+                        }
+                    }
+
                     const dbBags: OutboundBag[] = bagsData.map((row: any) => {
-                        let parcels: any[] = [];
-                        if (Array.isArray(row.parcels)) parcels = row.parcels;
-                        else if (typeof row.parcels === 'string') { try { parcels = JSON.parse(row.parcels); } catch (e) { parcels = []; } }
-                        const cumWeightGrams = (parcels || []).reduce((acc: number, p: any) => acc + normalizeWeightToGrams(p.weight), 0);
+                        let jsonbParcels: any[] = [];
+                        if (Array.isArray(row.parcels)) jsonbParcels = row.parcels;
+                        else if (typeof row.parcels === 'string') { try { jsonbParcels = JSON.parse(row.parcels); } catch (e) { jsonbParcels = []; } }
+
+                        const parcelMap = new Map<string, any>();
+                        // 1. Insert JSONB parcels
+                        jsonbParcels.forEach((p: any) => {
+                            const trk = String(p.trackingNumber || p.shipment_ref || p.reference_number || '').trim();
+                            if (trk) parcelMap.set(trk.toLowerCase(), p);
+                        });
+
+                        // 2. Insert and merge DB items
+                        const dbItems = bagItemsMap.get(String(row.bag_number || '').trim().toLowerCase()) || [];
+                        dbItems.forEach((it: any) => {
+                            const trk = String(it.shipment_ref || '').trim();
+                            if (trk) {
+                                const existing = parcelMap.get(trk.toLowerCase());
+                                parcelMap.set(trk.toLowerCase(), {
+                                    trackingNumber: trk,
+                                    weight: normalizeWeightToGrams(it.weight || existing?.weight || 0),
+                                    scannedBy: it.scanned_by || existing?.scannedBy || 'Staff',
+                                    timestamp: it.created_at || existing?.timestamp || row.created_at,
+                                    ...existing
+                                });
+                            }
+                        });
+
+                        const mergedParcels = Array.from(parcelMap.values());
+                        const cumWeightGrams = mergedParcels.reduce((acc: number, p: any) => acc + normalizeWeightToGrams(p.weight), 0);
                         const resolvedTotalWeight = cumWeightGrams > 0 ? cumWeightGrams : normalizeWeightToGrams(row.total_weight);
+                        const finalParcelCount = mergedParcels.length > 0 ? mergedParcels.length : (row.parcel_count || 0);
+
                         return {
                             bagNumber: row.bag_number, mawbRef: mawbRef,
                             manifestDbId: row.new_manifest_reference ? Number(row.new_manifest_reference) : (manifestDbId || undefined),
                             targetPartner: row.target_partner || 'ALL', destinationHub: row.destination_hub, status: row.status as 'OPEN' | 'SEALED',
-                            parcelCount: row.parcel_count || parcels.length, totalWeight: resolvedTotalWeight, createdAt: row.created_at,
-                            sealedAt: row.sealed_at, sealedBy: row.sealed_by, operator: row.created_by || 'Staff', parcels
+                            parcelCount: finalParcelCount, totalWeight: resolvedTotalWeight, createdAt: row.created_at,
+                            sealedAt: row.sealed_at, sealedBy: row.sealed_by, operator: row.created_by || 'Staff', parcels: mergedParcels
                         } as OutboundBag;
                     });
                     outboundBagsMap.forEach((bag, bNum) => { if (bag.mawbRef.toLowerCase() === mawbRef.toLowerCase()) outboundBagsMap.delete(bNum); });
@@ -625,37 +711,86 @@ export async function POST(request: Request) {
             let bag = outboundBagsMap.get(bagNumber);
             if (!bag) bag = { bagNumber, mawbRef: mawbRef, targetPartner: partner || body.targetPartner || 'ALL', destinationHub: destinationHub || 'Main Sort Hub', status: 'OPEN', parcelCount: 0, totalWeight: 0, createdAt: new Date().toISOString(), operator: typeof operator === 'string' ? operator : 'Staff', parcels: [] };
             if (bag.status === 'SEALED') return NextResponse.json({ success: false, error: `Bag "${bagNumber}" is SEALED & CLOSED. No additional parcels can be added.` }, { status: 400 });
+            
             const newParcel = body.parcel;
-            if (newParcel) {
-                const tracking = String(newParcel.trackingNumber || newParcel.reference_number || newParcel.scannedBarcode || '').trim();
-                const exists = bag.parcels.some(p => String(p.trackingNumber || p.reference_number || p.scannedBarcode || '').trim().toLowerCase() === tracking.toLowerCase());
-                if (!exists) {
-                    bag.parcels.unshift(newParcel);
+            const tracking = String(newParcel?.trackingNumber || newParcel?.reference_number || newParcel?.scannedBarcode || '').trim();
+
+            // 1. Insert into outbound_lmd_bag_items table FIRST
+            if (newParcel && tracking && sb) {
+                try {
+                    await fetch(`${sb.url}/rest/v1/outbound_lmd_bag_items`, {
+                        method: 'POST',
+                        headers: sb.headers,
+                        body: JSON.stringify({
+                            bag_number: bagNumber,
+                            shipment_ref: tracking,
+                            weight: normalizeWeightToGrams(newParcel.weight),
+                            scanned_by: typeof operator === 'string' ? operator : 'Staff'
+                        })
+                    }).catch(e => console.error("Optional bag items table update ignored:", e));
+                } catch (err) {
+                    console.error("Error inserting into outbound_lmd_bag_items:", err);
                 }
-                bag.parcelCount = bag.parcels.length;
-                bag.totalWeight = Math.round(bag.parcels.reduce((acc, p) => acc + (normalizeWeightToGrams(p.weight)), 0));
             }
-            outboundBagsMap.set(bagNumber, bag);
+
+            // 2. Fetch all bag items from DB for this bag to avoid in-memory stale overwrite
+            let allDbBagItems: any[] = [];
             if (sb) {
                 try {
-                    const patchRes = await fetch(`${sb.url}/rest/v1/outbound_lmd_bags?bag_number=eq.${encodeURIComponent(bagNumber)}`, { method: 'PATCH', headers: sb.headers, body: JSON.stringify({ parcel_count: bag.parcelCount, total_weight: bag.totalWeight, parcels: bag.parcels || [] }) });
+                    const itemsRes = await fetch(`${sb.url}/rest/v1/outbound_lmd_bag_items?bag_number=eq.${encodeURIComponent(bagNumber)}&select=shipment_ref,weight,created_at,scanned_by`, { headers: sb.headers, cache: 'no-store' });
+                    const itemsData = await itemsRes.json();
+                    if (Array.isArray(itemsData)) allDbBagItems = itemsData;
+                } catch (e) {
+                    console.error("Error fetching bag items for sync:", e);
+                }
+            }
+
+            // 3. Build deduplicated parcels list
+            const parcelMap = new Map<string, any>();
+            (bag.parcels || []).forEach((p: any) => {
+                const trk = String(p.trackingNumber || p.reference_number || p.shipment_ref || '').trim();
+                if (trk) parcelMap.set(trk.toLowerCase(), p);
+            });
+            allDbBagItems.forEach((it: any) => {
+                const trk = String(it.shipment_ref || '').trim();
+                if (trk) {
+                    const existing = parcelMap.get(trk.toLowerCase());
+                    parcelMap.set(trk.toLowerCase(), {
+                        trackingNumber: trk,
+                        weight: normalizeWeightToGrams(it.weight || existing?.weight || 0),
+                        scannedBy: it.scanned_by || existing?.scannedBy || (typeof operator === 'string' ? operator : 'Staff'),
+                        timestamp: it.created_at || existing?.timestamp || new Date().toISOString(),
+                        ...existing
+                    });
+                }
+            });
+            if (newParcel && tracking) {
+                const existing = parcelMap.get(tracking.toLowerCase());
+                parcelMap.set(tracking.toLowerCase(), {
+                    ...newParcel,
+                    trackingNumber: tracking,
+                    weight: normalizeWeightToGrams(newParcel.weight),
+                    scannedBy: typeof operator === 'string' ? operator : 'Staff',
+                    timestamp: new Date().toISOString(),
+                    ...existing
+                });
+            }
+
+            const mergedParcels = Array.from(parcelMap.values());
+            bag.parcels = mergedParcels;
+            bag.parcelCount = mergedParcels.length;
+            bag.totalWeight = Math.round(mergedParcels.reduce((acc, p) => acc + (normalizeWeightToGrams(p.weight)), 0));
+            outboundBagsMap.set(bagNumber, bag);
+
+            if (sb) {
+                try {
+                    const patchRes = await fetch(`${sb.url}/rest/v1/outbound_lmd_bags?bag_number=eq.${encodeURIComponent(bagNumber)}`, {
+                        method: 'PATCH',
+                        headers: sb.headers,
+                        body: JSON.stringify({ parcel_count: bag.parcelCount, total_weight: bag.totalWeight, parcels: bag.parcels || [] })
+                    });
                     if (!patchRes.ok) {
                         console.error("Supabase add-parcel PATCH error:", await patchRes.text());
-                    }
-                    if (newParcel) {
-                        const tracking = newParcel.trackingNumber || newParcel.reference_number;
-                        if (tracking) {
-                            await fetch(`${sb.url}/rest/v1/outbound_lmd_bag_items`, {
-                                method: 'POST',
-                                headers: sb.headers,
-                                body: JSON.stringify({
-                                    bag_number: bagNumber,
-                                    shipment_ref: tracking,
-                                    weight: normalizeWeightToGrams(newParcel.weight),
-                                    scanned_by: typeof operator === 'string' ? operator : 'Staff'
-                                })
-                            }).catch(e => console.error("Optional bag items table update ignored:", e));
-                        }
                     }
                     if (bag.mawbRef) await updateOutboundManifestInDB(sb, bag.mawbRef, serviceProviderId ? Number(serviceProviderId) : null);
                 } catch (err) { console.error("Supabase add-parcel update error:", err); }
@@ -677,6 +812,41 @@ export async function POST(request: Request) {
                 if (totalWeight !== undefined) bag.totalWeight = totalWeight;
                 if (parcels) bag.parcels = parcels;
             }
+
+            // Enrich and reconcile from outbound_lmd_bag_items before sealing to prevent freezing a stale count
+            if (sb) {
+                try {
+                    const itemsRes = await fetch(`${sb.url}/rest/v1/outbound_lmd_bag_items?bag_number=eq.${encodeURIComponent(bagNumber)}&select=shipment_ref,weight,created_at,scanned_by`, { headers: sb.headers, cache: 'no-store' });
+                    const itemsData = await itemsRes.json();
+                    if (Array.isArray(itemsData) && itemsData.length > 0) {
+                        const parcelMap = new Map<string, any>();
+                        (bag.parcels || []).forEach((p: any) => {
+                            const trk = String(p.trackingNumber || p.shipment_ref || p.reference_number || '').trim();
+                            if (trk) parcelMap.set(trk.toLowerCase(), p);
+                        });
+                        itemsData.forEach((it: any) => {
+                            const trk = String(it.shipment_ref || '').trim();
+                            if (trk) {
+                                const existing = parcelMap.get(trk.toLowerCase());
+                                parcelMap.set(trk.toLowerCase(), {
+                                    trackingNumber: trk,
+                                    weight: normalizeWeightToGrams(it.weight || existing?.weight || 0),
+                                    scannedBy: it.scanned_by || existing?.scannedBy || sealingOperator,
+                                    timestamp: it.created_at || existing?.timestamp || sealedTimestamp,
+                                    ...existing
+                                });
+                            }
+                        });
+                        const reconciledParcels = Array.from(parcelMap.values());
+                        bag.parcels = reconciledParcels;
+                        bag.parcelCount = reconciledParcels.length;
+                        bag.totalWeight = Math.round(reconciledParcels.reduce((acc, p) => acc + normalizeWeightToGrams(p.weight), 0));
+                    }
+                } catch (e) {
+                    console.error("Error reconciling seal items:", e);
+                }
+            }
+
             outboundBagsMap.set(bagNumber, bag);
             if (sb) {
                 try {
