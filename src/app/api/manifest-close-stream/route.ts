@@ -130,30 +130,37 @@ async function fetchShipmentsBatch(sb: any, trackingNumbers: string[]): Promise<
     const allSearchKeys = Array.from(new Set([...rawRefs, ...cleanRefs, ...cleanRefs.map(c => `SKYT-${c}`)]));
 
     const CHUNK_SIZE = 80;
+    const chunkPromises: Promise<void>[] = [];
+
     for (let i = 0; i < allSearchKeys.length; i += CHUNK_SIZE) {
         const chunk = allSearchKeys.slice(i, i + CHUNK_SIZE);
         const encodedChunk = chunk.map(k => encodeURIComponent(k)).join(',');
 
-        try {
-            const query = `or=(reference_number.in.(${encodedChunk}),sender_reference.in.(${encodedChunk}),alternate_reference.in.(${encodedChunk}))&select=*`;
-            const res = await fetch(`${sb.url}/rest/v1/shipments?${query}`, {
-                headers: sb.headers,
-                cache: 'no-store'
-            });
-            const data = await res.json();
-            if (Array.isArray(data)) {
-                for (const row of data) {
-                    if (row.reference_number) resultMap.set(String(row.reference_number).toLowerCase().trim(), row);
-                    if (row.sender_reference) resultMap.set(String(row.sender_reference).toLowerCase().trim(), row);
-                    if (row.alternate_reference) resultMap.set(String(row.alternate_reference).toLowerCase().trim(), row);
-                    if (row.sender_reference_2) resultMap.set(String(row.sender_reference_2).toLowerCase().trim(), row);
+        const p = (async () => {
+            try {
+                const query = `or=(reference_number.in.(${encodedChunk}),sender_reference.in.(${encodedChunk}),alternate_reference.in.(${encodedChunk}))&select=*`;
+                const res = await fetch(`${sb.url}/rest/v1/shipments?${query}`, {
+                    headers: sb.headers,
+                    cache: 'no-store'
+                });
+                const data = await res.json();
+                if (Array.isArray(data)) {
+                    for (const row of data) {
+                        if (row.reference_number) resultMap.set(String(row.reference_number).toLowerCase().trim(), row);
+                        if (row.sender_reference) resultMap.set(String(row.sender_reference).toLowerCase().trim(), row);
+                        if (row.alternate_reference) resultMap.set(String(row.alternate_reference).toLowerCase().trim(), row);
+                        if (row.sender_reference_2) resultMap.set(String(row.sender_reference_2).toLowerCase().trim(), row);
+                    }
                 }
+            } catch (e) {
+                console.error('[manifest-close-stream] Batch fetch error:', e);
             }
-        } catch (e) {
-            console.error('[manifest-close-stream] Batch fetch error:', e);
-        }
+        })();
+
+        chunkPromises.push(p);
     }
 
+    await Promise.all(chunkPromises);
     return resultMap;
 }
 
@@ -531,7 +538,15 @@ async function postToFfdx(xmlStream: string, manifestReference: string): Promise
             const rawContent = text.replace(/<[^>]+>/g, '').trim();
             const parts = rawContent.split('|');
             const statusVal = parts.length > 1 ? parseInt(parts[1], 10) : 0;
-            if (statusVal < 0 || rawContent.toLowerCase().includes('object reference') || rawContent.toLowerCase().includes('error')) {
+            const lowerRaw = rawContent.toLowerCase();
+            const isAlreadyUploaded = lowerRaw.includes('already exist') || lowerRaw.includes('duplicate') || lowerRaw.includes('already uploaded') || lowerRaw.includes('already processed') || lowerRaw.includes('already created') || lowerRaw.includes('already closed');
+
+            if (isAlreadyUploaded) {
+                console.log(`[manifest-close-stream] [${manifestReference}] Manifest is already confirmed on GETonline: ${rawContent}`);
+                return { success: true, response: text };
+            }
+
+            if (statusVal < 0 || lowerRaw.includes('object reference') || lowerRaw.includes('error')) {
                 return { success: false, response: text, error: `FFDX Rejected: ${rawContent}` };
             }
             return { success: true, response: text };

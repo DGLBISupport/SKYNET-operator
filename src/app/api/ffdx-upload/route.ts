@@ -75,7 +75,52 @@ function escapeXml(str: string | number | null | undefined): string {
         .replace(/'/g, '&apos;');
 }
 
-// ─── Fetch full shipment details from Supabase shipments table ────────────────
+// ─── Batch fetch shipment details from Supabase with high performance ────────
+async function fetchShipmentsBatch(sb: any, trackingNumbers: string[]): Promise<Map<string, any>> {
+    const resultMap = new Map<string, any>();
+    if (!sb || !trackingNumbers || trackingNumbers.length === 0) return resultMap;
+
+    const rawRefs = Array.from(new Set(trackingNumbers.map(t => t.trim()).filter(Boolean)));
+    const cleanRefs = Array.from(new Set(rawRefs.map(r => r.replace(/^skyt-?/i, '').trim()).filter(Boolean)));
+    const allSearchKeys = Array.from(new Set([...rawRefs, ...cleanRefs, ...cleanRefs.map(c => `SKYT-${c}`)]));
+
+    const CHUNK_SIZE = 80;
+    const chunkPromises: Promise<void>[] = [];
+
+    // Process chunks concurrently in batches
+    for (let i = 0; i < allSearchKeys.length; i += CHUNK_SIZE) {
+        const chunk = allSearchKeys.slice(i, i + CHUNK_SIZE);
+        const encodedChunk = chunk.map(k => encodeURIComponent(k)).join(',');
+
+        const p = (async () => {
+            try {
+                const query = `or=(reference_number.in.(${encodedChunk}),sender_reference.in.(${encodedChunk}),alternate_reference.in.(${encodedChunk}))&select=*`;
+                const res = await fetch(`${sb.url}/rest/v1/shipments?${query}`, {
+                    headers: sb.headers,
+                    cache: 'no-store'
+                });
+                const data = await res.json();
+                if (Array.isArray(data)) {
+                    for (const row of data) {
+                        if (row.reference_number) resultMap.set(String(row.reference_number).toLowerCase().trim(), row);
+                        if (row.sender_reference) resultMap.set(String(row.sender_reference).toLowerCase().trim(), row);
+                        if (row.alternate_reference) resultMap.set(String(row.alternate_reference).toLowerCase().trim(), row);
+                        if (row.sender_reference_2) resultMap.set(String(row.sender_reference_2).toLowerCase().trim(), row);
+                    }
+                }
+            } catch (e) {
+                console.error('[ffdx-upload] Batch fetch chunk error:', e);
+            }
+        })();
+
+        chunkPromises.push(p);
+    }
+
+    await Promise.all(chunkPromises);
+    return resultMap;
+}
+
+// ─── Fetch full shipment details from Supabase shipments table (Fallback) ─────
 async function fetchShipmentDetails(sb: any, trackingNumber: string): Promise<any | null> {
     if (!sb || !trackingNumber) return null;
     try {
@@ -95,12 +140,6 @@ async function fetchShipmentDetails(sb: any, trackingNumber: string): Promise<an
         const res2 = await fetch(`${sb.url}/rest/v1/shipments?${query2}&select=*`, { headers: sb.headers, cache: 'no-store' });
         const data2 = await res2.json();
         if (Array.isArray(data2) && data2.length > 0) return data2[0];
-
-        // 3. Try ilike wildcard fallback
-        const query3 = `or=(reference_number.ilike.*${encodeURIComponent(cleanRef)}*,sender_reference.ilike.*${encodeURIComponent(cleanRef)}*)`;
-        const res3 = await fetch(`${sb.url}/rest/v1/shipments?${query3}&select=*&limit=1`, { headers: sb.headers, cache: 'no-store' });
-        const data3 = await res3.json();
-        if (Array.isArray(data3) && data3.length > 0) return data3[0];
 
         return null;
     } catch (e) {
@@ -488,7 +527,15 @@ async function postToFfdx(xmlStream: string, manifestReference: string): Promise
             const parts = rawContent.split('|');
             const statusVal = parts.length > 1 ? parseInt(parts[1], 10) : 0;
 
-            if (statusVal < 0 || rawContent.toLowerCase().includes('object reference') || rawContent.toLowerCase().includes('error')) {
+            const lowerRaw = rawContent.toLowerCase();
+            const isAlreadyUploaded = lowerRaw.includes('already exist') || lowerRaw.includes('duplicate') || lowerRaw.includes('already uploaded') || lowerRaw.includes('already processed') || lowerRaw.includes('already created') || lowerRaw.includes('already closed');
+
+            if (isAlreadyUploaded) {
+                console.log(`[ffdx-upload] [${manifestReference}] Manifest is already confirmed on GETonline (FFDX): ${rawContent}`);
+                return { success: true, response: text };
+            }
+
+            if (statusVal < 0 || lowerRaw.includes('object reference') || lowerRaw.includes('error')) {
                 lastError = `FFDX Rejected: ${rawContent}`;
                 console.error(`[ffdx-upload] [${manifestReference}] FFDX upload rejected by server: ${lastError}`);
                 return { success: false, response: text, error: lastError };
@@ -541,7 +588,7 @@ export async function POST(request: Request) {
     let normalizedRef = '';
     try {
         const body = await request.json();
-        const { manifestReference, manifestId, serviceProviderName, bags } = body as {
+        const { manifestReference, manifestId, serviceProviderName, bags, markUploadedOnly } = body as {
             manifestReference: string;
             manifestId?: number | null;
             serviceProviderName?: string;
@@ -558,10 +605,19 @@ export async function POST(request: Request) {
                     province?: string;
                 }>;
             }>;
+            markUploadedOnly?: boolean;
         };
 
         if (!manifestReference) {
             return NextResponse.json({ success: false, error: 'Missing manifestReference' }, { status: 400 });
+        }
+
+        const sb = getSupabaseConfig();
+
+        // If client only wants to confirm/mark as uploaded in DB
+        if (markUploadedOnly) {
+            await markManifestUploaded(sb, manifestId || null, manifestReference);
+            return NextResponse.json({ success: true, manifestReference, message: 'Manifest marked as uploaded successfully.' });
         }
 
         normalizedRef = manifestReference.trim().toUpperCase();
@@ -571,8 +627,6 @@ export async function POST(request: Request) {
             return NextResponse.json({ success: false, error: 'Upload already in progress for this manifest.' }, { status: 409 });
         }
         activeFfdxUploads.add(normalizedRef);
-
-        const sb = getSupabaseConfig();
 
         // ─── Idempotency Check ─────────────────────────────────────────────────
         if (sb) {
@@ -702,6 +756,20 @@ export async function POST(request: Request) {
             allBags = enrichedBags;
         }
 
+        // Collect all tracking numbers from all bags
+        const allTrackingNumbers: string[] = [];
+        for (const bag of allBags) {
+            const parcels = Array.isArray(bag.parcels) ? bag.parcels : [];
+            for (const parcel of parcels) {
+                const trackingNum = (parcel.trackingNumber || parcel.shipment_ref || '').replace(/^skyt-?/i, '').trim();
+                if (trackingNum) allTrackingNumbers.push(trackingNum);
+            }
+        }
+
+        console.log(`[ffdx-upload] Batch fetching shipment details for ${allTrackingNumbers.length} parcel(s)...`);
+        const batchDetailsMap = await fetchShipmentsBatch(sb, allTrackingNumbers);
+        console.log(`[ffdx-upload] Batch fetch found ${batchDetailsMap.size} matching shipment record(s) in Supabase.`);
+
         const parcelLogs: ParcelLogData[] = [];
         for (const bag of allBags) {
             const parcels = Array.isArray(bag.parcels) ? bag.parcels : [];
@@ -709,7 +777,11 @@ export async function POST(request: Request) {
                 const trackingNum = (parcel.trackingNumber || parcel.shipment_ref || '').replace(/^skyt-?/i, '').trim();
                 if (!trackingNum) continue;
 
-                const detail = await fetchShipmentDetails(sb, trackingNum);
+                // High-speed O(1) map lookup
+                let detail = batchDetailsMap.get(trackingNum.toLowerCase())
+                    || batchDetailsMap.get(`skyt-${trackingNum.toLowerCase()}`)
+                    || null;
+
                 if (!firstShipmentDetail && detail) {
                     firstShipmentDetail = detail;
                 }

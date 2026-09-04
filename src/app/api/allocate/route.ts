@@ -777,27 +777,35 @@ export async function POST(request: Request) {
             const remarksToSend = 'Skynet Warehouse';
 
             if (finalAllocation && finalAllocation.id) {
-                fetch(`${supabaseUrl}/rest/v1/service_provider_allocation?id=eq.${finalAllocation.id}`, {
-                    method: 'PATCH',
-                    headers: { ...headers, "Content-Type": "application/json" },
-                    body: JSON.stringify({ unsealed: true, scan_status: '1ST_SCAN_DONE', updated_at: new Date().toISOString() })
-                }).catch(e => console.error("Failed to set 1ST_SCAN_DONE on allocation:", e));
+                try {
+                    await fetch(`${supabaseUrl}/rest/v1/service_provider_allocation?id=eq.${finalAllocation.id}`, {
+                        method: 'PATCH',
+                        headers: { ...headers, "Content-Type": "application/json" },
+                        body: JSON.stringify({ unsealed: true, scan_status: '1ST_SCAN_DONE', updated_at: new Date().toISOString() })
+                    });
+                } catch (e) {
+                    console.error("Failed to set 1ST_SCAN_DONE on allocation:", e);
+                }
 
                 // Fire-and-forget: push tracking event (85 for damaged/Temu parcel, 1558 for normal parcel) to FFDX GetonLine
                 uploadToFfdx(shipmentRef, supabaseUrl, headers, finalAllocation.id, eventIdToSend, remarksToSend);
             } else {
                 // Parcel has no allocation row yet — create a minimal one to record scan status
-                fetch(`${supabaseUrl}/rest/v1/service_provider_allocation`, {
-                    method: 'POST',
-                    headers: { ...headers, "Content-Type": "application/json", "Prefer": "return=minimal" },
-                    body: JSON.stringify({
-                        shipment_ref: shipmentRef,
-                        mawb_ref: mawbRef || shipment.mawb_ref || null,
-                        unsealed: true,
-                        scan_status: '1ST_SCAN_DONE',
-                        updated_at: new Date().toISOString()
-                    })
-                }).catch(e => console.error("Failed to create minimal allocation for 1ST_SCAN_DONE:", e));
+                try {
+                    await fetch(`${supabaseUrl}/rest/v1/service_provider_allocation`, {
+                        method: 'POST',
+                        headers: { ...headers, "Content-Type": "application/json", "Prefer": "return=minimal" },
+                        body: JSON.stringify({
+                            shipment_ref: shipmentRef,
+                            mawb_ref: mawbRef || shipment.mawb_ref || null,
+                            unsealed: true,
+                            scan_status: '1ST_SCAN_DONE',
+                            updated_at: new Date().toISOString()
+                        })
+                    });
+                } catch (e) {
+                    console.error("Failed to create minimal allocation for 1ST_SCAN_DONE:", e);
+                }
 
                 // Fire-and-forget: push tracking event (85 for damaged/Temu parcel, 1558 for normal parcel) to FFDX GetonLine
                 uploadToFfdx(shipmentRef, supabaseUrl, headers, null, eventIdToSend, remarksToSend);
@@ -981,15 +989,48 @@ export async function POST(request: Request) {
 
             if (allocation && allocation.id) {
                 // Mark 2nd scan done on service_provider_allocation (source of truth)
-                fetch(`${supabaseUrl}/rest/v1/service_provider_allocation?id=eq.${allocation.id}`, {
-                    method: 'PATCH',
-                    headers: { ...headers, "Content-Type": "application/json" },
-                    body: JSON.stringify({
-                        validated: true,
-                        scan_status: '2ND_SCAN_DONE',
-                        updated_at: new Date().toISOString()
-                    })
-                }).catch(e => console.error("Failed to update allocation to 2ND_SCAN_DONE:", e));
+                try {
+                    await fetch(`${supabaseUrl}/rest/v1/service_provider_allocation?id=eq.${allocation.id}`, {
+                        method: 'PATCH',
+                        headers: { ...headers, "Content-Type": "application/json" },
+                        body: JSON.stringify({
+                            validated: true,
+                            scan_status: '2ND_SCAN_DONE',
+                            updated_at: new Date().toISOString()
+                        })
+                    });
+                } catch (e) {
+                    console.error("Failed to update allocation to 2ND_SCAN_DONE by ID:", e);
+                }
+            } else if (shipmentRef) {
+                // Fallback: update by shipment_ref if allocation record had no ID
+                try {
+                    const patchRes = await fetch(`${supabaseUrl}/rest/v1/service_provider_allocation?shipment_ref=eq.${encodeURIComponent(shipmentRef)}`, {
+                        method: 'PATCH',
+                        headers: { ...headers, "Content-Type": "application/json" },
+                        body: JSON.stringify({
+                            validated: true,
+                            scan_status: '2ND_SCAN_DONE',
+                            updated_at: new Date().toISOString()
+                        })
+                    });
+                    if (!patchRes.ok) {
+                        await fetch(`${supabaseUrl}/rest/v1/service_provider_allocation`, {
+                            method: 'POST',
+                            headers: { ...headers, "Content-Type": "application/json", "Prefer": "return=minimal" },
+                            body: JSON.stringify({
+                                shipment_ref: shipmentRef,
+                                mawb_ref: initialManifestRef || null,
+                                unsealed: true,
+                                validated: true,
+                                scan_status: '2ND_SCAN_DONE',
+                                updated_at: new Date().toISOString()
+                            })
+                        });
+                    }
+                } catch (e) {
+                    console.error("Failed to update/create allocation for 2ND_SCAN_DONE by shipment_ref:", e);
+                }
             }
         }
 

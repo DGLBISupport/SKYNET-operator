@@ -484,11 +484,14 @@ export async function GET(request: Request) {
             const inboundMawb = (alloc.mawb_ref && typeof alloc.mawb_ref === 'string' && alloc.mawb_ref.trim()) ? alloc.mawb_ref.trim() : 'UNASSIGNED';
 
             const statusStr = (alloc.scan_status || '').toUpperCase();
-            const is1stScan = alloc.unsealed === true || statusStr === '1ST_SCAN_DONE' || statusStr === '2ND_SCAN_DONE' || statusStr === 'VERIFIED' || statusStr === 'DISPATCHED';
-            const is2ndScan = statusStr === '2ND_SCAN_DONE' || statusStr === 'VERIFIED' || statusStr === 'DISPATCHED';
+            const is2ndScanFromStatus = statusStr === '2ND_SCAN_DONE' || statusStr === 'VERIFIED' || statusStr === 'DISPATCHED';
 
             const fsInfo = firstScanMap.get(canonicalRef.toLowerCase()) || firstScanMap.get(rawRef.toLowerCase()) || (temuCode ? firstScanMap.get(temuCode.toLowerCase()) : null);
             const ssInfo = secondScanMap.get(canonicalRef.toLowerCase()) || secondScanMap.get(rawRef.toLowerCase()) || (temuCode ? secondScanMap.get(temuCode.toLowerCase()) : null);
+            const hasBagAssignment = shipmentToBagMap.has(canonicalRef) || shipmentToBagMap.has(rawRef) || Boolean(temuCode && shipmentToBagMap.has(temuCode));
+
+            const is2ndScan = is2ndScanFromStatus || Boolean(ssInfo?.time) || hasBagAssignment;
+            const is1stScan = alloc.unsealed === true || statusStr === '1ST_SCAN_DONE' || is2ndScan || Boolean(fsInfo?.time);
 
             const firstScanTime = is1stScan ? (fsInfo?.time || alloc.created_at || null) : null;
             const firstScannedBy = is1stScan ? (fsInfo?.operator || 'Staff') : null;
@@ -550,7 +553,7 @@ export async function GET(request: Request) {
                         secondScanTime,
                         secondScannedBy,
                         scannedBy: secondScannedBy || firstScannedBy || 'Staff',
-                        scanStatus: alloc.scan_status || (is2ndScan ? '2ND_SCAN_DONE' : '1ST_SCAN_DONE'),
+                        scanStatus: is2ndScan ? '2ND_SCAN_DONE' : (alloc.scan_status || '1ST_SCAN_DONE'),
                         serviceProvider: partnerName,
                         scannedAt: secondScanTime || firstScanTime || alloc.updated_at || alloc.created_at
                     });
@@ -565,6 +568,7 @@ export async function GET(request: Request) {
                         }
                         if (is2ndScan) {
                             existing.verified = true;
+                            existing.scanStatus = '2ND_SCAN_DONE';
                             if (!existing.secondScanTime && secondScanTime) existing.secondScanTime = secondScanTime;
                             if ((!existing.secondScannedBy || existing.secondScannedBy === 'Staff') && secondScannedBy) existing.secondScannedBy = secondScannedBy;
                             if (existing.scannedBy === 'Staff' && secondScannedBy) existing.scannedBy = secondScannedBy;

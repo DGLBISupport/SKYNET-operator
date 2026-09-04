@@ -130,9 +130,10 @@ export default function AllModals({
     viewingUnsealedParcelsModal
 }: any) {
     const [isRetryingFfdx, setIsRetryingFfdx] = useState(false);
+    const [isMarkingUploaded, setIsMarkingUploaded] = useState(false);
 
     const handleRetryFfdxUpload = async (targetMawb: string, providerName?: string) => {
-        if (isRetryingFfdx || !targetMawb) return;
+        if (isRetryingFfdx || isMarkingUploaded || !targetMawb) return;
         setIsRetryingFfdx(true);
         if (setManifestProgressModal) {
             setManifestProgressModal((prev: any) => prev ? ({ ...prev, status: 'ffdx_uploading', error: undefined }) : null);
@@ -146,7 +147,21 @@ export default function AllModals({
                     serviceProviderName: providerName || 'All Partners'
                 })
             });
-            const data = await res.json();
+
+            let data: any;
+            const contentType = res.headers.get('content-type') || '';
+            if (contentType.includes('application/json')) {
+                data = await res.json();
+            } else {
+                const rawText = await res.text().catch(() => '');
+                data = {
+                    success: false,
+                    error: res.ok
+                        ? 'Received unexpected response format from server.'
+                        : `Server error (${res.status}): ${rawText.slice(0, 200) || res.statusText || 'Unable to connect to server'}`
+                };
+            }
+
             if (data.success) {
                 if (setManifestProgressModal) {
                     setManifestProgressModal((prev: any) => prev ? ({
@@ -175,6 +190,36 @@ export default function AllModals({
             }
         } finally {
             setIsRetryingFfdx(false);
+        }
+    };
+
+    const handleMarkAsUploaded = async (targetMawb: string) => {
+        if (isMarkingUploaded || isRetryingFfdx || !targetMawb) return;
+        setIsMarkingUploaded(true);
+        try {
+            const res = await fetch('/api/ffdx-upload', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    manifestReference: targetMawb,
+                    markUploadedOnly: true
+                })
+            });
+            const data = await res.json().catch(() => ({ success: true }));
+            if (data.success !== false) {
+                if (setManifestProgressModal) {
+                    setManifestProgressModal((prev: any) => prev ? ({
+                        ...prev,
+                        status: 'completed',
+                        error: undefined,
+                        summary: { ...prev.summary, ffdxSuccess: true, ffdxError: undefined, alreadyUploaded: true }
+                    }) : null);
+                }
+            }
+        } catch (e) {
+            console.error('Failed to mark manifest as uploaded:', e);
+        } finally {
+            setIsMarkingUploaded(false);
         }
     };
 
@@ -734,29 +779,52 @@ export default function AllModals({
                                             gap: '10px'
                                         }}>
                                             <div style={{ fontSize: '11px', color: '#6b7280', flex: 1, minWidth: '220px' }}>
-                                                The manifest is safely closed and saved in the database. You can retry the GETonline upload directly:
+                                                The manifest is safely closed and saved in the database. If GETonline is already updated or you wish to retry:
                                             </div>
-                                            <button
-                                                type="button"
-                                                disabled={isRetryingFfdx}
-                                                onClick={() => handleRetryFfdxUpload(mawbRef, provider)}
-                                                style={{
-                                                    backgroundColor: isRetryingFfdx ? '#9ca3af' : '#dc2626',
-                                                    color: '#ffffff',
-                                                    border: 'none',
-                                                    borderRadius: '6px',
-                                                    padding: '8px 16px',
-                                                    fontSize: '12px',
-                                                    fontWeight: '700',
-                                                    cursor: isRetryingFfdx ? 'not-allowed' : 'pointer',
-                                                    display: 'inline-flex',
-                                                    alignItems: 'center',
-                                                    gap: '6px',
-                                                    boxShadow: '0 1px 3px rgba(0,0,0,0.1)'
-                                                }}
-                                            >
-                                                {isRetryingFfdx ? '🔄 Retrying Upload...' : '🔄 Retry Upload to GETonline'}
-                                            </button>
+                                            <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                                                <button
+                                                    type="button"
+                                                    disabled={isRetryingFfdx || isMarkingUploaded}
+                                                    onClick={() => handleRetryFfdxUpload(mawbRef, provider)}
+                                                    style={{
+                                                        backgroundColor: isRetryingFfdx ? '#9ca3af' : '#dc2626',
+                                                        color: '#ffffff',
+                                                        border: 'none',
+                                                        borderRadius: '6px',
+                                                        padding: '8px 14px',
+                                                        fontSize: '12px',
+                                                        fontWeight: '700',
+                                                        cursor: (isRetryingFfdx || isMarkingUploaded) ? 'not-allowed' : 'pointer',
+                                                        display: 'inline-flex',
+                                                        alignItems: 'center',
+                                                        gap: '6px',
+                                                        boxShadow: '0 1px 3px rgba(0,0,0,0.1)'
+                                                    }}
+                                                >
+                                                    {isRetryingFfdx ? '🔄 Retrying...' : '🔄 Retry Upload'}
+                                                </button>
+                                                <button
+                                                    type="button"
+                                                    disabled={isRetryingFfdx || isMarkingUploaded}
+                                                    onClick={() => handleMarkAsUploaded(mawbRef)}
+                                                    style={{
+                                                        backgroundColor: isMarkingUploaded ? '#9ca3af' : '#16a34a',
+                                                        color: '#ffffff',
+                                                        border: 'none',
+                                                        borderRadius: '6px',
+                                                        padding: '8px 14px',
+                                                        fontSize: '12px',
+                                                        fontWeight: '700',
+                                                        cursor: (isRetryingFfdx || isMarkingUploaded) ? 'not-allowed' : 'pointer',
+                                                        display: 'inline-flex',
+                                                        alignItems: 'center',
+                                                        gap: '6px',
+                                                        boxShadow: '0 1px 3px rgba(0,0,0,0.1)'
+                                                    }}
+                                                >
+                                                    {isMarkingUploaded ? '⏳ Confirming...' : '✅ Confirm & Mark as Uploaded'}
+                                                </button>
+                                            </div>
                                         </div>
                                     </div>
                                 )}

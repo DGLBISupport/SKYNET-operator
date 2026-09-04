@@ -728,6 +728,17 @@ export async function POST(request: Request) {
                             scanned_by: typeof operator === 'string' ? operator : 'Staff'
                         })
                     }).catch(e => console.error("Optional bag items table update ignored:", e));
+
+                    // Secondary sync on service_provider_allocation to ensure 2nd scan status is recorded
+                    await fetch(`${sb.url}/rest/v1/service_provider_allocation?shipment_ref=eq.${encodeURIComponent(tracking)}`, {
+                        method: 'PATCH',
+                        headers: sb.headers,
+                        body: JSON.stringify({
+                            validated: true,
+                            scan_status: '2ND_SCAN_DONE',
+                            updated_at: new Date().toISOString()
+                        })
+                    }).catch(e => console.error("Optional SPA update on add-parcel ignored:", e));
                 } catch (err) {
                     console.error("Error inserting into outbound_lmd_bag_items:", err);
                 }
@@ -1014,6 +1025,36 @@ export async function POST(request: Request) {
                             headers: sb.headers,
                             body: JSON.stringify(manifestUpdatePayload)
                         });
+                    }
+
+                    // Step 6b – Reconcile all parcels under this manifest in service_provider_allocation
+                    const extractedRefs: string[] = [];
+                    for (const b of allBagsList) {
+                        for (const p of b.parcels || []) {
+                            const ref = String(p.trackingNumber || p.reference_number || p.shipment_ref || '').replace(/^skyt-?/i, '').trim();
+                            if (ref) extractedRefs.push(ref);
+                        }
+                    }
+                    const allManifestTrackingRefs = Array.from(new Set(extractedRefs));
+
+                    if (allManifestTrackingRefs.length > 0) {
+                        for (let i = 0; i < allManifestTrackingRefs.length; i += 50) {
+                            const chunk = allManifestTrackingRefs.slice(i, i + 50);
+                            const inFilter = chunk.map(r => `"${encodeURIComponent(r)}"`).join(',');
+                            try {
+                                await fetch(`${sb.url}/rest/v1/service_provider_allocation?shipment_ref=in.(${inFilter})`, {
+                                    method: 'PATCH',
+                                    headers: sb.headers,
+                                    body: JSON.stringify({
+                                        validated: true,
+                                        scan_status: '2ND_SCAN_DONE',
+                                        updated_at: new Date().toISOString()
+                                    })
+                                });
+                            } catch (e) {
+                                console.error("[close-manifest] Batch SPA reconciliation error:", e);
+                            }
+                        }
                     }
 
                     // Step 7 – Trigger FFDX GETonline upload (bulk) for entire manifest only if not already uploaded
